@@ -191,10 +191,10 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Action == tea.MouseActionMotion {
-		if m.rowAt(msg.X, msg.Y) >= 0 {
-			m.hover = m.rowAt(msg.X, msg.Y)
-		} else {
-			m.hover = -1
+		row := m.rowAt(msg.X, msg.Y)
+		// Only a row change alters the frame; wiggles inside one row must not.
+		if row != m.hover {
+			m.hover = row
 		}
 		return m, nil
 	}

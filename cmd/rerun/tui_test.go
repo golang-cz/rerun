@@ -58,6 +58,10 @@ func mouse(x, y int, shift bool) tea.MouseMsg {
 	return tea.MouseMsg{X: x, Y: y, Shift: shift, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
 }
 
+func motion(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionMotion}
+}
+
 // buttons is the stream button of every row, in row order.
 func buttons(m *tuiModel) []string {
 	out := make([]string, len(m.targets))
@@ -567,6 +571,39 @@ func TestMouseClicksMuteSoloAndFocus(t *testing.T) {
 	m.handleMouse(mouse(2, 0, false))
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.View()
+
+	m.handleMouse(motion(2, 1))
+	if m.hover != 1 {
+		t.Fatalf("hover = %d, want 1 after a motion over row 1", m.hover)
+	}
+
+	// A wiggle inside the same row must not alter the frame.
+	before := m.View()
+	m.handleMouse(motion(1, 1))
+	if m.hover != 1 {
+		t.Fatalf("hover = %d, want 1 still", m.hover)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 still", m.cursor)
+	}
+	if after := m.View(); after != before {
+		t.Fatalf("the view changed on a same-row motion:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	m.handleMouse(motion(2, 2))
+	if m.hover != 2 {
+		t.Fatalf("hover = %d, want 2 after a motion onto another row", m.hover)
+	}
+
+	m.handleMouse(motion(m.layout.leftW+1, 2))
+	if m.hover != -1 {
+		t.Fatalf("hover = %d, want -1 outside the left column", m.hover)
 	}
 }
 

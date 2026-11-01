@@ -30,6 +30,7 @@ func runTUI(targets []Target, signals <-chan os.Signal) int {
 	program := tea.NewProgram(model,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
+		tea.WithFPS(30), // one frame per uptime tick is plenty; 60fps just redraws
 		tea.WithoutSignalHandler(),
 	)
 
