@@ -174,8 +174,8 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "t":
-		if m.cursor > 0 {
-			m.toggleTree(m.cursor - 1)
+		if m.cursor > 0 && m.targets[m.cursor-1].hasLedger() {
+			m.toggleTree()
 		}
 
 	case "o":
@@ -435,8 +435,15 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	case row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
-	case row > 0 && msg.X == treeX(m.layout.leftW) && len(m.targets[row-1].changeRows) > 0:
-		m.toggleTree(row - 1)
+	case row > 0 && msg.X == treeX(m.layout.leftW) && m.targets[row-1].hasLedger():
+		// The ledger follows the cursor, so the cell click moves the cursor to
+		// the row it clicked, then collapses or expands what it found.
+		if m.cursor == row {
+			m.toggleTree()
+		} else {
+			m.cursor = row
+			m.treeCollapsed = false
+		}
 	default:
 		m.cursor = row
 		// The pair's first click already soloed the row; the second click
@@ -562,8 +569,8 @@ func (m *tuiModel) copySelection() {
 }
 
 // rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none. A
-// change-tree line resolves to the target row it hangs under, so clicks and
-// hovers never land on a file.
+// ledger line resolves to the target row it hangs under, so clicks and hovers
+// never land on a file.
 func (m *tuiModel) rowAt(x, y int) int {
 	// The last screen row is the version line, never a list row.
 	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {

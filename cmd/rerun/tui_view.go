@@ -129,7 +129,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 // nameWidth is the name cell's width for a given left column width.
 func nameWidth(leftW int) int { return max(0, leftW-statusW-6) }
 
-// treeX is the change-tree cell: one column of the name's trailing cells.
+// treeX is the ledger's +/− cell: one column of the name's trailing cells.
 func treeX(leftW int) int { return nameWidth(leftW) + 3 }
 
 // badge is the name column's trailing cell: a marker for hidden output, else
@@ -142,7 +142,7 @@ func badge(unseen bool) string {
 }
 
 // listOffset scrolls the list so the cursor's row stays visible, and its
-// change tree with it when both fit. The row itself wins when they do not.
+// reboot ledger with it when both fit. The row itself wins when they do not.
 func (m *tuiModel) listOffset(rows []visualRow) int {
 	// The version line's row is never part of the list.
 	visible := max(1, m.height-1)
@@ -166,7 +166,7 @@ func (m *tuiModel) listOffset(rows []visualRow) int {
 func visualIndex(rows []visualRow, row int) int {
 	want := row - 1
 	for i, r := range rows {
-		if r.target == want && r.file == "" && r.more == 0 {
+		if r.target == want && r.kind == treeNone {
 			return i
 		}
 	}
@@ -174,21 +174,35 @@ func visualIndex(rows []visualRow, row int) int {
 }
 
 // visualRow is one line of the left column. A target row can be followed by
-// its change tree, so a screen line is not a target index: rowAt maps back
-// through this list.
+// the cursor row's reboot ledger, so a screen line is not a target index:
+// rowAt maps back through this list.
 type visualRow struct {
-	target int    // the row's target index; -1 is the ALL rollup
-	op     string // a change-tree row's fsnotify glyph
-	file   string // a change-tree row's path, relative to the watch root
+	target int      // the row's target index; -1 is the ALL rollup
+	kind   treeKind // which ledger line this is, treeNone on a target row
+	at     time.Time
+	count  int    // an entry header's or a pending line's file count
+	op     string // a ledger file row's fsnotify glyph
+	file   string // a ledger file row's path, relative to the watch root
 	more   int    // > 0 on the "+k more" row
 }
 
-// treeMax caps a row's change tree, so a batch of four hundred files cannot
-// swallow the list. The rest is reported as one "+k more" row.
+// treeKind is which line of a row's reboot ledger a visual row draws.
+type treeKind int
+
+const (
+	treeNone    treeKind = iota
+	treeEntry            // `↺ 14:32:07 · 3 files`
+	treeFile             // `+ pkg/api/types.gen.go`
+	treeMore             // `+2 more`
+	treePending          // `· 3 files recorded, not rebooted (stopped)`
+)
+
+// treeMax caps one ledger entry's files, so a batch of four hundred files
+// cannot swallow the list. The rest is reported as one "+k more" row.
 const treeMax = 5
 
 // visualRows lays out the left column: the ALL rollup, then every target row
-// with the expanded row's change tree beneath it.
+// with the cursor row's reboot ledger beneath it.
 func (m *tuiModel) visualRows() []visualRow {
 	rows := make([]visualRow, 0, len(m.targets)+1)
 	rows = append(rows, visualRow{target: -1})
@@ -201,19 +215,32 @@ func (m *tuiModel) visualRows() []visualRow {
 	return rows
 }
 
-// treeRows is the change tree under one target row.
+// treeRows is the reboot ledger under one target row: the batch a stopped
+// target never used, then its past spawns newest first, each capped at treeMax
+// files and counted. An empty ledger grows no rows at all.
 func (m *tuiModel) treeRows(i int) []visualRow {
-	changes := m.targets[i].changeRows
-	if len(changes) == 0 {
+	t := m.targets[i]
+	if !t.hasLedger() {
 		return nil
 	}
-	shown := min(len(changes), treeMax)
-	rows := make([]visualRow, 0, shown+1)
-	for _, c := range changes[:shown] {
-		rows = append(rows, visualRow{target: i, op: c.op, file: c.path})
+	var rows []visualRow
+	if t.pendingStopped() {
+		rows = append(rows, visualRow{target: i, kind: treePending, count: len(t.pending)})
 	}
-	if rest := len(changes) - shown; rest > 0 {
-		rows = append(rows, visualRow{target: i, more: rest})
+	for _, e := range t.ledger {
+		rows = append(rows, visualRow{target: i, kind: treeEntry, at: e.at, count: len(e.files)})
+		shown := min(len(e.files), treeMax)
+		for _, f := range e.files[:shown] {
+			rows = append(rows, visualRow{
+				target: i,
+				kind:   treeFile,
+				op:     opText(f.op),
+				file:   relToWatch(t.spec.On, f.path),
+			})
+		}
+		if rest := len(e.files) - shown; rest > 0 {
+			rows = append(rows, visualRow{target: i, kind: treeMore, more: rest})
+		}
 	}
 	return rows
 }
@@ -270,24 +297,26 @@ func buildAge(buildTime string, now time.Time) (string, bool) {
 	return fmt.Sprintf("%dd ago", int(d.Hours())/24), true
 }
 
-// changeRow is one file of a target's last change set, ready to render.
-type changeRow struct {
-	op   string
-	path string
-}
-
 // opGlyph is the fsnotify op as one glyph: created, written or renamed, and
 // removed. A set without op detail reads as a write.
-func opGlyph(op fsnotify.Op) string {
+func opGlyph(op fsnotify.Op) byte {
 	switch {
 	case op.Has(fsnotify.Create):
-		return "+"
+		return '+'
 	case op.Has(fsnotify.Write), op.Has(fsnotify.Rename):
-		return "~"
+		return '~'
 	case op.Has(fsnotify.Remove):
+		return '-'
+	}
+	return '~'
+}
+
+// opText renders a change glyph. A removal is a minus sign, not a hyphen.
+func opText(op byte) string {
+	if op == '-' {
 		return "−"
 	}
-	return "~"
+	return string(op)
 }
 
 // relToWatch trims a changed path to the target's watch root, so the tree reads
@@ -320,13 +349,20 @@ func (m *tuiModel) leftLine(y, leftW int, rows []visualRow) string {
 		return strings.Repeat(" ", leftW)
 	}
 	row := rows[idx]
-	switch {
-	case row.target < 0:
-		return m.allLine(leftW)
-	case row.more > 0:
-		return m.moreLine(row, leftW)
-	case row.file != "":
+	switch row.kind {
+	case treeEntry:
+		return m.entryLine(row, leftW)
+	case treeFile:
 		return m.treeLine(row, leftW)
+	case treeMore:
+		return m.moreLine(row, leftW)
+	case treePending:
+		return m.pendingLine(row, leftW)
+	case treeNone:
+		if row.target < 0 {
+			return m.allLine(leftW)
+		}
+		return m.targetLine(row.target, leftW)
 	}
 	return m.targetLine(row.target, leftW)
 }
@@ -368,11 +404,21 @@ func (m *tuiModel) targetLine(i, leftW int) string {
 	return renderSegs(segs, m.rowStyle(i+1), leftW)
 }
 
-// treeLine is one change-tree row: its op glyph and path, indented under the
-// target row it belongs to.
-func (m *tuiModel) treeLine(row visualRow, leftW int) string {
+// entryLine is one ledger entry's header: when the spawn ran and how many
+// files triggered it.
+func (m *tuiModel) entryLine(row visualRow, leftW int) string {
 	segs := []seg{
 		{text: "  "},
+		{text: "↺ " + row.at.Format("15:04:05") + " · " + fileCount(row.count), color: colorGray},
+	}
+	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
+}
+
+// treeLine is one changed file of a ledger entry: its op glyph and path,
+// indented under the entry header it belongs to.
+func (m *tuiModel) treeLine(row visualRow, leftW int) string {
+	segs := []seg{
+		{text: "    "},
 		{text: row.op, color: opColor(row.op)},
 		{text: " "},
 		{text: row.file},
@@ -380,7 +426,7 @@ func (m *tuiModel) treeLine(row visualRow, leftW int) string {
 	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
 }
 
-// moreLine stands in for the rest of a capped change tree.
+// moreLine stands in for the rest of a capped ledger entry's files.
 func (m *tuiModel) moreLine(row visualRow, leftW int) string {
 	segs := []seg{
 		{text: "    "},
@@ -389,7 +435,17 @@ func (m *tuiModel) moreLine(row visualRow, leftW int) string {
 	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
 }
 
-// opColor ties a change-tree glyph to the row palette: a created file is
+// pendingLine warns that a stopped target recorded changes no spawn used, so
+// the files stay in pending until a manual start.
+func (m *tuiModel) pendingLine(row visualRow, leftW int) string {
+	segs := []seg{
+		{text: "  "},
+		{text: "· " + fileCount(row.count) + " recorded, not rebooted (stopped)"},
+	}
+	return renderSegs(segs, m.rowStyle(row.target+1).Faint(true), leftW)
+}
+
+// opColor ties a ledger file glyph to the row palette: a created file is
 // green, a removed one red, a written one yellow.
 func opColor(op string) string {
 	switch op {
@@ -629,16 +685,20 @@ func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
 }
 
+// fileCount renders `1 file` or `3 files`.
+func fileCount(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
 // titleLine is the right pane's first line: how long the cursor row has been
 // up, how many files its last change batch held, and its command. The url
 // follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
 	t := m.targets[m.cursor-1]
-	plural := ""
-	if n := len(t.lastChange.Files); n != 1 {
-		plural = "s"
-	}
-	head := fmt.Sprintf("%s · %d file%s · %s", m.status(t), len(t.lastChange.Files), plural, t.spec.Cmd)
+	head := fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)
 	cmd := truncate(head, w)
 	line := m.styles.title.Render(cmd)
 	if t.spec.URL != "" {
@@ -703,7 +763,7 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "expand the row's change tree"},
+	{"t", "collapse the cursor row's reboot ledger"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -732,8 +792,8 @@ func (m *tuiModel) helpView() string {
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"the selected row's change tree lists its last changed files;",
-		"t or a click on its +/− cell expands and collapses it.",
+		"the cursor row's reboot ledger lists its last spawns and the files",
+		"that triggered each; t or a click on its +/− cell collapses it.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
 		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",

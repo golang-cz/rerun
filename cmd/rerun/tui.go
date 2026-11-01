@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -123,15 +122,17 @@ type tuiTarget struct {
 	unseen bool
 	opened bool
 
-	// lastChange is the newest change batch the target reacted to; changeRows
-	// is that set as the tree's rows, sorted once here rather than per frame.
+	// lastChange is the newest change batch the target reacted to, which the
+	// pane's title line counts.
 	lastChange rerun.ChangeSet
-	changeRows []changeRow
 
-	// treePinned and treeOpen are the manual override of the change tree: the
-	// cursor's own row expands on its own, a pinned row keeps its own state.
-	treePinned bool
-	treeOpen   bool
+	// pending is every change recorded since the last spawn: paths merged, the
+	// latest op winning. A spawn commits it to the ledger; a target the user
+	// stopped keeps it until a manual start.
+	pending map[string]byte
+	// ledger is the target's past spawns, newest first, each with the file
+	// changes that triggered it.
+	ledger []ledgerEntry
 
 	// colSpec is the spec the cached column expressions were parsed from, so
 	// a spec swap reparses exactly once. colBad marks a spec whose expression
@@ -154,6 +155,9 @@ type tuiModel struct {
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
 	help   bool
+	// treeCollapsed hides the cursor row's reboot ledger. The ledger follows
+	// the cursor, so one flag covers every row.
+	treeCollapsed bool
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -385,28 +389,23 @@ func (m *tuiModel) refreshUnseen() {
 	}
 }
 
-// treeExpanded reports whether a row's change tree is shown. The cursor's row
-// opens on its own; a manual toggle pins a row either way.
+// treeExpanded reports whether a row's reboot ledger is shown. Only the cursor
+// row opens, and t or its +/− cell collapses it.
 func (m *tuiModel) treeExpanded(i int) bool {
-	t := m.targets[i]
-	if t.treePinned {
-		return t.treeOpen
-	}
-	return m.cursor == i+1
+	return i == m.cursor-1 && !m.treeCollapsed
 }
 
-// toggleTree pins a row's change tree to the opposite of what it shows now.
-func (m *tuiModel) toggleTree(i int) {
-	t := m.targets[i]
-	was := m.treeExpanded(i)
-	t.treePinned = true
-	t.treeOpen = !was
-}
+// toggleTree collapses or expands the cursor row's reboot ledger.
+func (m *tuiModel) toggleTree() { m.treeCollapsed = !m.treeCollapsed }
 
-// treeCell is the row's change-tree indicator: `−` while its tree is open, `+`
-// while a retained change set stays collapsed, and blank without one.
+// hasLedger reports whether a row has anything for its ledger to show: a past
+// spawn, or a batch a stopped target never used.
+func (t *tuiTarget) hasLedger() bool { return len(t.ledger) > 0 || t.pendingStopped() }
+
+// treeCell is the ledger indicator: `−` while the cursor row's ledger is open,
+// `+` while it stays collapsed, and blank without one.
 func (m *tuiModel) treeCell(i int) string {
-	if len(m.targets[i].changeRows) == 0 {
+	if !m.targets[i].hasLedger() {
 		return " "
 	}
 	if m.treeExpanded(i) {
@@ -588,10 +587,10 @@ func (m *tuiModel) applyEvent(ev event) {
 		m.captureURL(t, ev.line)
 
 	case evChanged:
-		// Retain the whole batch: the row's change tree renders it and the
+		// Retain the whole batch: the row's reboot ledger records it and the
 		// pane header counts it.
 		t.lastChange = ev.change
-		t.changeRows = m.changeRowsFor(t)
+		t.recordChange(ev.change)
 		plural := ""
 		if ev.count > 1 {
 			plural = "s"
@@ -615,6 +614,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = -1
 		t.exitLabel = ""
 		t.backoffUntil = time.Time{}
+		t.commitLedger(ev.at)
 		if t.spec.Open && t.spec.URL != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
 			if err := openURL(t.spec.URL); err != nil {
@@ -647,8 +647,8 @@ func (m *tuiModel) applyEvent(ev event) {
 }
 
 // rebuildRows adopts a reconciled target list. Rows are matched by name, so a
-// row keeps its stream, its mute, and its change tree across a reload; only a
-// name that just appeared gets a new row.
+// row keeps its stream, its mute, and its reboot ledger across a reload; only
+// a name that just appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
@@ -676,12 +676,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 				row.state = stateOff // the group holds it down until space or r
 			}
 		}
-		rootMoved := !slices.Equal(row.spec.On, spec.On)
 		row.spec = spec
-		if rootMoved {
-			// The tree's paths are relative to the watch root, which moved.
-			row.changeRows = m.changeRowsFor(row)
-		}
 		rows = append(rows, row)
 		index[spec.Name] = i
 	}
@@ -719,21 +714,61 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.recomputeSearch(false)
 }
 
-// changeRowsFor turns a row's retained change set into tree rows: paths
-// relative to the target's watch root, sorted, one fsnotify glyph each.
-func (m *tuiModel) changeRowsFor(t *tuiTarget) []changeRow {
-	if len(t.lastChange.Files) == 0 {
-		return nil
+// ledgerCap bounds a row's reboot ledger: the three newest spawns.
+const ledgerCap = 3
+
+// ledgerEntry is one spawn of a target and the file changes that triggered it.
+// Paths stay as the watcher reported them, so a moved watch root is relative
+// to the root in force when the entry renders.
+type ledgerEntry struct {
+	at    time.Time
+	files []changeFile
+}
+
+// changeFile is one file of a ledger entry: its path and its fsnotify op.
+// The op is `+` created, `~` written or renamed, `-` removed.
+type changeFile struct {
+	path string
+	op   byte
+}
+
+// pendingStopped reports whether a batch is recorded but no spawn will use it:
+// the target is stopped or booted off, so its changes wait for a manual start.
+func (t *tuiTarget) pendingStopped() bool {
+	return len(t.pending) > 0 && (t.state == stateStopped || t.state == stateOff)
+}
+
+// recordChange merges a change batch into the target's pending set, so a path
+// that changed twice keeps its latest op. The next spawn commits the set.
+func (t *tuiTarget) recordChange(cs rerun.ChangeSet) {
+	if len(cs.Files) == 0 {
+		return
 	}
-	rows := make([]changeRow, 0, len(t.lastChange.Files))
-	for path := range t.lastChange.Files {
-		rows = append(rows, changeRow{
-			op:   opGlyph(t.lastChange.Ops[path]),
-			path: relToWatch(t.spec.On, path),
-		})
+	if t.pending == nil {
+		t.pending = make(map[string]byte, len(cs.Files))
 	}
-	sort.Slice(rows, func(a, b int) bool { return rows[a].path < rows[b].path })
-	return rows
+	for path := range cs.Files {
+		t.pending[path] = opGlyph(cs.Ops[path])
+	}
+}
+
+// commitLedger files the pending batch as the newest ledger entry, stamped with
+// the spawn time. A spawn with nothing recorded commits nothing, which is what
+// a manual start after no change looks like.
+func (t *tuiTarget) commitLedger(at time.Time) {
+	if len(t.pending) == 0 {
+		return
+	}
+	files := make([]changeFile, 0, len(t.pending))
+	for path, op := range t.pending {
+		files = append(files, changeFile{path: path, op: op})
+	}
+	sort.Slice(files, func(a, b int) bool { return files[a].path < files[b].path })
+	t.pending = nil
+	t.ledger = append([]ledgerEntry{{at: at, files: files}}, t.ledger...)
+	if len(t.ledger) > ledgerCap {
+		t.ledger = t.ledger[:ledgerCap]
+	}
 }
 
 // paneLines is the merged stream, rebuilt when muting, soloing, or the filter

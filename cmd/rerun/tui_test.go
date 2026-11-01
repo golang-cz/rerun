@@ -1209,8 +1209,9 @@ func change() rerun.ChangeSet {
 	return rerun.ChangeSet{Files: map[string]struct{}{"a.go": {}}, FirstFile: "a.go"}
 }
 
-// A target the user stopped must not restart on a file change. start() emits
-// evStarted before it returns, so an empty event list proves no start either.
+// A target the user stopped must not restart on a file change. The batch is
+// still reported, so the row can say which files no spawn used; a restart would
+// report evStarted too.
 func TestStoppedTargetDoesNotRestartOnChange(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
@@ -1229,8 +1230,8 @@ func TestStoppedTargetDoesNotRestartOnChange(t *testing.T) {
 
 			r.handleChange(context.Background(), change())
 
-			if got := sink.all(); len(got) != 0 {
-				t.Fatalf("a stopped target reported %+v, want nothing and no start", got)
+			if got, want := eventKinds(sink), []eventKind{evChanged}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("a stopped target reported %v, want %v and no start", got, want)
 			}
 		})
 	}

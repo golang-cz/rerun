@@ -169,7 +169,7 @@ func TestOpGlyphMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := opGlyph(tt.op); got != tt.want {
+			if got := opText(opGlyph(tt.op)); got != tt.want {
 				t.Fatalf("opGlyph(%v) = %q, want %q", tt.op, got, tt.want)
 			}
 		})
@@ -212,30 +212,30 @@ func sevenFiles() rerun.ChangeSet {
 	return rerun.ChangeSet{FirstFile: "a.go", Files: files, Ops: ops}
 }
 
-// treeModel is three targets whose first row carries a seven-file change set.
+// treeModel is three targets whose first row carries one seven-file spawn.
 func treeModel(t *testing.T) *tuiModel {
 	t.Helper()
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	m.applyEvent(event{kind: evChanged, target: "web", count: 7, first: "a.go", change: sevenFiles()})
+	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
 	return m
 }
 
-// The left column interleaves target rows with change trees, so a screen line
-// is not a target index: every line has to resolve back to a row.
+// The left column interleaves target rows with reboot ledgers, so a screen
+// line is not a target index: every line has to resolve back to a row.
 func TestVisualRowsMapScreenLinesToTargets(t *testing.T) {
 	m := treeModel(t)
-	m.cursor = 1 // web, whose tree opens on its own
+	m.cursor = 1 // web, whose ledger opens on its own
 	m.View()
 	if m.layout.offset != 0 {
-		t.Fatalf("offset = %d, want the tree on screen from the top", m.layout.offset)
+		t.Fatalf("offset = %d, want the ledger on screen from the top", m.layout.offset)
 	}
 
-	// ALL, web, five files, "+2 more", api, worker.
+	// ALL, web, its entry header, five files, "+2 more", api, worker.
 	rows := m.visualRows()
-	if len(rows) != 10 {
-		t.Fatalf("visual rows = %d, want 10", len(rows))
+	if len(rows) != 11 {
+		t.Fatalf("visual rows = %d, want 11", len(rows))
 	}
-	want := []int{0, 1, 1, 1, 1, 1, 1, 1, 2, 3}
+	want := []int{0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3}
 	for y := range want {
 		if got := m.rowAt(2, y); got != want[y] {
 			t.Fatalf("rowAt line %d = %d, want %d", y, got, want[y])
@@ -243,80 +243,91 @@ func TestVisualRowsMapScreenLinesToTargets(t *testing.T) {
 	}
 
 	// Past the list is nothing, as before.
-	if got := m.rowAt(2, 10); got != -1 {
+	if got := m.rowAt(2, 11); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
 
 	// A click on a file line selects the target row it hangs under.
-	m.handleMouse(mouse(2, 3, false))
+	m.handleMouse(mouse(2, 4, false))
 	if m.cursor != 1 {
 		t.Fatalf("cursor after a file-line click = %d, want 1", m.cursor)
 	}
 }
 
-// Sorted paths, capped at treeMax, with the rest counted.
-func TestChangeTreeRowsAreSortedAndCapped(t *testing.T) {
+// Newest first, sorted paths, capped at treeMax, with the rest counted.
+func TestLedgerRowsAreSortedAndCapped(t *testing.T) {
 	m := treeModel(t)
 	m.cursor = 1
 
 	rows := m.treeRows(0)
-	if len(rows) != treeMax+1 {
-		t.Fatalf("tree rows = %d, want %d plus the more row", len(rows), treeMax)
+	if len(rows) != 1+treeMax+1 {
+		t.Fatalf("ledger rows = %d, want the header, %d files and the more row", len(rows), treeMax)
 	}
-	if rows[0].file != "a.go" || rows[0].op != "+" || rows[1].file != "b.go" {
-		t.Fatalf("tree rows = %+v, want sorted paths with their ops", rows[:2])
+	if rows[0].kind != treeEntry || rows[0].count != 7 || !rows[0].at.Equal(ledgerClock) {
+		t.Fatalf("header = %+v, want the spawn time and the file count", rows[0])
 	}
-	if last := rows[len(rows)-1]; last.more != 2 || last.file != "" {
+	if rows[1].file != "a.go" || rows[1].op != "+" || rows[2].file != "b.go" {
+		t.Fatalf("file rows = %+v, want sorted paths with their ops", rows[1:3])
+	}
+	if last := rows[len(rows)-1]; last.kind != treeMore || last.more != 2 {
 		t.Fatalf("last row = %+v, want a +2 more row", last)
 	}
 
-	// A row without a change set grows no tree, expanded or not.
+	// A row without a ledger grows no tree, expanded or not.
 	if got := m.treeRows(1); got != nil {
 		t.Fatalf("tree rows for an unchanged target = %+v, want none", got)
 	}
 
 	view := m.View()
-	if !strings.Contains(view, "+2 more") || !strings.Contains(view, "a.go") {
-		t.Fatalf("the view is missing the change tree:\n%s", view)
+	if !strings.Contains(view, "↺ 14:32:07 · 7 files") || !strings.Contains(view, "+2 more") {
+		t.Fatalf("the view is missing the reboot ledger:\n%s", view)
 	}
 }
 
-// The tree belongs to the cursor, and t pins a row open or closed regardless.
-func TestTreeFollowsTheCursorAndTogglesByKey(t *testing.T) {
+// Only the cursor row shows a ledger, and t collapses the cursor row's.
+func TestLedgerFollowsTheCursorAndTogglesByKey(t *testing.T) {
 	m := treeModel(t)
 	m.cursor = 1
-	if got := len(m.visualRows()); got != 10 {
-		t.Fatalf("rows with web selected = %d, want 10", got)
+	if got := len(m.visualRows()); got != 11 {
+		t.Fatalf("rows with web selected = %d, want 11", got)
 	}
 
-	// Moving off the row collapses its tree.
+	// Moving off the row collapses its ledger.
 	press(m, "down")
 	if got := len(m.visualRows()); got != 4 {
 		t.Fatalf("rows after moving away = %d, want the plain list", got)
 	}
 
-	// Selecting it again expands it: selection still auto-expands.
+	// Selecting it again expands it.
 	press(m, "up")
-	if got := len(m.visualRows()); got != 10 {
-		t.Fatalf("rows after reselecting = %d, want the tree back", got)
+	if got := len(m.visualRows()); got != 11 {
+		t.Fatalf("rows after reselecting = %d, want the ledger back", got)
 	}
 
-	// A manual toggle outlives the selection; another toggle brings it back.
+	// t collapses the cursor row's ledger; another t brings it back.
 	press(m, "t")
 	if got := len(m.visualRows()); got != 4 {
-		t.Fatalf("rows after collapsing the tree = %d, want the plain list", got)
+		t.Fatalf("rows after collapsing the ledger = %d, want the plain list", got)
 	}
-	if !m.targets[0].treePinned || m.targets[0].treeOpen {
-		t.Fatalf("the row is pinned open=%v, want collapsed", m.targets[0].treeOpen)
+	if !m.treeCollapsed {
+		t.Fatal("t did not collapse the cursor row's ledger")
 	}
 	press(m, "t")
-	if got := len(m.visualRows()); got != 10 {
-		t.Fatalf("rows after expanding the tree = %d, want the tree back", got)
+	if got := len(m.visualRows()); got != 11 {
+		t.Fatalf("rows after expanding the ledger = %d, want the ledger back", got)
+	}
+
+	// A row with nothing to show ignores t: the flag covers the cursor's row.
+	m.cursor = 2
+	press(m, "t")
+	if len(m.visualRows()) != 4 {
+		t.Fatal("t opened a ledger on a row without one")
 	}
 }
 
-// The +/− cell expands and collapses without selecting or soloing the row.
-func TestTreeCellClickTogglesWithoutSelecting(t *testing.T) {
+// The +/− cell opens the row it belongs to, and toggles it once the cursor is
+// there. It never solos.
+func TestTreeCellClickOpensAndTogglesTheLedger(t *testing.T) {
 	m := treeModel(t)
 	m.cursor = 0
 	m.View()
@@ -324,22 +335,27 @@ func TestTreeCellClickTogglesWithoutSelecting(t *testing.T) {
 	leftW, _ := m.layoutWidths()
 	cell := treeX(leftW)
 	if got := m.rowAt(cell, 1); got != 1 {
-		t.Fatalf("the tree cell at line 1 maps to row %d, want 1", got)
+		t.Fatalf("the ledger cell at line 1 maps to row %d, want 1", got)
 	}
 
 	m.handleMouse(mouse(cell, 1, false))
-	if m.cursor != 0 {
-		t.Fatalf("cursor = %d, want the ALL row: the cell click must not select", m.cursor)
+	if m.cursor != 1 {
+		t.Fatalf("cursor after the cell click = %d, want the web row", m.cursor)
 	}
 	if m.solo != -1 {
 		t.Fatalf("solo = %d, want none after a cell click", m.solo)
 	}
 	if !m.treeExpanded(0) {
-		t.Fatal("the cell click did not expand the tree")
+		t.Fatal("the cell click did not open the ledger")
+	}
+
+	m.handleMouse(mouse(cell, 1, false))
+	if !m.treeCollapsed || len(m.visualRows()) != 4 {
+		t.Fatalf("the second cell click did not collapse the ledger: collapsed=%v rows=%d", m.treeCollapsed, len(m.visualRows()))
 	}
 }
 
-// The cursor row stays visible even when its tree cannot fit with it.
+// The cursor row stays visible even when its ledger cannot fit with it.
 func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m := treeModel(t)
 	m.cursor = 3 // worker, the last row
@@ -350,10 +366,10 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
 	}
 
-	m.cursor = 1 // web with its six tree lines and room for four
+	m.cursor = 1 // web with its eight ledger lines and room for three
 	m.View()
 	if m.layout.offset != 1 {
-		t.Fatalf("offset = %d, want 1 so the tree stays right below its row", m.layout.offset)
+		t.Fatalf("offset = %d, want 1 so the ledger stays right below its row", m.layout.offset)
 	}
 }
 

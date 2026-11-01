@@ -683,8 +683,10 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		return
 	}
 
-	// A target the user stopped waits for space or r, not for files.
+	// A target the user stopped waits for space or r, not for files. The batch
+	// is still reported, so the row can say which files it did not use.
 	if r.userStopped() {
+		r.reportChange(changeSet)
 		return
 	}
 
@@ -695,6 +697,13 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		return
 	}
 
+	r.reportChange(changeSet)
+	r.spawn(ctx)
+}
+
+// reportChange tells the front-end which files changed, whether or not a spawn
+// follows.
+func (r *targetRunner) reportChange(changeSet rerun.ChangeSet) {
 	r.sink.emit(event{
 		kind:   evChanged,
 		target: r.target.Name,
@@ -702,8 +711,6 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		first:  changeSet.FirstFile,
 		change: changeSet,
 	})
-
-	r.spawn(ctx)
 }
 
 // spawn starts a generation, waiting out the restart backoff first. A spawn

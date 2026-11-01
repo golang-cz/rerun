@@ -28,24 +28,27 @@ Piped or non-TTY output stays plain prefixed lines.
 Left column: one row per target; right pane: one merged log; `?` lists keys.
 
 Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` expand or
-collapse the row's change tree, `m` mute a stream, `s` or `enter` solo (`esc`
-clears), `o` open the url, `G` live output, `f` freeze or resume the pane.
+collapse the cursor row's reboot ledger, `m` mute a stream, `s` or `enter`
+solo (`esc` clears), `o` open the url, `G` live output, `f` freeze or resume
+the pane.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
 (a leading `.` runs a yq expression per JSON line); `c` toggles the columns
 table for targets that define `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
-button cell to mute, the `+/−` cell to expand or collapse that row's change
-tree, shift-click to solo, and a click on the ALL row to clear
+button cell to mute, the `+/−` cell to collapse the cursor row's reboot
+ledger, shift-click to solo, and a click on the ALL row to clear
 solo. Click a pane line to copy it; drag copies a range and freezes the tail
 (`f`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
 The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
-last change batch held, and its command, with its url linked. The selected
-row's change tree lists that batch below it, one `+`/`~`/`−` glyph (created,
-written, removed) and relative path per row, five rows then `+k more`.
+last change batch held, and its command, with its url linked. The cursor
+row's reboot ledger lists its last spawns, newest first, and the files that
+triggered each, one `+`/`~`/`−` glyph (created, written, removed) and relative
+path per file, five files then `+k more`. A target the user stopped records
+its changes without using them, as a dim `not rebooted (stopped)` line.
 
 #### Examples:
 ```bash
