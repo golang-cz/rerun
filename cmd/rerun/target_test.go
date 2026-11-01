@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -510,4 +511,440 @@ func waitForPids(t *testing.T, dir string) []int {
 	}
 	t.Fatalf("no pids in %s within 3s", dir)
 	return nil
+}
+
+// restoreKnobs restores the timing knobs a test shrank.
+func restoreKnobs(t *testing.T) func() {
+	t.Helper()
+	limit, timeout := staggerLimit, staggerSlotTimeout
+	window, delays := backoffWindow, backoffDelays
+	return func() {
+		staggerLimit, staggerSlotTimeout = limit, timeout
+		backoffWindow, backoffDelays = window, delays
+	}
+}
+
+// The gate lets staggerLimit starts through and serves its queue in rerun.yml
+// order, not in the order the waiters happened to arrive.
+func TestStartGateServesQueuedRunnersInConfigOrder(t *testing.T) {
+	g := newStartGate(2)
+	ctx := context.Background()
+
+	first, _, ok := g.acquire(ctx, nil, nil, 0, nil)
+	if !ok {
+		t.Fatal("first acquire refused")
+	}
+	second, _, ok := g.acquire(ctx, nil, nil, 1, nil)
+	if !ok {
+		t.Fatal("second acquire refused")
+	}
+
+	granted := make(chan int, 2)
+	go func() {
+		_, _, ok := g.acquire(ctx, nil, nil, 3, nil)
+		if ok {
+			granted <- 3
+		}
+	}()
+	go func() {
+		_, _, ok := g.acquire(ctx, nil, nil, 2, nil)
+		if ok {
+			granted <- 2
+		}
+	}()
+	// Let both queue before either slot frees.
+	time.Sleep(50 * time.Millisecond)
+
+	first()
+	if got := <-granted; got != 2 {
+		t.Fatalf("first waiter served = %d, want the lower config index", got)
+	}
+	second()
+	if got := <-granted; got != 3 {
+		t.Fatalf("second waiter served = %d, want 3", got)
+	}
+}
+
+// A queued acquire aborts on ctx and hands no slot back to the pool, so the
+// next acquire still works.
+func TestStartGateAbortsOnContext(t *testing.T) {
+	g := newStartGate(1)
+	release, _, ok := g.acquire(context.Background(), nil, nil, 0, nil)
+	if !ok {
+		t.Fatal("first acquire refused")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		_, _, ok := g.acquire(ctx, nil, nil, 1, nil)
+		done <- ok
+	}()
+	cancel()
+	if ok := <-done; ok {
+		t.Fatal("aborted acquire reported a slot")
+	}
+
+	release()
+	queued := false
+	_, _, ok = g.acquire(context.Background(), nil, nil, 2, func() { queued = true })
+	if !ok || queued {
+		t.Fatalf("acquire after abort = (queued %v, ok %v), want a free slot", queued, ok)
+	}
+}
+
+// A config with more targets than slots starts them in waves: the queued ones
+// wait until a running target talks.
+func TestRunTargetsStaggersStarts(t *testing.T) {
+	defer restoreKnobs(t)()
+	staggerLimit = 4
+	staggerSlotTimeout = 10 * time.Second
+
+	_, stop, dir := startRunner(t, `t1:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+t2:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+t3:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+t4:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+t5:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+t6:
+  on: src
+  cmd: echo tick >> started.txt; sleep 2; echo up; sleep 30
+`)
+
+	started := filepath.Join(dir, "started.txt")
+	waitForCount(t, started, 4, 3*time.Second)
+	waitForStableCount(t, started, 4, 400*time.Millisecond)
+	waitForCount(t, started, 6, 5*time.Second)
+
+	if got := stop(); got != 0 {
+		t.Errorf("exit code = %d, want 0", got)
+	}
+}
+
+// A shutdown must abort the targets still queued behind the gate instead of
+// waiting for them to acquire a slot.
+func TestShutdownWhileQueuedDoesNotHang(t *testing.T) {
+	defer restoreKnobs(t)()
+	staggerLimit = 1
+	staggerSlotTimeout = time.Hour
+
+	_, stop, _ := startRunner(t, `t1:
+  on: src
+  cmd: sleep 30
+t2:
+  on: src
+  cmd: sleep 30
+t3:
+  on: src
+  cmd: sleep 30
+t4:
+  on: src
+  cmd: sleep 30
+`)
+
+	time.Sleep(300 * time.Millisecond) // let the first one take the only slot
+
+	start := time.Now()
+	if got := stop(); got != 0 {
+		t.Errorf("exit code = %d, want 0", got)
+	}
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Fatalf("shutdown took %v, want the queued acquires aborted", waited)
+	}
+}
+
+// The backoff waits before the third restart in a window, and never before the
+// first two.
+func TestWaitBackoffDelaysTheThirdRestart(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{10 * time.Millisecond, 20 * time.Millisecond}
+	backoffWindow = time.Minute
+
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true}, sink)
+	r.selfExited = true
+	r.lastRun = time.Second
+
+	for restart := 1; restart <= 3; restart++ {
+		sink.events = nil
+		start := time.Now()
+		if !r.waitBackoff(context.Background()) {
+			t.Fatalf("restart %d aborted", restart)
+		}
+		waited := time.Since(start)
+		want := backoffDelay(restart)
+		if waited < want {
+			t.Fatalf("restart %d waited %v, want at least %v", restart, waited, want)
+		}
+		if len(r.restarts) != restart {
+			t.Fatalf("window after restart %d = %d, want %d", restart, len(r.restarts), restart)
+		}
+		var backedOff bool
+		for _, ev := range sink.all() {
+			if ev.kind == evBackoff {
+				backedOff = true
+				if ev.delay != want || ev.ordinal != restart {
+					t.Fatalf("restart %d backoff = %+v, want delay %v ordinal %d", restart, ev, want, restart)
+				}
+			}
+		}
+		if backedOff != (want > 0) {
+			t.Fatalf("restart %d backed off = %v, want %v", restart, backedOff, want > 0)
+		}
+	}
+}
+
+// The delay ladder caps at the last entry.
+func TestBackoffDelayLadder(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
+
+	for _, tt := range []struct {
+		ordinal int
+		want    time.Duration
+	}{
+		{1, 0}, {2, 0}, {3, time.Second}, {4, 2 * time.Second},
+		{5, 4 * time.Second}, {6, 8 * time.Second}, {7, 10 * time.Second}, {40, 10 * time.Second},
+	} {
+		if got := backoffDelay(tt.ordinal); got != tt.want {
+			t.Errorf("backoffDelay(%d) = %v, want %v", tt.ordinal, got, tt.want)
+		}
+	}
+}
+
+// A run that outlived the backoff window does not feed it: its restart neither
+// counts toward the ordinal nor waits.
+func TestWaitBackoffResetsAfterAStableRun(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{time.Second}
+	backoffWindow = 30 * time.Millisecond
+
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true}, sink)
+	r.selfExited = true
+	r.lastRun = 35 * time.Millisecond // already past the window
+	r.restarts = []time.Time{time.Now(), time.Now()}
+
+	start := time.Now()
+	if !r.waitBackoff(context.Background()) {
+		t.Fatal("waitBackoff aborted")
+	}
+	if waited := time.Since(start); waited > 10*time.Millisecond {
+		t.Fatalf("waited %v after a stable run, want no backoff", waited)
+	}
+	if len(r.restarts) != 0 {
+		t.Fatalf("window = %d, want cleared without a new entry", len(r.restarts))
+	}
+	for _, ev := range sink.all() {
+		if ev.kind == evBackoff {
+			t.Fatalf("a stable run still backed off: %+v", ev)
+		}
+	}
+}
+
+// A manual stop clears the crash-loop window, so the next start runs at once.
+func TestManualStopClearsBackoff(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{10 * time.Second}
+	backoffWindow = time.Minute
+
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true, Grace: rerun.DefaultGrace}, sink)
+	r.selfExited = true
+	r.lastRun = time.Second
+	r.restarts = []time.Time{time.Now(), time.Now()}
+
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlStop})
+	if r.selfExited || len(r.restarts) != 0 {
+		t.Fatalf("ctrlStop left the window: selfExited=%v restarts=%d", r.selfExited, len(r.restarts))
+	}
+
+	start := time.Now()
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlStart})
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("manual start waited %v, want immediate", waited)
+	}
+	for _, ev := range sink.all() {
+		if ev.kind == evBackoff {
+			t.Fatalf("a manual start backed off: %+v", ev)
+		}
+	}
+}
+
+// A stop queued while a runner waits out the backoff aborts the wait instead
+// of being ignored until the delay elapses.
+func TestBackoffAbortsOnStopControl(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{time.Hour}
+	backoffWindow = time.Minute
+
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true}, sink)
+	r.selfExited = true
+	r.lastRun = time.Second
+	r.restarts = []time.Time{time.Now(), time.Now()}
+
+	done := make(chan bool, 1)
+	go func() { done <- r.waitBackoff(context.Background()) }()
+	time.Sleep(50 * time.Millisecond)
+	r.control(ctrlStop)
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("waitBackoff reported a completed wait after a stop")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitBackoff did not abort on a stop control")
+	}
+	if r.stash == nil || r.stash.kind != ctrlStop {
+		t.Fatalf("stash = %+v, want the stop for the run loop", r.stash)
+	}
+}
+
+// A stop that lands while a start waits for a gate slot aborts the wait: the
+// target must never spawn.
+func TestQueuedStartAbortsOnStopControl(t *testing.T) {
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true, Grace: rerun.DefaultGrace}, sink)
+	g := newStartGate(1)
+	r.gate = g
+	r.order.Store(1)
+
+	hold, _, ok := g.acquire(context.Background(), nil, nil, 0, nil)
+	if !ok {
+		t.Fatal("holding acquire refused")
+	}
+	defer hold()
+
+	done := make(chan error, 1)
+	go func() { done <- r.start(context.Background()) }()
+	// The stop is buffered before the runner reaches acquire, so the queued
+	// wait has to see it and abort.
+	r.control(ctrlStop)
+
+	if err := <-done; !errors.Is(err, errStartAborted) {
+		t.Fatalf("start = %v, want errStartAborted", err)
+	}
+	if r.stash == nil || r.stash.kind != ctrlStop {
+		t.Fatalf("stash = %+v, want the queued stop", r.stash)
+	}
+	if r.currentCmd() != nil {
+		t.Fatal("a stopped queued start spawned anyway")
+	}
+	for _, ev := range sink.all() {
+		if ev.kind == evStarted {
+			t.Fatal("a stopped queued start reported a spawn")
+		}
+	}
+}
+
+// An aborted backoff does not count its crash twice: the next spawn pays the
+// same delay again.
+func TestAbortedBackoffDoesNotCountTwice(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{50 * time.Millisecond}
+	backoffWindow = time.Minute
+
+	sink := &recordingSink{}
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true}, sink)
+	r.selfExited = true
+	r.lastRun = time.Second
+	r.restarts = []time.Time{time.Now(), time.Now()}
+
+	done := make(chan bool, 1)
+	go func() { done <- r.waitBackoff(context.Background()) }()
+	time.Sleep(10 * time.Millisecond)
+	r.control(ctrlStop)
+	<-done
+	if len(r.restarts) != 2 {
+		t.Fatalf("window after abort = %d, want the crash rolled back", len(r.restarts))
+	}
+
+	// The run loop consumes the stash before the next spawn; clear it here.
+	r.stash = nil
+	if !r.waitBackoff(context.Background()) {
+		t.Fatal("second waitBackoff aborted")
+	}
+	if len(r.restarts) != 3 {
+		t.Fatalf("window after the retry = %d, want 3 crashes counted once each", len(r.restarts))
+	}
+	var ordinal int
+	for _, ev := range sink.all() {
+		if ev.kind == evBackoff {
+			ordinal = ev.ordinal
+		}
+	}
+	if ordinal != 3 {
+		t.Fatalf("last backoff ordinal = %d, want 3", ordinal)
+	}
+}
+
+// A manual start or reboot after a crash loop runs at once: the user took
+// over, so no backoff applies.
+func TestManualStartAndRebootSkipBackoff(t *testing.T) {
+	defer restoreKnobs(t)()
+	backoffDelays = []time.Duration{time.Hour}
+	backoffWindow = time.Minute
+
+	for _, kind := range []ctrlKind{ctrlStart, ctrlReboot} {
+		sink := &recordingSink{}
+		r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true, Grace: rerun.DefaultGrace}, sink)
+		r.selfExited = true
+		r.lastRun = time.Second
+		r.restarts = []time.Time{time.Now(), time.Now()}
+
+		start := time.Now()
+		r.handleControl(context.Background(), ctrlMsg{kind: kind})
+		if waited := time.Since(start); waited > time.Second {
+			t.Fatalf("%v waited %v, want immediate", kind, waited)
+		}
+		for _, ev := range sink.all() {
+			if ev.kind == evBackoff {
+				t.Fatalf("%v backed off: %+v", kind, ev)
+			}
+		}
+	}
+}
+
+// waitDelay leaves a control already stashed for the run loop alone and
+// returns at once so the loop can handle it.
+func TestWaitDelayLeavesAStashAlone(t *testing.T) {
+	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true}, &recordingSink{})
+	r.stash = &ctrlMsg{kind: ctrlSpec}
+
+	start := time.Now()
+	if r.waitDelay(context.Background(), time.Hour) {
+		t.Fatal("waitDelay completed with a stash pending")
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("waitDelay waited %v with a stash pending", waited)
+	}
+	if r.stash == nil || r.stash.kind != ctrlSpec {
+		t.Fatalf("stash = %+v, want it untouched", r.stash)
+	}
+}
+
+// A free slot waits for a lower-order waiter already queued; a newcomer never
+// overtakes it.
+func TestStartGateDoesNotLetANewcomerJumpTheQueue(t *testing.T) {
+	g := newStartGate(2)
+	g.active = 1 // one slot free
+	g.waiters = []*gateWaiter{{order: 0, grant: make(chan struct{})}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if release, _, ok := g.acquire(ctx, nil, nil, 1, nil); ok {
+		release()
+		t.Fatal("a newcomer took a free slot ahead of a queued waiter")
+	}
 }

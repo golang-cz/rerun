@@ -494,11 +494,11 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	if got := nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+15 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+15)
+	if leftW != wantName+17 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+17)
 	}
-	if statusW != 9 {
-		t.Fatalf("statusW = %d, want 9", statusW)
+	if statusW != 11 {
+		t.Fatalf("statusW = %d, want 11", statusW)
 	}
 	// The tree cell sits between the name's badge and the status column.
 	if got := treeX(leftW); got != wantName+3 {
@@ -1179,7 +1179,7 @@ func TestSelfExitedTargetWaitsForChange(t *testing.T) {
 	sink := &recordingSink{}
 	r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true, Grace: rerun.DefaultGrace}, sink)
 
-	if err := r.start(); err != nil {
+	if err := r.start(context.Background()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	<-r.exited
@@ -1282,7 +1282,7 @@ func TestReadLinesReportsScannerError(t *testing.T) {
 		_, _ = pw.Write(bytes.Repeat([]byte("x"), 2*1024*1024))
 	}()
 
-	r.readLines(pr, "t")
+	r.readLines(pr, "t", nil)
 
 	got := sink.all()
 	if len(got) != 1 {
@@ -1301,5 +1301,104 @@ func TestRenderSegsTruncatesInsteadOfWrapping(t *testing.T) {
 	}
 	if w := displayWidth(got); w != 12 {
 		t.Fatalf("width = %d, want 12: %q", w, got)
+	}
+}
+
+// A row queued behind the start stagger shows `starting` and keeps the running
+// glyph while its uptime stays frozen.
+func TestRowStatusStartingFreezesUptime(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	row := m.targets[0]
+	row.state = stateStarting
+	row.lastStart = m.now.Add(-5 * time.Second)
+
+	if got := m.status(row); got != "starting" {
+		t.Fatalf("status = %q, want starting", got)
+	}
+	if got := row.glyph(); got != "●" {
+		t.Fatalf("glyph = %q, want the running glyph", got)
+	}
+	if got := stateColor(row); got != colorYellow {
+		t.Fatalf("color = %q, want the running color", got)
+	}
+}
+
+// A backing-off row counts the wait down in its status column.
+func TestRowStatusBackoffCountsDown(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	row := m.targets[0]
+	row.state = stateBackoff
+	row.exitCode = 1
+	row.backoffUntil = m.now.Add(4 * time.Second)
+
+	if got := m.status(row); got != "backoff 4s" {
+		t.Fatalf("status = %q, want backoff 4s", got)
+	}
+	m.now = m.now.Add(2 * time.Second)
+	if got := m.status(row); got != "backoff 2s" {
+		t.Fatalf("status after 2s = %q, want backoff 2s", got)
+	}
+	m.now = m.now.Add(3 * time.Second)
+	if got := m.status(row); got != "backoff 0s" {
+		t.Fatalf("status after the wait = %q, want backoff 0s", got)
+	}
+	if got := row.glyph(); got != "✗" {
+		t.Fatalf("glyph = %q, want the failed exit glyph", got)
+	}
+}
+
+// The backoff event lands one pane line naming the delay and the restart.
+func TestBackoffEventAddsPaneLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvent(event{kind: evBackoff, target: "web", delay: 4 * time.Second, ordinal: 5})
+
+	if m.targets[0].state != stateBackoff {
+		t.Fatalf("state = %v, want backoff", m.targets[0].state)
+	}
+	pane := strings.Join(m.paneLines(), "\n")
+	if !strings.Contains(pane, "# backoff 4s (5th restart in 30s)") {
+		t.Fatalf("pane is missing the backoff line:\n%s", pane)
+	}
+}
+
+// The backoff line words its ordinal correctly.
+func TestOrdinalWord(t *testing.T) {
+	for n, want := range map[int]string{1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 13: "13th", 21: "21st", 22: "22nd"} {
+		if got := ordinalWord(n); got != want {
+			t.Errorf("ordinalWord(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
+// The status column is wide enough for the longest backoff text.
+func TestStatusWFitsBackoff(t *testing.T) {
+	if got := displayWidth("backoff 10s"); got > statusW {
+		t.Fatalf("`backoff 10s` is %d cells, statusW is %d", got, statusW)
+	}
+}
+
+// The starting event flips a running row to starting; the started event ends
+// the backoff and resumes the uptime.
+func TestStartingAndStartedEventsMoveTheRow(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvent(event{kind: evExited, target: "web", status: "exit 1", code: 1})
+	m.applyEvent(event{kind: evBackoff, target: "web", delay: 2 * time.Second, ordinal: 3})
+	m.applyEvent(event{kind: evStarting, target: "web"})
+
+	if m.targets[0].state != stateStarting {
+		t.Fatalf("state after starting = %v, want starting", m.targets[0].state)
+	}
+	if got := m.status(m.targets[0]); got != "starting" {
+		t.Fatalf("status after starting = %q, want starting", got)
+	}
+
+	m.now = m.now.Add(3 * time.Second)
+	spawn := m.now
+	m.applyEvent(event{kind: evStarted, target: "web", at: spawn})
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("state after started = %v, want running", m.targets[0].state)
+	}
+	if got := m.status(m.targets[0]); got != "0s" {
+		t.Fatalf("status after started = %q, want 0s", got)
 	}
 }

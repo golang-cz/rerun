@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,24 @@ import (
 
 	"github.com/golang-cz/rerun"
 )
+
+// Timing knobs, package vars so tests can shrink them to milliseconds.
+var (
+	// staggerLimit is how many targets may be starting at the same time.
+	staggerLimit = 4
+	// staggerSlotTimeout bounds how long a quiet target may hold a start slot.
+	staggerSlotTimeout = 10 * time.Second
+
+	// backoffWindow is the span the restarts that trigger a backoff land in,
+	// and the age past which a run stops counting as a crash.
+	backoffWindow = 30 * time.Second
+	// backoffDelays is the wait before the 3rd, 4th, ... restart in a window.
+	backoffDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
+)
+
+// errStartAborted reports a start cancelled before it spawned, which is not a
+// spawn failure the front-end should print.
+var errStartAborted = errors.New("start aborted")
 
 // runTargets runs every target in parallel until a shutdown signal arrives.
 //
@@ -48,6 +67,143 @@ func signalChannel(signals <-chan os.Signal) (<-chan os.Signal, func()) {
 	return ch, func() { signal.Stop(ch) }
 }
 
+// startGate bounds how many targets may be starting at once, so a config with
+// many targets does not launch them all in the same instant. Callers queue in
+// rerun.yml order and are served in it.
+type startGate struct {
+	limit int
+
+	mu      sync.Mutex
+	active  int
+	waiters []*gateWaiter
+}
+
+type gateWaiter struct {
+	order   int // the runner's config index, the queue's sort key
+	granted bool
+	grant   chan struct{}
+}
+
+func newStartGate(limit int) *startGate {
+	if limit < 1 {
+		limit = 1
+	}
+	return &startGate{limit: limit}
+}
+
+// acquire takes a starting slot, calling onQueue once when the wait begins.
+// ctrl is the control that aborted the wait, or nil; ok is false when ctx,
+// retire, or ctrl aborted it.
+func (g *startGate) acquire(ctx context.Context, retire <-chan struct{}, ctrl <-chan ctrlMsg, order int, onQueue func()) (release func(), abort *ctrlMsg, ok bool) {
+	g.mu.Lock()
+	// A free slot still waits for a lower-order waiter already queued. The
+	// initial burst has no waiters, so its order stays goroutine order.
+	if !g.overtakenLocked(order) && g.active < g.limit {
+		g.active++
+		g.mu.Unlock()
+		return g.slot(), nil, true
+	}
+	w := &gateWaiter{order: order, grant: make(chan struct{})}
+	g.waiters = append(g.waiters, w)
+	g.mu.Unlock()
+
+	if onQueue != nil {
+		onQueue()
+	}
+
+	select {
+	case <-w.grant:
+		return g.slot(), nil, true
+	case <-ctx.Done():
+	case <-retire:
+	case c := <-ctrl:
+		abort = &c
+	}
+
+	// The grant raced the abort: whoever loses hands the slot back.
+	g.mu.Lock()
+	if w.granted {
+		g.releaseLocked()
+	} else {
+		g.removeLocked(w)
+	}
+	g.mu.Unlock()
+	return nil, abort, false
+}
+
+// overtakenLocked reports whether a lower-order waiter is already queued.
+func (g *startGate) overtakenLocked(order int) bool {
+	for _, w := range g.waiters {
+		if w.order < order {
+			return true
+		}
+	}
+	return false
+}
+
+// slot returns the release for one starting slot. The first call wins.
+func (g *startGate) slot() func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			g.releaseLocked()
+			g.mu.Unlock()
+		})
+	}
+}
+
+// releaseLocked frees one slot, handing it to the lowest-index waiter.
+func (g *startGate) releaseLocked() {
+	if len(g.waiters) == 0 {
+		g.active--
+		return
+	}
+	i := 0
+	for j := 1; j < len(g.waiters); j++ {
+		if g.waiters[j].order < g.waiters[i].order {
+			i = j
+		}
+	}
+	w := g.waiters[i]
+	g.waiters = append(g.waiters[:i], g.waiters[i+1:]...)
+	w.granted = true
+	close(w.grant)
+}
+
+// removeLocked drops a waiter that was not granted. It reports whether the
+// waiter was still queued.
+func (g *startGate) removeLocked(w *gateWaiter) bool {
+	for i, x := range g.waiters {
+		if x == w {
+			g.waiters = append(g.waiters[:i], g.waiters[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// startSlot is the gate slot one generation holds while it starts. The first
+// of its first output line, its exit, or the timeout frees it.
+type startSlot struct {
+	release func()
+	once    sync.Once
+	timer   *time.Timer
+}
+
+func newStartSlot(release func()) *startSlot {
+	s := &startSlot{release: release}
+	s.timer = time.AfterFunc(staggerSlotTimeout, s.free)
+	return s
+}
+
+func (s *startSlot) free() {
+	s.once.Do(func() {
+		s.timer.Stop()
+		s.release()
+	})
+}
+
 // targetGroup owns one runner per target and the process lifecycle both
 // front-ends share. A config reload can add, drop, and reorder runners, so the
 // two lists are swapped under mu and read through a snapshot.
@@ -55,6 +211,8 @@ type targetGroup struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	sink   sink
+	// gate staggers the targets' starts; every runner holds it while spawning.
+	gate *startGate
 
 	mu      sync.Mutex
 	targets []Target
@@ -79,12 +237,16 @@ func newTargetGroup(targets []Target, s sink, configPath string) *targetGroup {
 		ctx:        ctx,
 		cancel:     cancel,
 		sink:       s,
+		gate:       newStartGate(staggerLimit),
 		targets:    append([]Target(nil), targets...),
 		configPath: configPath,
 		done:       make(chan struct{}),
 	}
-	for _, target := range targets {
-		g.runners = append(g.runners, newTargetRunner(target, s))
+	for i, target := range targets {
+		r := newTargetRunner(target, s)
+		r.gate = g.gate
+		r.order.Store(int64(i))
+		g.runners = append(g.runners, r)
 	}
 	return g
 }
@@ -230,6 +392,17 @@ type targetRunner struct {
 	// watcher is the live file watcher, published so a shutdown can abort the
 	// walk Watch starts even while the run goroutine is stuck in it.
 	watcher atomic.Pointer[rerun.Watcher]
+
+	// gate and order are the runner's place in the group's start stagger, which
+	// a config reload can reorder. A nil gate means no stagger, which is how
+	// the unit tests build a runner.
+	gate  *startGate
+	order atomic.Int64
+	// selfExited, lastRun, and restarts track the crash loop the backoff
+	// guards against. Run goroutine only.
+	selfExited bool
+	lastRun    time.Duration
+	restarts   []time.Time
 
 	mu        sync.Mutex
 	cmd       rerun.Command
@@ -383,7 +556,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 	// while the watcher was built starts nothing.
 	if ctx.Err() == nil {
 		if !r.userStopped() {
-			if err := r.start(); err != nil {
+			if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 				return err
 			}
 		}
@@ -446,17 +619,20 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 	switch c.kind {
 	case ctrlStop:
 		atomic.StoreInt32(&r.stopped, 1)
+		r.forgetCrashLoop()
 		r.killCurrent(ctx)
 
 	case ctrlStart:
 		atomic.StoreInt32(&r.stopped, 0)
+		r.forgetCrashLoop()
 		if cmd := r.currentCmd(); cmd != nil && !cmd.Exited() {
 			return
 		}
-		r.startReporting()
+		r.spawn(ctx)
 
 	case ctrlReboot:
 		atomic.StoreInt32(&r.stopped, 0)
+		r.forgetCrashLoop()
 		r.restart(ctx)
 
 	case ctrlSpec:
@@ -498,7 +674,7 @@ func (r *targetRunner) restart(ctx context.Context) {
 	if ctx.Err() != nil || r.retired() {
 		return
 	}
-	r.startReporting()
+	r.spawn(ctx)
 }
 
 func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeSet) {
@@ -527,19 +703,41 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		change: changeSet,
 	})
 
-	r.startReporting()
+	r.spawn(ctx)
 }
 
-// startReporting starts a generation, reporting a spawn failure in the
-// target's stream instead of taking the whole run down.
-func (r *targetRunner) startReporting() {
-	if err := r.start(); err != nil {
+// spawn starts a generation, waiting out the restart backoff first. A spawn
+// failure is reported in the target's own stream instead of taking the whole
+// run down.
+func (r *targetRunner) spawn(ctx context.Context) {
+	if !r.waitBackoff(ctx) {
+		return
+	}
+	if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 		r.sink.emit(event{kind: evRunnerErr, target: r.target.Name, err: err})
 	}
 }
 
-// start spawns a new generation.
-func (r *targetRunner) start() error {
+// start spawns a new generation, holding a stagger slot until it is under way.
+func (r *targetRunner) start(ctx context.Context) error {
+	var slot *startSlot
+	if r.gate != nil {
+		if r.stash != nil {
+			return errStartAborted // the run loop drains the stash first
+		}
+		release, abort, ok := r.gate.acquire(ctx, r.retire, r.ctrlCh, int(r.order.Load()), func() {
+			// Queued, not spawned yet: the row shows `starting` until evStarted.
+			r.sink.emit(event{kind: evStarting, target: r.target.Name})
+		})
+		if !ok {
+			if abort != nil {
+				r.stash = abort
+			}
+			return errStartAborted
+		}
+		slot = newStartSlot(release)
+	}
+
 	var (
 		cmd rerun.Command
 		pw  *os.File
@@ -549,19 +747,23 @@ func (r *targetRunner) start() error {
 		// The ad-hoc command is passed through raw: no pipe, no prefixing.
 		cmd, err = rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace, rerun.WithStdout(r.out))
 	} else {
-		cmd, pw, err = r.startPiped()
+		cmd, pw, err = r.startPiped(slot)
 	}
 	if err != nil {
+		if slot != nil {
+			slot.free()
+		}
 		return err
 	}
 
-	exited := r.watchGeneration(cmd, pw)
+	exited := r.watchGeneration(cmd, pw, slot)
 
 	r.mu.Lock()
 	r.cmd = cmd
 	r.lastStart = time.Now()
 	started := r.lastStart
 	r.mu.Unlock()
+	r.selfExited = false
 
 	r.exited = exited
 	r.sink.emit(event{kind: evStarted, target: r.target.Name, at: started})
@@ -569,7 +771,7 @@ func (r *targetRunner) start() error {
 }
 
 // startPiped spawns a generation whose output is reported line by line.
-func (r *targetRunner) startPiped() (rerun.Command, *os.File, error) {
+func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, error) {
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		return nil, nil, err
@@ -583,16 +785,19 @@ func (r *targetRunner) startPiped() (rerun.Command, *os.File, error) {
 		return nil, nil, err
 	}
 
-	go r.readLines(pr, r.target.Name)
+	go r.readLines(pr, r.target.Name, slot)
 	return cmd, pw, nil
 }
 
 // watchGeneration closes the pipe writer once the generation is reaped, which
 // unblocks the readLines side.
-func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File) <-chan struct{} {
+func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File, slot *startSlot) <-chan struct{} {
 	exited := make(chan struct{})
 	go func() {
 		_ = cmd.WaitExit(context.Background())
+		if slot != nil {
+			slot.free()
+		}
 		if pw != nil {
 			_ = pw.Close()
 		}
@@ -601,12 +806,17 @@ func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File) <-chan st
 	return exited
 }
 
-func (r *targetRunner) readLines(pr *os.File, name string) {
+func (r *targetRunner) readLines(pr *os.File, name string, slot *startSlot) {
 	defer pr.Close()
 
 	scanner := bufio.NewScanner(pr)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	first := slot != nil
 	for scanner.Scan() {
+		if first {
+			slot.free() // the target is talking; it no longer needs the start slot
+			first = false
+		}
 		r.sink.emit(event{kind: evOutput, target: name, line: scanner.Text()})
 	}
 	// A line past the cap ends the read, so say so instead of going quiet.
@@ -627,6 +837,12 @@ func (r *targetRunner) reportExit() {
 	}
 
 	code, err := cmd.ExitState()
+
+	r.mu.Lock()
+	r.lastRun = time.Since(r.lastStart)
+	r.mu.Unlock()
+	r.selfExited = true
+
 	r.sink.emit(event{
 		kind:   evExited,
 		target: r.target.Name,
@@ -634,6 +850,78 @@ func (r *targetRunner) reportExit() {
 		code:   code,
 		err:    err,
 	})
+}
+
+// forgetCrashLoop drops the restart window: the user took over, so the next
+// start must not be delayed by an earlier crash loop.
+func (r *targetRunner) forgetCrashLoop() {
+	r.selfExited = false
+	r.restarts = r.restarts[:0]
+}
+
+// waitBackoff holds a restart back while the target keeps dying young. It
+// reports false when the wait was aborted, not completed.
+func (r *targetRunner) waitBackoff(ctx context.Context) bool {
+	if !r.selfExited {
+		return true
+	}
+	if r.lastRun >= backoffWindow {
+		// A run that outlived the window is no longer a crash loop, so its
+		// restart neither counts nor needs a delay.
+		r.restarts = r.restarts[:0]
+		return true
+	}
+
+	cut := time.Now().Add(-backoffWindow)
+	kept := r.restarts[:0]
+	for _, at := range r.restarts {
+		if at.After(cut) {
+			kept = append(kept, at)
+		}
+	}
+	r.restarts = append(kept, time.Now())
+
+	d := backoffDelay(len(r.restarts))
+	if d <= 0 {
+		return true
+	}
+	r.sink.emit(event{kind: evBackoff, target: r.target.Name, delay: d, ordinal: len(r.restarts)})
+	if !r.waitDelay(ctx, d) {
+		// The next spawn pays the same delay again, so one crash never counts
+		// as two ordinals.
+		r.restarts = r.restarts[:len(r.restarts)-1]
+		return false
+	}
+	return true
+}
+
+// backoffDelay is the wait before the ordinal-th restart in the window.
+func backoffDelay(ordinal int) time.Duration {
+	if ordinal < 3 {
+		return 0
+	}
+	return backoffDelays[min(ordinal-3, len(backoffDelays)-1)]
+}
+
+// waitDelay sleeps out d, aborting on ctx, retire, or a queued stop. A control
+// already stashed for the run loop wins over the delay.
+func (r *targetRunner) waitDelay(ctx context.Context, d time.Duration) bool {
+	if r.stash != nil {
+		return false
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-r.retire:
+		return false
+	case c := <-r.ctrlCh:
+		r.stash = &c
+		return false
+	}
 }
 
 // raw reports whether the target passes output through unprefixed. The ad-hoc

@@ -176,7 +176,7 @@ func (m *tuiModel) moveCursor(delta int) {
 }
 
 func (m *tuiModel) toggleTarget(i int) {
-	if m.targets[i].state == stateRunning {
+	if m.targets[i].state.up() {
 		m.stopTarget(i)
 		return
 	}

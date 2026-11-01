@@ -86,9 +86,17 @@ type procState int
 const (
 	stateOff procState = iota
 	stateRunning
+	stateStarting
+	stateBackoff
 	stateExited
 	stateStopped
 )
+
+// up reports whether a state means the target is running, getting ready to
+// run, or waiting out a restart backoff.
+func (s procState) up() bool {
+	return s == stateRunning || s == stateStarting || s == stateBackoff
+}
 
 // tuiTarget is one row: its process state, its stream state, and its output.
 type tuiTarget struct {
@@ -99,6 +107,8 @@ type tuiTarget struct {
 	exitCode  int
 	exitLabel string
 	lastStart time.Time
+	// backoffUntil is when a backoff-delayed start may run.
+	backoffUntil time.Time
 
 	muted  bool
 	unseen bool
@@ -361,16 +371,16 @@ func (m *tuiModel) rebootTarget(i int) {
 func (m *tuiModel) toggleAll() {
 	anyRunning := false
 	for _, t := range m.targets {
-		if t.state == stateRunning {
+		if t.state.up() {
 			anyRunning = true
 			break
 		}
 	}
 	for i, t := range m.targets {
 		switch {
-		case anyRunning && t.state == stateRunning:
+		case anyRunning && t.state.up():
 			m.stopTarget(i)
-		case !anyRunning && t.state != stateRunning:
+		case !anyRunning && !t.state.up():
 			m.startTarget(i)
 		}
 	}
@@ -498,11 +508,23 @@ func (m *tuiModel) applyEvent(ev event) {
 		}
 		m.addLine(i, fmt.Sprintf("# %d file%s changed (e.g. %s)", ev.count, plural, ev.first))
 
+	case evStarting:
+		// Queued behind the start stagger: the glyph stays running but the
+		// uptime does not tick until evStarted names the real spawn time.
+		t.state = stateStarting
+		t.exitLabel = ""
+
+	case evBackoff:
+		t.state = stateBackoff
+		t.backoffUntil = m.now.Add(ev.delay)
+		m.addLine(i, fmt.Sprintf("# backoff %s (%s restart in %s)", ev.delay, ordinalWord(ev.ordinal), backoffWindow))
+
 	case evStarted:
 		t.state = stateRunning
 		t.lastStart = ev.at
 		t.exitCode = -1
 		t.exitLabel = ""
+		t.backoffUntil = time.Time{}
 		if t.spec.Open && t.spec.URL != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
 			if err := openURL(t.spec.URL); err != nil {
@@ -684,6 +706,15 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	switch t.state {
 	case stateRunning:
 		return uptime(m.now.Sub(t.lastStart))
+	case stateStarting:
+		return "starting"
+	case stateBackoff:
+		left := t.backoffUntil.Sub(m.now)
+		if left < 0 {
+			left = 0
+		}
+		secs := int((left + time.Second - 1) / time.Second)
+		return fmt.Sprintf("backoff %ds", secs)
 	case stateExited:
 		return t.exitLabel
 	case stateStopped:
@@ -692,12 +723,28 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	return "off"
 }
 
+// ordinalWord renders a count as 1st, 2nd, 3rd, ... for the backoff line.
+func ordinalWord(n int) string {
+	suffix := "th"
+	if n%100 < 11 || n%100 > 13 {
+		switch n % 10 {
+		case 1:
+			suffix = "st"
+		case 2:
+			suffix = "nd"
+		case 3:
+			suffix = "rd"
+		}
+	}
+	return fmt.Sprintf("%d%s", n, suffix)
+}
+
 // glyph is the row's process state, backed by shape as well as color.
 func (t *tuiTarget) glyph() string {
 	switch t.state {
-	case stateRunning:
+	case stateRunning, stateStarting:
 		return "●"
-	case stateExited:
+	case stateExited, stateBackoff:
 		if t.exitCode == 0 {
 			return "✓"
 		}
@@ -713,11 +760,11 @@ func (m *tuiModel) rollupSegs() []seg {
 	var running, ok, bad int
 	for _, t := range m.targets {
 		switch {
-		case t.state == stateRunning:
+		case t.state == stateRunning || t.state == stateStarting:
 			running++
-		case t.state == stateExited && t.exitCode == 0:
+		case (t.state == stateExited || t.state == stateBackoff) && t.exitCode == 0:
 			ok++
-		case t.state == stateExited:
+		case t.state == stateExited || t.state == stateBackoff:
 			bad++
 		}
 	}

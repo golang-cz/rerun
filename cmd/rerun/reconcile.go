@@ -233,10 +233,11 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 	stopped := make([]bool, 0, len(targets))
 	var spawn []*targetRunner
 	var stale []string
-	for _, spec := range targets {
+	for i, spec := range targets {
 		r, running := runnerByName[spec.Name]
 		if !running {
 			r = newTargetRunner(spec, g.sink)
+			r.gate = g.gate
 			if g.soloGuard.Load() {
 				// Added while one stream is soloed: hold it for an explicit start.
 				atomic.StoreInt32(&r.stopped, 1)
@@ -256,6 +257,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 				}
 			}
 		}
+		r.order.Store(int64(i))
 		runners = append(runners, r)
 		stopped = append(stopped, r.userStopped())
 	}

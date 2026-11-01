@@ -18,10 +18,10 @@ const (
 	colorSolo   = "6"
 )
 
-// Left column geometry: glyph, space, name, badge, status, space, button —
-// nameW + 14 cells. The longest real status is `exit segv` and the longest
-// uptime form is `4d03h`.
-const statusW = 9
+// Left column geometry: glyph, space, name, badge, tree, status, space,
+// button — nameW + statusW + 6 cells. The status column fits `exit segv`,
+// `4d03h`, and `backoff 10s` (11 cells).
+const statusW = 11
 
 type tuiStyles struct {
 	base    lipgloss.Style
@@ -359,9 +359,9 @@ func (m *tuiModel) rowStyle(row int) lipgloss.Style {
 
 func stateColor(t *tuiTarget) string {
 	switch t.state {
-	case stateRunning:
+	case stateRunning, stateStarting:
 		return colorYellow
-	case stateExited:
+	case stateExited, stateBackoff:
 		if t.exitCode == 0 {
 			return colorGreen
 		}

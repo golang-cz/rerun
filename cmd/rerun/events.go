@@ -15,8 +15,10 @@ type eventKind int
 const (
 	evOutput     eventKind = iota // one line of the target's own output
 	evChanged                     // a file-change batch restarted the target
+	evStarting                    // queued behind the start stagger, not spawned yet
 	evStarted                     // a new generation is live
 	evExited                      // a generation ended on its own
+	evBackoff                     // the next restart waits out a crash-loop backoff
 	evWatcherErr                  // the file watcher failed
 	evRunnerErr                   // rerun could not start a generation
 	evCleared                     // the screen clear the ad-hoc mode prints
@@ -36,6 +38,10 @@ type event struct {
 	code   int
 	err    error
 	at     time.Time
+	// delay is the wait behind evBackoff, and ordinal the restart number in
+	// the window that triggered it.
+	delay   time.Duration
+	ordinal int
 	// change is the whole batch behind evChanged, which the TUI keeps so the
 	// row can show the files it last reacted to.
 	change rerun.ChangeSet
