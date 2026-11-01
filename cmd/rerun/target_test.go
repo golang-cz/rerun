@@ -4,8 +4,10 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -303,4 +305,161 @@ worker:
 	if got := stop(); got != 0 {
 		t.Errorf("exit code = %d, want 0", got)
 	}
+}
+
+// pidOf reads one pid out of a file a target's shell wrote.
+func pidOf(t *testing.T, path string) []int {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			fields := strings.Fields(string(data))
+			if len(fields) == 2 {
+				var pids []int
+				for _, f := range fields {
+					pid, err := strconv.Atoi(f)
+					if err != nil {
+						t.Fatalf("pid file %s holds %q", path, data)
+					}
+					pids = append(pids, pid)
+				}
+				return pids
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no pids in %s within 3s", path)
+	return nil
+}
+
+func assertDead(t *testing.T, pid int, why string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return // ESRCH: the process is gone
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s: pid %d is still alive after the shutdown", why, pid)
+}
+
+// A shutdown must kill the running child for real, not just stop the runner
+// loop: the shell writes its own pid and its sleep's, and both must be gone.
+func TestShutdownLeavesNoChildProcess(t *testing.T) {
+	for _, sig := range []os.Signal{syscall.SIGINT, syscall.SIGTERM} {
+		t.Run(sig.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, filepath.Join(dir, ConfigFileName), `svc1:
+  on: src
+  cmd: 'sleep 60 & echo "$$ $!" > pids; wait'
+`)
+			if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(dir)
+
+			cfg, err := LoadConfig(dir)
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+
+			signals := make(chan os.Signal, 2)
+			code := make(chan int, 1)
+			go func() { code <- runTargets(cfg.Targets, io.Discard, cfg.Path, signals) }()
+
+			pids := pidOf(t, filepath.Join(dir, "pids"))
+			signals <- sig
+
+			select {
+			case got := <-code:
+				if got != 0 {
+					t.Errorf("exit code = %d, want 0 after one signal", got)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("rerun did not stop after the signal")
+			}
+
+			for _, pid := range pids {
+				assertDead(t, pid, sig.String())
+			}
+		})
+	}
+}
+
+// A signal that lands while a target waits out its cooldown must still be
+// prompt, and must leave no child of the previous generation behind.
+func TestShutdownDuringCooldownKillsTheChild(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFileName), `svc1:
+  on: src
+  cmd: 'sleep 60 & echo $! > sleep.pid; echo $$ > sh.pid; wait'
+  delay: 20ms
+  cooldown: 5s
+`)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	signals := make(chan os.Signal, 2)
+	code := make(chan int, 1)
+	go func() { code <- runTargets(cfg.Targets, io.Discard, cfg.Path, signals) }()
+
+	first := waitForPids(t, dir)
+
+	// A change restarts the target: the old generation dies, and the cooldown
+	// holds the next one back.
+	writeFile(t, filepath.Join(dir, "src", "change.txt"), "x")
+	time.Sleep(300 * time.Millisecond)
+
+	start := time.Now()
+	signals <- syscall.SIGINT
+	select {
+	case <-code:
+	case <-time.After(3 * time.Second):
+		t.Fatal("rerun waited out the cooldown instead of stopping")
+	}
+	if waited := time.Since(start); waited > 2*time.Second {
+		t.Fatalf("shutdown took %v, want it not to wait out the cooldown", waited)
+	}
+
+	// Whatever the run last recorded, and whatever it recorded before the
+	// restart, has to be gone.
+	for _, pid := range append(first, waitForPids(t, dir)...) {
+		assertDead(t, pid, "cooldown shutdown")
+	}
+}
+
+// waitForPids reads the shell pid and the sleep pid a target's generation
+// recorded.
+func waitForPids(t *testing.T, dir string) []int {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		var pids []int
+		for _, name := range []string{"sh.pid", "sleep.pid"} {
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				break
+			}
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil || pid <= 0 {
+				break
+			}
+			pids = append(pids, pid)
+		}
+		if len(pids) == 2 {
+			return pids
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no pids in %s within 3s", dir)
+	return nil
 }
