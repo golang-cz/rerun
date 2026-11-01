@@ -23,7 +23,8 @@ const usage = `rerun - re-run a command on file system changes
 
 Usage:
   rerun                                run all rerun.yml targets in parallel
-  rerun <target> [target...]           run specific rerun.yml targets
+  rerun <target> [target...]           start these rerun.yml targets; the TUI
+                                       still lists every target, space starts one
   rerun -- <cmd>                       ad-hoc run: watch ./ and run <cmd>
   rerun a b --except c d -- <cmd>      bare words = watchlist, --except = ignorelist
   rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
@@ -76,12 +77,7 @@ func runConfigMode(args Args) int {
 			fmt.Fprintf(os.Stderr, "rerun: %v\n", noCmdHint)
 			return 1
 		}
-		targets := lookupAll(cfg, args.Targets)
-		for i := range targets {
-			targets[i].Selected = true // naming a target starts it, selected or not
-		}
-		applyOverrides(targets, args)
-		return startTargets(targets)
+		return startTargets(resolveTargets(cfg, args))
 	}
 
 	cfg, err := LoadConfig(".")
@@ -94,20 +90,40 @@ func runConfigMode(args Args) int {
 	}
 
 	if args.Target != "" {
-		target, ok := cfg.Find(args.Target)
-		if !ok {
+		if _, ok := cfg.Find(args.Target); !ok {
 			fmt.Fprintf(os.Stderr, "rerun: unknown target %q; available: %s\n", args.Target, strings.Join(cfg.Names(), ", "))
 			return 1
 		}
-		targets := []Target{target}
-		targets[0].Selected = true
-		applyOverrides(targets, args)
-		return startTargets(targets)
+	}
+
+	return startTargets(resolveTargets(cfg, args))
+}
+
+// resolveTargets keeps every rerun.yml target in the list: named targets are
+// the start-set, so the TUI still shows the rest and can start them by hand.
+func resolveTargets(cfg *Config, args Args) []Target {
+	named := args.Targets
+	if args.Target != "" {
+		named = []string{args.Target}
 	}
 
 	targets := append([]Target(nil), cfg.Targets...)
+	if len(named) > 0 {
+		for i := range targets {
+			targets[i].Selected = containsName(named, targets[i].Name)
+		}
+	}
 	applyOverrides(targets, args)
-	return startTargets(targets)
+	return targets
+}
+
+func containsName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // startTargets runs the targets: behind the TUI on a terminal, as plain
@@ -128,15 +144,6 @@ func allKnown(cfg *Config, names []string) bool {
 		}
 	}
 	return true
-}
-
-func lookupAll(cfg *Config, names []string) []Target {
-	targets := make([]Target, 0, len(names))
-	for _, name := range names {
-		target, _ := cfg.Find(name)
-		targets = append(targets, target)
-	}
-	return targets
 }
 
 func applyOverrides(targets []Target, args Args) {

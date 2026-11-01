@@ -9,13 +9,18 @@ Lightweight file-watcher that re-runs given command on FS changes. It has simple
 
 ```
 rerun                                run all rerun.yml targets in parallel
-rerun <target> [target...]           run specific rerun.yml targets
+rerun <target> [target...]           start these rerun.yml targets; the TUI
+                                     still lists every target, space starts one
 rerun -- <cmd>                       ad-hoc run: watch ./ and run <cmd>
 rerun a b --except c d -- <cmd>      bare words = watchlist, --except = ignorelist
 rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
 ```
 
 Everything after `--` is the command, passed through verbatim.
+
+Naming targets picks what starts, not what is listed: the TUI still shows
+every rerun.yml target. The named ones come up running; the rest start off
+and `space` starts one by hand.
 
 Target mode on a terminal opens a TUI: one row per target, `?` lists the keys.
 Piped or non-TTY output stays plain prefixed lines.
@@ -89,7 +94,7 @@ Each top-level key is one target. Fields:
 | `cmd` | shell command to run, required |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
 | `open` | open `url` in the browser once at startup (default false) |
-| `selected` | start this target on a bare `rerun` (default true) |
+| `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `delay` | batch window before restarting (default 200ms) |
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |

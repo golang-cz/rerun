@@ -498,6 +498,31 @@ func TestUnselectedTargetStartsOff(t *testing.T) {
 	}
 }
 
+// The named-target flow lists every rerun.yml target and keeps the unnamed
+// ones startable with space.
+func TestNamedRunListsEveryTargetAndStartsOffOnDemand(t *testing.T) {
+	cfg := configFromYAML(t, threeTargetsYAML)
+	m := newTestModel(t, resolveTargets(cfg, Args{Targets: []string{"frontend"}})...)
+
+	if len(m.targets) != 3 {
+		t.Fatalf("got %d rows, want 3", len(m.targets))
+	}
+	if m.targets[0].state != stateRunning {
+		t.Errorf("named target state = %v, want running", m.targets[0].state)
+	}
+	for i := 1; i < len(m.targets); i++ {
+		if m.targets[i].state != stateOff {
+			t.Errorf("unnamed target %d state = %v, want off", i, m.targets[i].state)
+		}
+	}
+
+	m.cursor = 2 // the api row, named off by the yml and not on the command line
+	press(m, " ")
+	if m.targets[1].state != stateRunning {
+		t.Fatalf("state after space = %v, want running", m.targets[1].state)
+	}
+}
+
 func TestRebootOnAllRowTouchesSelectedTargetsOnly(t *testing.T) {
 	off := target("job")
 	off.Selected = false

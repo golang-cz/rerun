@@ -49,6 +49,11 @@ rerun test             # run one target (flags allowed: rerun test -delay 500ms)
 Each target gets its own watcher and command; output is prefixed `[name]`.
 A target that exits by itself stays down until its next matching file change.
 
+Naming targets sets what starts, not what is listed. In the TUI every rerun.yml
+target keeps its row: the named ones start running, the rest show `·` (off) and
+`space` starts one on demand. Piped or non-TTY output stays plain prefixed text
+and runs the named targets only.
+
 On a terminal, target mode opens the TUI: a row per target on the left, the
 merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the full key list.
@@ -89,6 +94,8 @@ test:
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
 `selected: true`, `open: false`.
+Naming a target on the command line overrides `selected` either way: named ones
+start, unnamed ones stay off (still listed, still startable with `space`).
 Unknown fields, duplicate fields, and non-string values are errors.
 
 ## Flags
