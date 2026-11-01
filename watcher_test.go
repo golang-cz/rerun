@@ -689,6 +689,55 @@ func TestGitignoreNestedOverridesRoot(t *testing.T) {
 	}
 }
 
+// A watch root nested in a repo must still pick up the repo-root .gitignore,
+// which the walk alone never visits.
+func TestGitignoreLoadsAncestorRules(t *testing.T) {
+	repo := t.TempDir()
+	sub := filepath.Join(repo, "sub")
+	bin := filepath.Join(sub, "bin")
+	mkdirs(t, bin, filepath.Join(repo, ".git"))
+	writeGitignore(t, repo, "bin/\n")
+	writeGitignore(t, sub, "*.log\n")
+
+	binary := filepath.Join(bin, "x")
+	log := filepath.Join(sub, "a.log")
+	source := filepath.Join(sub, "a.go")
+	writeFiles(t, binary, log, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(sub)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	// repo/ is above the pinned watch root, so this only sees the ancestor rule
+	// once it is loaded on demand.
+	if !w.gitignored(bin, true) {
+		t.Fatalf("gitignored(%s) = false, want true", bin)
+	}
+	for _, watched := range w.watcher.WatchList() {
+		if watched == bin {
+			t.Fatalf("watch list contains ignored dir %s", bin)
+		}
+	}
+
+	writeFiles(t, binary)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	if !w.gitignored(log, false) {
+		t.Fatalf("gitignored(%s) = false, want true", log)
+	}
+	writeFiles(t, log)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
 func TestNoGitignoreDisablesFiltering(t *testing.T) {
 	dir := t.TempDir()
 	writeGitignore(t, dir, "*.log\n")
@@ -704,6 +753,33 @@ func TestNoGitignoreDisablesFiltering(t *testing.T) {
 	changes := w.Watch(20 * time.Millisecond)
 	defer w.Close()
 
+	change := writeUntilChange(t, changes, log, 2*time.Second)
+	if _, ok := change.Files[log]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, log)
+	}
+}
+
+// A .gitignore above the repo root is outside git's scope and must not apply.
+func TestGitignoreStopsAtRepoRoot(t *testing.T) {
+	outer := t.TempDir()
+	repo := filepath.Join(outer, "repo")
+	mkdirs(t, filepath.Join(repo, ".git"))
+	writeGitignore(t, outer, "*.log\n")
+
+	log := filepath.Join(repo, "a.log")
+	writeFiles(t, log)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(repo)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	if w.gitignored(log, false) {
+		t.Fatalf("gitignored(%s) = true, want false: outer .gitignore leaked past repo root", log)
+	}
 	change := writeUntilChange(t, changes, log, 2*time.Second)
 	if _, ok := change.Files[log]; !ok {
 		t.Fatalf("ChangeSet files = %v, want %s", change.Files, log)
@@ -744,9 +820,9 @@ func TestGitignorePinnedRootWarnsAndWatches(t *testing.T) {
 	}
 }
 
-// A pin scopes its whole subtree: shallower .gitignore rules stop at the
-// pinned root, while its own .gitignore still applies inside.
-func TestGitignorePinnedRootScopesDescendants(t *testing.T) {
+// Ancestor .gitignore rules cascade down into a pinned root's subtree, next to
+// the root's own .gitignore.
+func TestGitignoreAncestorRulesApplyBelowPinnedRoot(t *testing.T) {
 	dir := t.TempDir()
 	mkdirs(t, filepath.Join(dir, ".git"))
 	writeGitignore(t, dir, "*.log\n")
@@ -757,7 +833,8 @@ func TestGitignorePinnedRootScopesDescendants(t *testing.T) {
 
 	log := filepath.Join(dist, "a.log")
 	tmp := filepath.Join(dist, "b.tmp")
-	writeFiles(t, log, tmp)
+	source := filepath.Join(dist, "c.go")
+	writeFiles(t, log, tmp, source)
 
 	w, err := NewWatcher()
 	if err != nil {
@@ -767,11 +844,17 @@ func TestGitignorePinnedRootScopesDescendants(t *testing.T) {
 	changes := w.Watch(20 * time.Millisecond)
 	defer w.Close()
 
+	if !w.gitignored(log, false) {
+		t.Fatalf("gitignored(%s) = false, want true", log)
+	}
+	writeFiles(t, log)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
 	writeFiles(t, tmp)
 	assertNoChange(t, changes, 400*time.Millisecond)
 
-	change := writeUntilChange(t, changes, log, 2*time.Second)
-	if _, ok := change.Files[log]; !ok {
-		t.Fatalf("ChangeSet files = %v, want %s", change.Files, log)
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
 	}
 }

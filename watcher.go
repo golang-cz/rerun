@@ -26,6 +26,8 @@ type Watcher struct {
 	ignoreDirs   map[string]struct{}
 	ignoreFiles  map[string]struct{}
 	gitignores   map[string]*gitignoreFile      // dir -> its .gitignore, when one exists
+	checked      map[string]struct{}            // dirs already looked up in gitignores, hit or miss
+	repoRoots    map[string]string              // dir -> enclosing git root, "" when none
 	pinned       map[string]struct{}            // explicit on: roots, never ignored themselves
 	fileOnlyDirs map[string]map[string]struct{} // dir -> single-file roots watched through it
 	fullyWatched map[string]struct{}            // dirs watched by the directory walk
@@ -59,6 +61,8 @@ func NewWatcher() (*Watcher, error) {
 		ignoreDirs:       make(map[string]struct{}),
 		ignoreFiles:      make(map[string]struct{}),
 		gitignores:       make(map[string]*gitignoreFile),
+		checked:          make(map[string]struct{}),
+		repoRoots:        make(map[string]string),
 		pinned:           make(map[string]struct{}),
 		fileOnlyDirs:     make(map[string]map[string]struct{}),
 		fullyWatched:     make(map[string]struct{}),
@@ -366,12 +370,23 @@ func (w *Watcher) loadGitignore(dir string) {
 	if !w.respectGitignore {
 		return
 	}
-	if _, ok := w.gitignores[dir]; ok {
+	if _, ok := w.checked[dir]; ok {
 		return
 	}
+	w.checked[dir] = struct{}{}
 	if g := readGitignore(dir); g != nil {
 		w.gitignores[dir] = g
 	}
+}
+
+// repoRoot returns dir's enclosing git root, cached so events skip the disk walk.
+func (w *Watcher) repoRoot(dir string) string {
+	if root, ok := w.repoRoots[dir]; ok {
+		return root
+	}
+	root := gitRoot(dir)
+	w.repoRoots[dir] = root
+	return root
 }
 
 // gitignored reports whether path is ignored, walking its .gitignore chain
@@ -382,13 +397,23 @@ func (w *Watcher) gitignored(path string, isDir bool) bool {
 		return false
 	}
 
+	// Git scopes .gitignore files to their repo, so nothing above it counts.
+	stop := w.repoRoot(filepath.Dir(clean))
 	for dir := filepath.Dir(clean); ; {
+		// Watch roots below a repo never visit the repo root, so its rules must
+		// be pulled in on demand as the chain is walked.
+		if stop != "" {
+			w.loadGitignore(dir)
+		}
 		if g := w.gitignores[dir]; g != nil {
 			if rel, err := filepath.Rel(dir, clean); err == nil {
 				if ignored, matched := g.match(rel, isDir); matched {
 					return ignored
 				}
 			}
+		}
+		if dir == stop {
+			return false
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
