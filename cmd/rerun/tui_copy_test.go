@@ -453,6 +453,27 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 	}
 }
 
+// Copied text is plain, the way a native terminal selection is: the pane
+// keeps raw ANSI lines, so the payload is stripped on the way out.
+func TestCopyStripsANSIFromThePayload(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents([]event{{kind: evOutput, target: "web", line: "\x1b[36mcyan text\x1b[0m"}})
+	m.View()
+	press(m, "f")
+
+	x := paneX(m)
+	m.handleMouse(mouse(x, 0, false))
+	m.handleMouse(release(x, 0))
+
+	got := decodeCopy(t, m.copySeq)
+	if got != "cyan text\n" {
+		t.Fatalf("payload = %q, want %q", got, "cyan text\n")
+	}
+	if strings.ContainsRune(got, '\x1b') {
+		t.Fatal("the payload kept ANSI escapes")
+	}
+}
+
 // A drag in the live pane freezes the tail on its first motion, then copies
 // the range on release.
 func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {

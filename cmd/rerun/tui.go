@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/golang-cz/rerun"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
@@ -1098,6 +1099,8 @@ const copyCap = 64 << 10
 func copyPayload(lines []string) (payload string, n int, truncated bool) {
 	var b strings.Builder
 	for _, line := range lines {
+		// Native selections copy plain text; drop the pane's color codes.
+		line = ansi.Strip(line)
 		add := len(line)
 		if n > 0 {
 			add++ // the separator newline
