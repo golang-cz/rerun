@@ -91,9 +91,9 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.help {
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
-		case "?", "esc", "enter", " ":
+		case "q", "?", "esc", "enter", " ":
 			m.help = false
 		}
 		return m, nil

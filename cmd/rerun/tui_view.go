@@ -438,34 +438,42 @@ func (m *tuiModel) rightLines(w int) []string {
 
 	if len(out) > 0 {
 		last := len(out) - 1
+		// The state chip never shows while a bar owns the line.
+		chip := ""
+		if m.inputMode == inputNone {
+			chip = m.stateChip()
+		}
 		markerShown := !m.follow && m.pending > 0
 		if markerShown {
 			marker := fmt.Sprintf("↓ %d new", m.pending)
 			m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + m.vp.Height - 1, w: w, h: 1}
-			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.marker.Render(marker))
+			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		}
 		// One line, six claimants, in precedence order: an open bar, the copy
 		// hint, the new-lines marker (already drawn), the committed search
 		// counter, the filter count, then the m/s hint.
 		switch {
 		case m.inputMode == inputSearch:
-			out[last] = m.bottomLine(w, m.searchStatus(true))
+			out[last] = m.bottomLine(w, m.searchStatus(true), "")
 		case m.inputMode == inputFilter && m.filterErr != "":
-			out[last] = m.bottomLine(w, "yq: "+m.filterErr)
+			out[last] = m.bottomLine(w, "yq: "+m.filterErr, "")
 		case m.inputMode == inputFilter:
-			out[last] = m.bottomLine(w, m.filterStatus()+"  "+m.input)
+			out[last] = m.bottomLine(w, m.filterStatus()+"  "+m.input, "")
 		case m.copyHintActive():
 			// The OSC 52 sequence rides the hint line, so the renderer writes it
 			// once and the terminal executes the copy.
-			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(m.copyHint, w))) + m.copySeq
+			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip))) + m.copySeq
 		case markerShown:
 			// The marker owns the line and was drawn above.
 		case m.search != "":
-			out[last] = m.bottomLine(w, m.searchStatus(false))
+			out[last] = m.bottomLine(w, m.searchLine(), chip)
 		case m.filter != "":
-			out[last] = m.bottomLine(w, m.filterStatus())
+			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
-			out[last] = m.bottomLine(w, m.hint)
+			out[last] = m.bottomLine(w, m.hint, chip)
+		case !m.follow:
+			// A frozen pane with nothing else to say still names the state.
+			out[last] = m.bottomLine(w, "", chip)
 		}
 	}
 
@@ -500,9 +508,62 @@ func (m *tuiModel) selectionRange() (lo, hi int, ok bool) {
 	return lo, hi, true
 }
 
-// bottomLine draws plain text faint across the pane's width.
-func (m *tuiModel) bottomLine(w int, text string) string {
-	return lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(text, w)))
+// bottomLine draws plain text faint across the pane's width, with the state
+// chip appended after it.
+func (m *tuiModel) bottomLine(w int, text string, chip string) string {
+	return lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, text, chip)))
+}
+
+// bottomText joins text and the chip, truncating text so the chip survives at
+// narrow widths.
+func (m *tuiModel) bottomText(w int, text string, chip string) string {
+	if chip == "" {
+		return truncate(text, w)
+	}
+	if text == "" {
+		return truncate(chip, w)
+	}
+	suffix := " · " + chip
+	if displayWidth(suffix) >= w {
+		return truncate(chip, w)
+	}
+	return truncate(text, w-displayWidth(suffix)) + suffix
+}
+
+// markerLine draws the new-lines marker, with the state chip after it in the
+// hint style.
+func (m *tuiModel) markerLine(w int, marker string, chip string) string {
+	if chip == "" {
+		return m.styles.marker.Render(truncate(marker, w))
+	}
+	suffix := " · " + chip
+	if displayWidth(suffix) >= w {
+		return m.styles.hint.Render(truncate(chip, w))
+	}
+	return m.styles.marker.Render(truncate(marker, w-displayWidth(suffix))) + m.styles.hint.Render(suffix)
+}
+
+// stateChip is the bottom line's frozen/solo suffix. Solo alone does not claim
+// an idle line, so following output keeps its newest row visible.
+func (m *tuiModel) stateChip() string {
+	parts := make([]string, 0, 2)
+	if !m.follow {
+		parts = append(parts, "frozen (f/G)")
+	}
+	if m.solo >= 0 {
+		parts = append(parts, "solo "+m.targets[m.solo].spec.Name)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// searchLine is the committed search counter.
+func (m *tuiModel) searchLine() string {
+	return "/" + m.search + " · " + m.searchStatus(false) + " · esc"
+}
+
+// filterLine is the committed filter counter, query included.
+func (m *tuiModel) filterLine() string {
+	return m.filter + " · " + m.filterStatus() + " · esc"
 }
 
 // copyHintActive reports whether the copy feedback still owns the bottom line.
@@ -561,6 +622,9 @@ func (m *tuiModel) emptyHint() string {
 	if m.solo >= 0 {
 		return "solo: " + m.targets[m.solo].spec.Name
 	}
+	if m.filter != "" {
+		return "no lines match the filter · esc clears"
+	}
 	if m.allMuted() {
 		return "every stream is muted — m unmutes the highlighted target"
 	}
@@ -584,16 +648,16 @@ var helpKeys = [][2]string{
 	{"t", "expand the row's change tree"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
-	{"esc", "clear solo"},
+	{"esc", "clear search, then filter, then solo"},
 	{"o", "open the target's url"},
 	{"G", "jump to live output"},
 	{"f", "freeze / resume the pane"},
 	{"/", "search the pane (n/N next/prev, esc clears)"},
-	{"v", "filter the pane (yq: .a.b > 1)"},
+	{"v", "filter (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"?", "close this help"},
-	{"q ^C", "quit (a second ^C forces the kill)"},
+	{"^C", "quit (q closes help)"},
 }
 
 func (m *tuiModel) helpView() string {
@@ -605,17 +669,16 @@ func (m *tuiModel) helpView() string {
 	b.WriteString("\n")
 	for _, line := range []string{
 		"mouse: click a row to solo it (again or on ALL to clear),",
-		"double-click to stop/start like space, click its button cell to",
-		"mute, shift-click to solo.",
-		"a click in the live pane copies without freezing; a drag freezes it.",
-		"frozen copy: click or drag; OSC 52 works over ssh and tmux.",
-		"shift-drag selects text with the terminal's own copy.",
+		"double-click to stop/start like space, click its button cell to mute.",
+		"click a pane line to copy it; drag copies a range and freezes the tail",
+		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
+		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
 		"the selected row's change tree lists its last changed files;",
 		"t or a click on its +/− cell expands and collapses it.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
-		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen",
+		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",
 	} {
 		b.WriteString(m.styles.hint.Render(line) + "\n")
 	}

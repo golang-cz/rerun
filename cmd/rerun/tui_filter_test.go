@@ -262,6 +262,24 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	}
 }
 
+// A filter that matches nothing names the filter instead of claiming no output.
+func TestFilterZeroMatchHint(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "keep-0", "drop-1")
+	m.View()
+	press(m, "v")
+	typeString(m, "nomatch")
+	press(m, "enter")
+	m.View()
+
+	if view := renderedBody(m); !strings.Contains(view, "no lines match the filter · esc clears") {
+		t.Fatalf("pane hint = %q, want the filter hint", view)
+	}
+	if view := renderedBody(m); strings.Contains(view, "no output yet") {
+		t.Fatalf("pane hint lies about output while filtered: %q", view)
+	}
+}
+
 // A leading "." evaluates yq per line: matching JSON stays, everything else
 // (including a non-JSON line) is dropped.
 func TestYQFilterKeepsTruthyJSONOnly(t *testing.T) {

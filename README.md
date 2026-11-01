@@ -25,6 +25,8 @@ and `space` starts one by hand.
 Target mode on a terminal opens a TUI: one row per target, `?` lists the keys.
 Piped or non-TTY output stays plain prefixed lines.
 
+Left column: one row per target; right pane: one merged log; `?` lists keys.
+
 Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` expand or
 collapse the row's change tree, `m` mute a stream, `s` or `enter` solo (`esc`
 clears), `o` open the url, `G` live output, `f` freeze or resume the pane.
@@ -35,9 +37,9 @@ table for targets that define `columns`. A JSON output line's top-level `url`,
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, the `+/−` cell to expand or collapse that row's change
 tree, shift-click to solo, and a click on the ALL row to clear
-solo. A click in the live pane copies without freezing; a drag freezes the
-tail as it selects. In a frozen pane, click or drag a line to
-copy it, sent as OSC 52 so it works over ssh and tmux. The right pane is always the merged
+solo. Click a pane line to copy it; drag copies a range and freezes the tail
+(`f`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
+The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its

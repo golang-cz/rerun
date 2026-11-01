@@ -772,11 +772,60 @@ func TestQuitKeysReturnQuit(t *testing.T) {
 		if _, cmd := m.Update(keyMsg(key)); cmd == nil {
 			t.Errorf("%s did not return a quit command", key)
 		}
+	}
 
-		m.help = true
-		if _, cmd := m.Update(keyMsg(key)); cmd == nil {
-			t.Errorf("%s in the help overlay did not return a quit command", key)
-		}
+	m := newTestModel(t)
+	m.help = true
+	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
+		t.Error("ctrl+c in the help overlay did not return a quit command")
+	}
+}
+
+// Inside help, q closes the overlay instead of quitting.
+func TestQClosesHelpWithoutQuitting(t *testing.T) {
+	m := newTestModel(t)
+	press(m, "?")
+	if !m.help {
+		t.Fatal("? did not open the help overlay")
+	}
+	if _, cmd := m.Update(keyMsg("q")); cmd != nil {
+		t.Fatal("q in the help overlay returned a quit command")
+	}
+	if m.help {
+		t.Fatal("q did not close the help overlay")
+	}
+}
+
+// A frozen pane names its state even with nothing pending.
+func TestFrozenChipShowsWithoutPending(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 5).events)
+	m.View()
+	press(m, "f")
+	if got := bottomPaneLine(m); !strings.Contains(got, "frozen (f/G)") {
+		t.Fatalf("bottom line = %q, want the frozen chip", got)
+	}
+}
+
+// Soloing a frozen pane appends the solo chip after the frozen one.
+func TestSoloChipAppendsToFrozen(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.toggleSolo(0)
+	press(m, "f")
+	if got := bottomPaneLine(m); !strings.Contains(got, "frozen (f/G) · solo web") {
+		t.Fatalf("bottom line = %q, want frozen then solo", got)
+	}
+}
+
+// An open bar owns the bottom line, so the state chip stays hidden.
+func TestChipHiddenWhileInputOpen(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 20).events)
+	m.View()
+	press(m, "f")
+	press(m, "/")
+	if got := bottomPaneLine(m); strings.Contains(got, "frozen") || strings.Contains(got, "solo") {
+		t.Fatalf("bottom line = %q, want no chip while the bar is open", got)
 	}
 }
 
