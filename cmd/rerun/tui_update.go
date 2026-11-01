@@ -112,6 +112,9 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "v":
 		m.openInput(inputFilter)
 
+	case "c":
+		m.toggleTable()
+
 	case "n":
 		m.searchJump(1)
 

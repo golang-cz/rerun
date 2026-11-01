@@ -465,7 +465,7 @@ func (m *tuiModel) rightLines(w int) []string {
 		case m.filter != "":
 			out[last] = m.bottomLine(w, m.filterStatus())
 		case m.now.Before(m.hintUntil):
-			out[last] = m.bottomLine(w, allRowHint)
+			out[last] = m.bottomLine(w, m.hint)
 		}
 	}
 
@@ -541,7 +541,7 @@ func (m *tuiModel) syncContent() {
 		return
 	}
 
-	lines := m.paneLines()
+	lines := m.tableLines(m.paneLines())
 	content := strings.Join(lines, "\n")
 	if len(lines) == 0 {
 		content = m.styles.hint.Render(m.emptyHint())
@@ -590,6 +590,7 @@ var helpKeys = [][2]string{
 	{"f", "freeze / resume the pane"},
 	{"/", "search the pane (n/N next/prev, esc clears)"},
 	{"v", "filter the pane (yq: .a.b > 1)"},
+	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"?", "close this help"},
 	{"q ^C", "quit (a second ^C forces the kill)"},

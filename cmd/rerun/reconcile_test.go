@@ -464,6 +464,29 @@ func TestApplyConfigHandsTheRunnerItsNewSpec(t *testing.T) {
 	}
 }
 
+// A columns edit is cosmetic: no restart, no rewatch, and the new spec still
+// reaches the TUI rows.
+func TestColumnsChangeIsCosmeticAndReachesTheTUI(t *testing.T) {
+	old := recTarget("web", "web")
+	old.Columns = []Column{{Name: "a", Expr: ".a"}}
+	fresh := recTarget("web", "web")
+	fresh.Columns = []Column{{Name: "b", Expr: ".b"}}
+
+	if actions := diffTargets([]Target{old}, []Target{fresh}); len(actions) != 0 {
+		t.Fatalf("actions = %+v, want none for a columns-only change", actions)
+	}
+
+	m := newTestModel(t, old)
+	m.applyEvent(event{kind: evReconcile, cfg: &configChange{
+		targets: []Target{fresh},
+		runners: []*targetRunner{m.targets[0].runner},
+		stopped: []bool{false},
+	}})
+	if got := m.targets[0].spec.Columns; len(got) != 1 || got[0].Name != "b" {
+		t.Fatalf("columns = %+v, want the new spec on the row", got)
+	}
+}
+
 // nextCtrl pops the control a runner's loop would have taken.
 func nextCtrl(t *testing.T, r *targetRunner) ctrlMsg {
 	t.Helper()

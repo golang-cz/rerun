@@ -29,7 +29,9 @@ Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` expand or
 collapse the row's change tree, `m` mute a stream, `s` or `enter` solo (`esc`
 clears), `o` open the url, `G` live output, `f` freeze or resume the pane.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
-(a leading `.` runs a yq expression per JSON line).
+(a leading `.` runs a yq expression per JSON line); `c` toggles the columns
+table for targets that define `columns`. A JSON output line's top-level `url`,
+`addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, the `+/−` cell to expand or collapse that row's change
 tree, shift-click to solo, and a click on the ALL row to clear
@@ -105,6 +107,7 @@ Each top-level key is one target. Fields:
 | `except` | paths or globs to ignore, a string or a list |
 | `cmd` | shell command to run, required |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
+| `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `[method {.request.method}, status {.response.status}]` |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `delay` | batch window before restarting (default 200ms) |

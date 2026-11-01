@@ -28,6 +28,13 @@ func (e *configNotFoundError) Error() string {
 
 func (e *configNotFoundError) Unwrap() error { return ErrConfigNotFound }
 
+// Column is one table-mode column: a display header and the yq expression
+// that extracts one value from a JSON output line.
+type Column struct {
+	Name string
+	Expr string
+}
+
 type Target struct {
 	Name     string
 	Desc     string
@@ -35,6 +42,7 @@ type Target struct {
 	Except   []string
 	Cmd      string
 	URL      string
+	Columns  []Column
 	Delay    time.Duration
 	Cooldown time.Duration
 	Grace    time.Duration
@@ -199,6 +207,21 @@ func parseTarget(path, name string, node *yaml.Node) (Target, error) {
 				target.URL = s
 			}
 
+		case "columns":
+			list, err := stringOrList(path, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			cols := make([]Column, 0, len(list))
+			for _, raw := range list {
+				col, err := parseColumn(raw)
+				if err != nil {
+					return Target{}, fmt.Errorf("%s: target %q: field %q: %s in %q", path, name, field, err, raw)
+				}
+				cols = append(cols, col)
+			}
+			target.Columns = cols
+
 		case "open", "selected":
 			b, err := boolField(path, name, field, value)
 			if err != nil {
@@ -261,6 +284,29 @@ func boolField(path, name, field string, node *yaml.Node) (bool, error) {
 		return false, fmt.Errorf("%s: target %q: field %q: expected a boolean, got %q", path, name, field, node.Value)
 	}
 	return b, nil
+}
+
+// parseColumn splits a `name {.yq.expr}` column entry: the header is
+// everything before the first `{`, the expression everything up to the last
+// `}`.
+func parseColumn(raw string) (Column, error) {
+	open := strings.Index(raw, "{")
+	if open < 0 {
+		return Column{}, errors.New("expected a name and a {.yq.expr}")
+	}
+	close := strings.LastIndex(raw, "}")
+	if close < open {
+		return Column{}, errors.New("missing a closing }")
+	}
+	name := strings.TrimSpace(raw[:open])
+	expr := strings.TrimSpace(raw[open+1 : close])
+	if name == "" {
+		return Column{}, errors.New("empty column name")
+	}
+	if expr == "" {
+		return Column{}, errors.New("empty column expression")
+	}
+	return Column{Name: name, Expr: expr}, nil
 }
 
 // yamlType names a node's type for error messages, e.g. "int" for !!int.

@@ -180,6 +180,26 @@ func TestParseConfigErrors(t *testing.T) {
 			wantSub: []string{`target "api"`, "cmd is required"},
 		},
 		{
+			name:    "column without expression",
+			content: "api:\n  cmd: echo hi\n  columns: [\"method\"]\n",
+			wantSub: []string{`target "api"`, `field "columns"`, "method"},
+		},
+		{
+			name:    "column without name",
+			content: "api:\n  cmd: echo hi\n  columns: [\"{.a}\"]\n",
+			wantSub: []string{`target "api"`, "empty column name"},
+		},
+		{
+			name:    "column with empty expression",
+			content: "api:\n  cmd: echo hi\n  columns: [\"a {}\"]\n",
+			wantSub: []string{`target "api"`, "empty column expression"},
+		},
+		{
+			name:    "non-string column",
+			content: "api:\n  cmd: echo hi\n  columns: [5]\n",
+			wantSub: []string{`target "api"`, `"columns"`, "got int"},
+		},
+		{
 			name:    "non-string list item",
 			content: "api:\n  cmd: echo hi\n  on: [\"a\", 5]\n",
 			wantSub: []string{`target "api"`, `"on"`, "got int"},
@@ -226,6 +246,23 @@ func TestParseConfigErrors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseConfigColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\n  columns:\n    - method {.request.method}\n    - \"status {.response.status}\"\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	want := []Column{
+		{Name: "method", Expr: ".request.method"},
+		{Name: "status", Expr: ".response.status"},
+	}
+	if !reflect.DeepEqual(cfg.Targets[0].Columns, want) {
+		t.Fatalf("columns = %+v, want %+v", cfg.Targets[0].Columns, want)
 	}
 }
 

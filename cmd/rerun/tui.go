@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/golang-cz/rerun"
+	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
 // lineCap bounds each target's scrollback and the merged ALL stream. Phase B
@@ -130,6 +131,13 @@ type tuiTarget struct {
 	// cursor's own row expands on its own, a pinned row keeps its own state.
 	treePinned bool
 	treeOpen   bool
+
+	// colSpec is the spec the cached column expressions were parsed from, so
+	// a spec swap reparses exactly once. colBad marks a spec whose expression
+	// does not compile, which keeps every one of its rows raw.
+	colSpec  []Column
+	colExprs []*yqlib.ExpressionNode
+	colBad   bool
 }
 
 // tuiModel is the whole screen: the target list on the left, the stream on
@@ -173,6 +181,21 @@ type tuiModel struct {
 	// target's own text. len(visibleRaw) always equals len(visible).
 	visibleRaw []string
 
+	// visibleIdx mirrors visible with each line's target row, or -1 for rerun's
+	// own notice lines. len(visibleIdx) always equals len(visible).
+	visibleIdx []int
+
+	// visibleCells caches each visible line's table form, so a chatty stream
+	// evaluates a line once and a frame only pads cached cells. Cleared on
+	// every visibility rebuild; "not computed" is a zero cellCache.
+	visibleCells []cellCache
+	// cellEvals counts the lines evaluated for the table, which the tests read.
+	cellEvals int
+
+	// table renders the pane as a table of each row target's columns; the raw
+	// lines, and so search, filter, and copy, are untouched.
+	table bool
+
 	// inputMode names the bottom-line bar that is open, input its in-progress
 	// text. While one is open it owns every key and the bottom line.
 	inputMode int
@@ -205,7 +228,9 @@ type tuiModel struct {
 
 	width, height int
 	now           time.Time
-	// hintUntil bounds the ALL-row m/s hint; the 1s tick expires it.
+	// hint is the transient bottom-line message, live until hintUntil; the 1s
+	// tick expires it.
+	hint      string
 	hintUntil time.Time
 
 	// lastClick and lastClickAt track the previous row click, so a second
@@ -240,8 +265,10 @@ func newTUI(targets []Target) *tuiModel {
 		hover:     -1,
 		searchRow: -1,
 		styles:    newTUIStyles(),
-		// Kept non-nil: copy code walks this list in parallel with visible.
-		visibleRaw: []string{},
+		// Kept non-nil: copy code walks these lists in parallel with visible.
+		visibleRaw:   []string{},
+		visibleIdx:   []int{},
+		visibleCells: []cellCache{},
 	}
 	m.vp = viewport.New(80, 20)
 
@@ -381,7 +408,11 @@ func (m *tuiModel) treeCell(i int) string {
 }
 
 // showTargetHint flags that m/s need a row, not the ALL rollup.
-func (m *tuiModel) showTargetHint() {
+func (m *tuiModel) showTargetHint() { m.showHint(allRowHint) }
+
+// showHint posts a transient message to the pane's bottom line.
+func (m *tuiModel) showHint(text string) {
+	m.hint = text
 	m.hintUntil = m.now.Add(hintDuration)
 }
 
@@ -453,6 +484,8 @@ func (m *tuiModel) addLine(i int, line string) {
 	if m.streamsTo(i) {
 		m.visible = appendCapped(m.visible, m.prefixed(mergedLine{target: i, name: t.spec.Name, text: line}))
 		m.visibleRaw = appendCapped(m.visibleRaw, line)
+		m.visibleIdx = appendCapped(m.visibleIdx, i)
+		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
 		if m.filterOn() {
 			m.paneSelDirty = true
 		}
@@ -481,6 +514,8 @@ func (m *tuiModel) addNotice(line string) {
 	m.merged = appendCapped(m.merged, mergedLine{target: -1, text: line})
 	m.visible = appendCapped(m.visible, line)
 	m.visibleRaw = appendCapped(m.visibleRaw, line)
+	m.visibleIdx = appendCapped(m.visibleIdx, -1)
+	m.visibleCells = appendCapped(m.visibleCells, cellCache{raw: true})
 	if m.filterOn() {
 		m.paneSelDirty = true
 	}
@@ -542,6 +577,7 @@ func (m *tuiModel) applyEvent(ev event) {
 	switch ev.kind {
 	case evOutput:
 		m.addLine(i, ev.line)
+		m.captureURL(t, ev.line)
 
 	case evChanged:
 		// Retain the whole batch: the row's change tree renders it and the
@@ -902,12 +938,16 @@ func (m *tuiModel) prefixed(line mergedLine) string {
 func (m *tuiModel) rebuildMerged() {
 	m.visible = m.visible[:0]
 	m.visibleRaw = m.visibleRaw[:0]
+	m.visibleIdx = m.visibleIdx[:0]
+	m.visibleCells = m.visibleCells[:0]
 	for _, line := range m.merged {
 		if !m.streamsTo(line.target) {
 			continue
 		}
 		m.visible = appendCapped(m.visible, m.prefixed(line))
 		m.visibleRaw = appendCapped(m.visibleRaw, line.text)
+		m.visibleIdx = appendCapped(m.visibleIdx, line.target)
+		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
 	}
 	m.mergedDirty = false
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible

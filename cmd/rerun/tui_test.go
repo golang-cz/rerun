@@ -1275,33 +1275,6 @@ func TestSelfExitedTargetWaitsForChange(t *testing.T) {
 }
 
 // c and / are reserved for Phase B, so pressing one must change nothing.
-func TestUnboundKeysChangeNothing(t *testing.T) {
-	for _, key := range []string{"c", "/"} {
-		t.Run(key, func(t *testing.T) {
-			m := newTestModel(t)
-			m.cursor = 2
-			m.toggleMute(0)
-			m.toggleSolo(1)
-
-			type snapshot struct {
-				cursor, solo int
-				help, follow bool
-				buttons      []string
-			}
-			before := snapshot{m.cursor, m.solo, m.help, m.follow, buttons(m)}
-
-			if _, cmd := m.Update(keyMsg(key)); cmd != nil {
-				t.Errorf("%s returned a command", key)
-			}
-
-			after := snapshot{m.cursor, m.solo, m.help, m.follow, buttons(m)}
-			if !reflect.DeepEqual(before, after) {
-				t.Errorf("%s changed the model: before %+v, after %+v", key, before, after)
-			}
-		})
-	}
-}
-
 // A runner that could not start leaves nothing running: the row must not keep
 // the running glyph and a ticking uptime.
 func TestRunnerErrorLeavesRunningState(t *testing.T) {
