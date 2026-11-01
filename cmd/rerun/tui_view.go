@@ -324,10 +324,10 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 	return strings.Repeat(" ", leftW)
 }
 
-// treeIndent is a folder or file line's left margin: two cells for a root, two
-// more per level.
+// treeIndent is a folder or file line's left margin: a root sits at column 0,
+// one cell per level below it.
 func treeIndent(depth int) string {
-	return strings.Repeat(" ", 2+2*depth)
+	return strings.Repeat(" ", depth)
 }
 
 // treeSuffixW is the drawer's fixed right column: the recursive count on a

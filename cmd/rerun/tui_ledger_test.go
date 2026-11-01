@@ -261,10 +261,10 @@ func TestTreeFolderClicksFoldChildren(t *testing.T) {
 	m.View()
 	got := drawerOf(m)
 	want := []string{
-		treeText("  − apps/", "3"),
-		treeText("    ~ api/", "1"),
-		treeText("    ~ web/", "1"),
-		treeText("    ~ root.go", "0s"),
+		treeText("− apps/", "3"),
+		treeText(" ~ api/", "1"),
+		treeText(" ~ web/", "1"),
+		treeText(" ~ root.go", "0s"),
 	}
 	if !reflect.DeepEqual(got[1:], want) {
 		t.Fatalf("expanded tree = %q, want %q", got[1:], want)
@@ -366,9 +366,9 @@ func TestTreeFileLineCarriesOpAndAge(t *testing.T) {
 	m.toggleTreeFolder("apps/")
 
 	if got := drawerOf(m); !reflect.DeepEqual(got[1:], []string{
-		treeText("  − apps/", "2"),
-		treeText("    − gone.go", "4m"),
-		treeText("    + new.go", "4m"),
+		treeText("− apps/", "2"),
+		treeText(" − gone.go", "4m"),
+		treeText(" + new.go", "4m"),
 	}) {
 		t.Fatalf("file lines = %q, want sorted names with the 4m age", got[1:])
 	}
