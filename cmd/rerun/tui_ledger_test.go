@@ -60,11 +60,12 @@ func leftPane(m *tuiModel) []string {
 const drawerWidth = 60
 
 // drawerOf is the fs drawer as drawn at drawerWidth: its separator and its
-// entries, down to the line above the version line.
+// entries. The blank divider and the version line sit below it.
 func drawerOf(m *tuiModel) []string {
 	m.View()
-	out := make([]string, 0, len(m.layout.drawer))
-	for y := m.height - 1 - len(m.layout.drawer); y < m.height-1; y++ {
+	n := len(m.layout.drawer)
+	out := make([]string, 0, n)
+	for y := m.height - 2 - n; y < m.height-2; y++ {
 		out = append(out, strings.TrimRight(ansi.Strip(m.leftLine(y, drawerWidth)), " "))
 	}
 	return out
@@ -157,14 +158,15 @@ func TestDrawerMergesEveryTargetNewestFirst(t *testing.T) {
 	spawnWithChange(m, "api", oneFile("b.go"), ledgerClock.Add(time.Minute))
 	spawnWithChange(m, "web", oneFile("c.go"), ledgerClock.Add(2*time.Minute))
 
+	m.now = ledgerClock.Add(2*time.Minute + 12*time.Second)
 	lines := drawerOf(m)
 	if !strings.HasPrefix(lines[0], "fs ·") {
 		t.Fatalf("the drawer does not lead with its separator: %q", lines[0])
 	}
 	want := []string{
-		"↺ 14:34:07 · web · 1 file",
-		"↺ 14:33:07 · api · 1 file",
-		"↺ 14:32:07 · web · 1 file",
+		"↺ 12s · web · 1 file",
+		"↺ 1m · api · 1 file",
+		"↺ 2m · web · 1 file",
 	}
 	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("drawer headers = %q, want %q", got, want)
@@ -175,7 +177,7 @@ func TestDrawerMergesEveryTargetNewestFirst(t *testing.T) {
 	web.state, web.exitCode = stateExited, 1
 	m.View()
 	leftW, _ := m.layoutWidths()
-	header := m.leftLine(m.height-1-len(m.layout.drawer)+1, leftW)
+	header := m.leftLine(m.height-2-len(m.layout.drawer)+1, leftW)
 	if got := m.styles.base.Foreground(lipgloss.Color(colorRed)).Render("web"); !strings.Contains(header, got) {
 		t.Fatalf("the entry header does not carry the row's state color: %q", header)
 	}
@@ -201,27 +203,80 @@ func TestLedgerKeepsTheThreeNewestSpawns(t *testing.T) {
 		}
 	}
 
-	// Only what the target still holds reaches the drawer.
+	// Only what the target still holds reaches the drawer, one collapsed
+	// header each.
+	m.now = ledgerClock.Add(3*time.Minute + 5*time.Second)
 	lines := drawerOf(m)
 	wantLines := []string{
-		"↺ 14:35:07 · web · 1 file", "  ~ d.go",
-		"↺ 14:34:07 · web · 1 file", "  ~ c.go",
-		"↺ 14:33:07 · web · 1 file", "  ~ b.go",
+		"↺ 5s · web · 1 file",
+		"↺ 1m · web · 1 file",
+		"↺ 2m · web · 1 file",
 	}
 	if got := lines[1:]; !reflect.DeepEqual(got, wantLines) {
 		t.Fatalf("drawer entries = %q, want %q", got, wantLines)
 	}
 }
 
-// An entry lists three files and counts the rest in a `+k more` row. A one-file
-// batch reads `1 file`, and a removal shows the minus glyph.
-func TestDrawerShowsThreeFilesAndAMoreRow(t *testing.T) {
+// A new entry renders one header line with a relative age; its files appear
+// only once the entry is expanded, and clicking again collapses it.
+func TestDrawerEntryCollapsesToHeaderAndExpandsOnClick(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
+	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
+	m.now = ledgerClock.Add(12 * time.Second)
 
 	want := []string{
 		"fs ·" + strings.Repeat("─", drawerWidth-4),
-		"↺ 14:32:07 · web · 7 files",
+		"↺ 12s · web · 1 file",
+	}
+	if got := drawerOf(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("collapsed drawer = %q, want %q", got, want)
+	}
+	if got := strings.Join(drawerOf(m), "\n"); strings.Contains(got, "a.go") {
+		t.Fatalf("the collapsed entry showed a file:\n%s", got)
+	}
+
+	id := m.targets[0].ledger[0].id
+	m.toggleExpanded(id)
+	lines := drawerOf(m)
+	if len(lines) != 3 || lines[2] != "  ~ a.go" {
+		t.Fatalf("expanded entry = %q, want its one file", lines)
+	}
+
+	m.toggleExpanded(id)
+	if got := len(drawerOf(m)); got != 2 {
+		t.Fatalf("re-collapsed entry lines = %d, want the header only", got)
+	}
+}
+
+// Two entries stay independent: expanding one leaves the other a one-liner.
+func TestExpandingOneEntryLeavesTheOtherCollapsed(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
+	spawnWithChange(m, "web", oneFile("b.go"), ledgerClock.Add(time.Minute))
+	m.now = ledgerClock.Add(2 * time.Minute)
+
+	m.toggleExpanded(m.targets[0].ledger[0].id) // the newest, b.go
+	want := []string{
+		"fs ·" + strings.Repeat("─", drawerWidth-4),
+		"↺ 1m · web · 1 file",
+		"  ~ b.go",
+		"↺ 2m · web · 1 file",
+	}
+	if got := drawerOf(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("drawer = %q, want %q", got, want)
+	}
+}
+
+// An expanded entry lists three files and counts the rest in a `+k more` row.
+func TestDrawerShowsThreeFilesAndAMoreRow(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
+	m.now = ledgerClock.Add(2 * time.Minute)
+	m.toggleExpanded(m.targets[0].ledger[0].id)
+
+	want := []string{
+		"fs ·" + strings.Repeat("─", drawerWidth-4),
+		"↺ 2m · web · 7 files",
 		"  + a.go",
 		"  ~ b.go",
 		"  ~ c.go",
@@ -233,8 +288,9 @@ func TestDrawerShowsThreeFilesAndAMoreRow(t *testing.T) {
 
 	// A spawned removal becomes the newest entry: singular, with `−`.
 	spawnWithChange(m, "web", changeBatch(map[string]fsnotify.Op{"b.go": fsnotify.Remove}), ledgerClock.Add(time.Minute))
+	m.toggleExpanded(m.targets[0].ledger[0].id)
 	lines := drawerOf(m)
-	if len(lines) < 3 || lines[1] != "↺ 14:33:07 · web · 1 file" || lines[2] != "  − b.go" {
+	if len(lines) < 3 || lines[1] != "↺ 1m · web · 1 file" || lines[2] != "  − b.go" {
 		t.Fatalf("newest entry lines = %q, want `1 file` singular and the removal glyph", lines)
 	}
 }
@@ -291,6 +347,7 @@ func TestDrawerIsCappedAtHalfTheColumnHeight(t *testing.T) {
 	for i, d := range defs {
 		spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i)*time.Second))
 	}
+	m.now = ledgerClock.Add(5 * time.Second)
 	m.View()
 
 	limit := (m.height - 1) / 2
@@ -299,14 +356,14 @@ func TestDrawerIsCappedAtHalfTheColumnHeight(t *testing.T) {
 		t.Fatalf("drawer rows = %d, want between 1 and half of %d", len(drawer), m.height-1)
 	}
 	// The newest entries win the rows; the ones that do not fit are not drawn.
-	var headers []string
-	for _, row := range drawer {
-		if row.kind == drawerSpawn {
-			headers = append(headers, row.at.Format("15:04:05"))
-		}
+	want := []string{
+		"↺ 0s · t5 · 1 file",
+		"↺ 1s · t4 · 1 file",
+		"↺ 2s · t3 · 1 file",
+		"↺ 3s · t2 · 1 file",
 	}
-	if want := []string{"14:32:12", "14:32:11"}; !reflect.DeepEqual(headers, want) {
-		t.Fatalf("drawn entries = %v, want the newest that fit %v", headers, want)
+	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("drawn entries = %q, want the newest that fit %q", got, want)
 	}
 
 	// The data behind the overflow is intact.
@@ -402,47 +459,59 @@ func TestDrawerTogglesGloballyWithT(t *testing.T) {
 	}
 }
 
-// Clicking a drawer entry solos the target it belongs to; clicking the drawer's
-// separator does nothing at all.
-func TestDrawerEntryClickSolosItsTarget(t *testing.T) {
+// Clicking a drawer entry's header expands its files in place and clicking it
+// again collapses it. It never solos the target or moves the cursor: a file
+// line, the separator, and the pending line all do nothing.
+func TestDrawerEntryClickExpandsItsFiles(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
+	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
 	spawnWithChange(m, "api", oneFile("b.go"), ledgerClock.Add(time.Minute))
+	m.now = ledgerClock.Add(time.Minute + 30*time.Second)
 	m.View()
 
 	drawer := m.layout.drawer
-	if len(drawer) < 4 || drawer[1].target != 1 {
+	if len(drawer) < 3 || drawer[1].kind != drawerSpawn || drawer[1].target != 1 {
 		t.Fatalf("setup: the newest entry (api) is not right under the separator: %+v", drawer)
 	}
-	top := m.height - 1 - len(drawer) // the separator's screen row
+	top := m.height - 2 - len(drawer) // the separator's screen row
 	if got := m.rowAt(2, top); got != -1 {
 		t.Fatalf("the separator resolves to row %d, want no row", got)
 	}
 	if got := m.rowAt(2, top+1); got != 2 {
 		t.Fatalf("the api entry header resolves to row %d, want 2", got)
 	}
-	if got := m.rowAt(2, top+2); got != 2 {
-		t.Fatalf("the entry's file line resolves to row %d, want 2", got)
+
+	m.handleMouse(mouse(2, top+1, false))
+	if m.solo != -1 || m.cursor != 0 {
+		t.Fatalf("the drawer click soloed or moved the cursor: solo=%d cursor=%d", m.solo, m.cursor)
+	}
+	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "  ~ b.go") {
+		t.Fatalf("the expanded entry did not show its file:\n%s", got)
 	}
 
-	// The header solos its target, cursor and all, the way its row does.
-	m.handleMouse(mouse(2, top+1, false))
-	if m.solo != 1 {
-		t.Fatalf("solo after clicking the entry = %d, want 1", m.solo)
+	// The file line of the expanded entry does nothing.
+	top = m.height - 2 - len(m.layout.drawer)
+	m.handleMouse(mouse(2, top+2, false))
+	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "  ~ b.go") {
+		t.Fatalf("clicking the file line collapsed the entry:\n%s", got)
 	}
-	if m.cursor != 2 {
-		t.Fatalf("cursor after clicking the entry = %d, want 2", m.cursor)
+
+	// A second click on the header collapses it.
+	m.handleMouse(mouse(2, top+1, false))
+	lines := drawerOf(m)
+	if got := strings.Join(lines, "\n"); strings.Contains(got, "  ~ b.go") {
+		t.Fatal("the second click did not collapse the entry")
 	}
 
 	// The last column of an entry is inside the drawer, not a mute cell.
+	top = m.height - 2 - len(m.layout.drawer)
 	slowClick(m)
-	m.handleMouse(mouse(m.layout.leftW-1, top+2, false))
+	m.handleMouse(mouse(m.layout.leftW-1, top+1, false))
 	if m.targets[1].muted {
 		t.Fatal("clicking a drawer entry muted the target")
 	}
 
-	// The separator, and the blank rows past the list, belong to no row.
-	m.cursor = 0
+	// The separator belongs to no row.
 	m.clearSolo()
 	m.handleMouse(mouse(2, top, false))
 	if m.solo != -1 || m.cursor != 0 {
@@ -507,21 +576,98 @@ func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 	}
 }
 
-// The version line still owns the bottom row, with the drawer right above it.
+// The version line still owns the bottom row, one blank divider above it, with
+// the drawer's separator starting above that blank.
 func TestVersionLineOwnsTheBottomRowUnderTheDrawer(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.height = 14 // room for the separator and the whole seven-file entry
+	m.height = 14 // room for the separator, the header, the blank, and the version
 	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
 	lines := leftPane(m)
 
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
 		t.Fatalf("the bottom row is not the version line: %q", got)
 	}
-	if got := lines[m.height-1-len(m.layout.drawer)]; !strings.HasPrefix(got, "fs ·") {
-		t.Fatalf("the drawer does not start right above the version line: %q", got)
+	if got := lines[m.height-2]; got != "" {
+		t.Fatalf("the row above the version line = %q, want the blank divider", got)
+	}
+	top := m.height - 2 - len(m.layout.drawer)
+	if got := lines[top]; !strings.HasPrefix(got, "fs ·") {
+		t.Fatalf("the drawer does not start above the blank divider: %q", got)
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {
 		t.Fatalf("the version row resolved to row %d, want none", got)
+	}
+}
+
+// Ten entries render at most the eight drawer lines: seven headers under the
+// separator, newest first, and the rest are simply not drawn.
+func TestDrawerRendersAtMostEightLines(t *testing.T) {
+	defs := make([]Target, 0, 10)
+	for i := 0; i < 10; i++ {
+		defs = append(defs, target(fmt.Sprintf("t%d", i)))
+	}
+	m := newTestModel(t, defs...)
+	for i, d := range defs {
+		spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i)*time.Second))
+	}
+	m.now = ledgerClock.Add(9 * time.Second)
+	m.View()
+
+	if got := len(m.layout.drawer); got != drawerMax {
+		t.Fatalf("drawer lines = %d, want the %d-line cap", got, drawerMax)
+	}
+	want := []string{
+		"↺ 0s · t9 · 1 file",
+		"↺ 1s · t8 · 1 file",
+		"↺ 2s · t7 · 1 file",
+		"↺ 3s · t6 · 1 file",
+		"↺ 4s · t5 · 1 file",
+		"↺ 5s · t4 · 1 file",
+		"↺ 6s · t3 · 1 file",
+	}
+	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("drawn entries = %q, want the newest %d %q", got, len(want), want)
+	}
+	if got := len(m.drawerEntries()); got != 10 {
+		t.Fatalf("merged entries = %d, want all 10 kept in the data", got)
+	}
+}
+
+// An entry pushed out of the twenty-entry cap forgets its expansion, and no
+// surviving entry inherits it.
+func TestDrawerExpansionForgetsEntriesPushedOutOfTheCap(t *testing.T) {
+	defs := make([]Target, 0, 8)
+	for i := 0; i < 8; i++ {
+		defs = append(defs, target(fmt.Sprintf("t%d", i)))
+	}
+	m := newTestModel(t, defs...)
+	for i, d := range defs {
+		for j := 0; j < 3; j++ {
+			spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i*3+j)*time.Second))
+		}
+	}
+	m.View()
+
+	entries := m.drawerEntries()
+	if len(entries) != drawerCap {
+		t.Fatalf("merged entries = %d, want the %d-entry cap", len(entries), drawerCap)
+	}
+	oldest := entries[len(entries)-1].id
+	m.toggleExpanded(oldest)
+	if !m.isExpanded(oldest) {
+		t.Fatal("setup: the oldest entry did not expand")
+	}
+
+	// A newer spawn pushes the oldest entry out of the cap.
+	spawnWithChange(m, "t0", oneFile("z.go"), ledgerClock.Add(time.Hour))
+	m.View()
+	if m.isExpanded(oldest) {
+		t.Fatal("an entry pushed out of the cap kept its expansion")
+	}
+	for _, e := range m.drawerEntries() {
+		if m.isExpanded(e.id) {
+			t.Fatalf("entry %d read as expanded", e.id)
+		}
 	}
 }
 

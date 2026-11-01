@@ -161,6 +161,14 @@ type tuiModel struct {
 	// expansion.
 	drawerOpen bool
 
+	// expanded holds the ids of the drawer entries whose file list is open.
+	// Keyed by ledger id, so a new entry never inherits an old one's state.
+	expanded map[int]bool
+
+	// ledgerSeq stamps every committed ledger entry with a unique id, the key
+	// expansion uses.
+	ledgerSeq int
+
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
 	version   string
@@ -275,6 +283,7 @@ func newTUI(targets []Target) *tuiModel {
 		solo:       -1,
 		follow:     true,
 		drawerOpen: true,
+		expanded:   map[int]bool{},
 		now:        time.Now(),
 		lastClick:  -1,
 		hover:      -1,
@@ -590,7 +599,8 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = -1
 		t.exitLabel = ""
 		t.backoffUntil = time.Time{}
-		t.commitLedger(ev.at)
+		m.ledgerSeq++
+		t.commitLedger(ev.at, m.ledgerSeq)
 		if t.spec.Open && t.spec.URL != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
 			if err := openURL(t.spec.URL); err != nil {
@@ -708,6 +718,7 @@ const drawerFiles = 3
 // Paths stay as the watcher reported them, so a moved watch root is relative
 // to the root in force when the entry renders.
 type ledgerEntry struct {
+	id    int // unique per committed entry, so expansion survives a rebuild
 	at    time.Time
 	files []changeFile
 }
@@ -742,7 +753,7 @@ func (t *tuiTarget) recordChange(cs rerun.ChangeSet) {
 // commitLedger files the pending batch as the newest ledger entry, stamped with
 // the spawn time. A spawn with nothing recorded commits nothing, which is what
 // a manual start after no change looks like.
-func (t *tuiTarget) commitLedger(at time.Time) {
+func (t *tuiTarget) commitLedger(at time.Time, id int) {
 	if len(t.pending) == 0 {
 		return
 	}
@@ -752,7 +763,7 @@ func (t *tuiTarget) commitLedger(at time.Time) {
 	}
 	sort.Slice(files, func(a, b int) bool { return files[a].path < files[b].path })
 	t.pending = nil
-	t.ledger = append([]ledgerEntry{{at: at, files: files}}, t.ledger...)
+	t.ledger = append([]ledgerEntry{{id: id, at: at, files: files}}, t.ledger...)
 	if len(t.ledger) > ledgerCap {
 		t.ledger = t.ledger[:ledgerCap]
 	}

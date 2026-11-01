@@ -145,9 +145,13 @@ func badge(unseen bool) string {
 func (m *tuiModel) listLen() int { return len(m.targets) + 1 }
 
 // listHeight is how many screen rows the target list has: everything above the
-// drawer, which itself sits above the version line.
+// drawer, which itself sits above a blank divider and the version line.
 func (m *tuiModel) listHeight() int {
-	return max(1, m.height-1-len(m.layout.drawer))
+	reserved := len(m.layout.drawer)
+	if reserved > 0 {
+		reserved++ // the blank line between the drawer and the version line
+	}
+	return max(1, m.height-1-reserved)
 }
 
 // listOffset scrolls the list so the cursor's row stays inside the list area.
@@ -176,6 +180,7 @@ const (
 // this line resolves to, or -1 for a line that belongs to no target.
 type drawerRow struct {
 	kind   drawerKind
+	id     int // the drawer entry's ledger id, 0 for the separator and pending
 	target int
 	at     time.Time
 	count  int    // an entry header's file count, or a `+k more` remainder
@@ -186,6 +191,7 @@ type drawerRow struct {
 // drawerEntry is one block of the drawer: a spawn of a target, or the changes a
 // stopped target recorded but no spawn will use.
 type drawerEntry struct {
+	id      int
 	target  int
 	at      time.Time
 	files   []changeFile
@@ -198,7 +204,7 @@ func (m *tuiModel) drawerEntries() []drawerEntry {
 	entries := make([]drawerEntry, 0, len(m.targets))
 	for i := range m.targets {
 		for _, e := range m.targets[i].ledger {
-			entries = append(entries, drawerEntry{target: i, at: e.at, files: e.files})
+			entries = append(entries, drawerEntry{id: e.id, target: i, at: e.at, files: e.files})
 		}
 	}
 	sort.SliceStable(entries, func(a, b int) bool { return entries[a].at.After(entries[b].at) })
@@ -213,26 +219,35 @@ func (m *tuiModel) drawerEntries() []drawerEntry {
 	return entries
 }
 
-// drawerRows lays out the fs drawer: the separator, then whole entries, newest
-// first, until it would take more than half the left pane. It stays hidden
-// while nothing has ever changed, and an entry that does not fit whole is not
-// drawn at all — the data behind it stays in the target's ledger.
+// drawerMax caps the fs drawer's drawn lines, its `fs ·` separator included.
+// Entries past the cap are simply not drawn; the data stays in the ledger.
+const drawerMax = 8
+
+// drawerRows lays out the fs drawer: the separator, then entries newest first,
+// each collapsed to its header unless the user expanded it. The drawer never
+// exceeds drawerMax lines and stays hidden while nothing has ever changed.
 func (m *tuiModel) drawerRows() []drawerRow {
 	if !m.drawerOpen {
 		return nil
 	}
-	limit := max(0, m.height-1) / 2
+	limit := min(drawerMax, max(0, m.height-1)/2)
 	if limit < 2 {
 		return nil // the separator alone would claim the whole drawer
 	}
+	entries := m.drawerEntries()
+	m.pruneExpansions(entries)
 	rows := make([]drawerRow, 0, limit)
 	rows = append(rows, drawerRow{kind: drawerSep, target: -1})
-	for _, e := range m.drawerEntries() {
-		lines := m.drawerEntryRows(e)
-		if len(rows)+len(lines) > limit {
-			continue
+	for _, e := range entries {
+		if len(rows) >= limit {
+			break
 		}
-		rows = append(rows, lines...)
+		for _, line := range m.drawerEntryRows(e) {
+			if len(rows) >= limit {
+				break
+			}
+			rows = append(rows, line)
+		}
 	}
 	if len(rows) == 1 {
 		return nil
@@ -240,25 +255,67 @@ func (m *tuiModel) drawerRows() []drawerRow {
 	return rows
 }
 
-// drawerEntryRows expands one entry block: its header, its newest files, the
-// `+k more` row for the rest, or the dim pending warning of a stopped target.
+// pruneExpansions drops the expansion flag of every entry no longer drawn, so
+// an entry pushed out of the cap forgets it, and a reused id cannot revive it.
+func (m *tuiModel) pruneExpansions(entries []drawerEntry) {
+	if len(m.expanded) == 0 {
+		return
+	}
+	live := make(map[int]bool, len(entries))
+	for _, e := range entries {
+		if e.id > 0 {
+			live[e.id] = true
+		}
+	}
+	for id := range m.expanded {
+		if !live[id] {
+			delete(m.expanded, id)
+		}
+	}
+}
+
+// isExpanded reports whether the entry with this id shows its files. The
+// separator's id 0 is never expandable.
+func (m *tuiModel) isExpanded(id int) bool {
+	return id > 0 && m.expanded[id]
+}
+
+// toggleExpanded opens or closes one entry's file list, in place.
+func (m *tuiModel) toggleExpanded(id int) {
+	if id <= 0 {
+		return
+	}
+	if m.expanded[id] {
+		delete(m.expanded, id)
+		return
+	}
+	m.expanded[id] = true
+}
+
+// drawerEntryRows lays out one entry block: its header, then its newest files
+// and a `+k more` row only while the entry is expanded. A stopped target's
+// pending batch stays its one dim line.
 func (m *tuiModel) drawerEntryRows(e drawerEntry) []drawerRow {
 	if e.stopped > 0 {
 		return []drawerRow{{kind: drawerPending, target: e.target, count: e.stopped}}
 	}
-	rows := []drawerRow{{kind: drawerSpawn, target: e.target, at: e.at, count: len(e.files)}}
+	rows := []drawerRow{{kind: drawerSpawn, id: e.id, target: e.target, at: e.at, count: len(e.files)}}
+	if !m.isExpanded(e.id) {
+		return rows
+	}
 	t := m.targets[e.target]
 	shown := min(len(e.files), drawerFiles)
 	for _, f := range e.files[:shown] {
 		rows = append(rows, drawerRow{
 			kind:   drawerFile,
+			id:     e.id,
 			target: e.target,
 			op:     opText(f.op),
 			file:   relToWatch(t.spec.On, f.path),
 		})
 	}
 	if extra := len(e.files) - shown; extra > 0 {
-		rows = append(rows, drawerRow{kind: drawerMore, target: e.target, count: extra})
+		rows = append(rows, drawerRow{kind: drawerMore, id: e.id, target: e.target, count: extra})
 	}
 	return rows
 }
@@ -267,10 +324,10 @@ func (m *tuiModel) drawerEntryRows(e drawerEntry) []drawerRow {
 // lines it is. The drawer sits between the list and the version line.
 func (m *tuiModel) inDrawer(y int) (drawerRow, bool) {
 	n := len(m.layout.drawer)
-	if n == 0 || y < m.height-1-n || y >= m.height-1 {
+	if n == 0 || y < m.height-2-n || y >= m.height-2 {
 		return drawerRow{}, false
 	}
-	return m.layout.drawer[y-(m.height-1-n)], true
+	return m.layout.drawer[y-(m.height-2-n)], true
 }
 
 // versionCell draws the left column's bottom line: the version text and the
@@ -374,6 +431,10 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	if y == m.height-1 {
 		return m.versionCell(leftW)
 	}
+	// The blank divider keeps the drawer's last line off the version line.
+	if len(m.layout.drawer) > 0 && y == m.height-2 {
+		return strings.Repeat(" ", leftW)
+	}
 	if row, ok := m.inDrawer(y); ok {
 		return m.drawerLine(row, leftW)
 	}
@@ -402,7 +463,7 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 	case drawerSpawn:
 		t := m.targets[row.target]
 		segs := []seg{
-			{text: "↺ " + row.at.Format("15:04:05") + " · ", color: colorGray},
+			{text: "↺ " + relAge(m.now.Sub(row.at)) + " · ", color: colorGray},
 			// The name keeps its state color, so a red row reads red here too.
 			{text: t.spec.Name, color: stateColor(t)},
 			{text: " · " + fileCount(row.count), color: colorGray},
@@ -713,6 +774,23 @@ func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
 }
 
+// relAge renders a drawer entry's age as one word: 12s, 3m, 1h, 4d. The
+// uptime ladder without the finer units; a future stamp reads as 0s.
+func relAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours())/24)
+}
+
 // fileCount renders `1 file` or `3 files`.
 func fileCount(n int) string {
 	if n == 1 {
@@ -792,7 +870,7 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "toggle the fs drawer under the target list"},
+	{"t", "toggle the fs drawer (entries collapse; click one for its files)"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -815,8 +893,8 @@ func (m *tuiModel) helpView() string {
 	}
 	b.WriteString("\n")
 	for _, line := range []string{
-		"mouse: click a row to solo it (again or on ALL to clear), a drawer",
-		"entry solos the target it belongs to, double-click to stop/start like",
+		"mouse: click a row to solo it (again or on ALL to clear), click a",
+		"drawer entry to expand its files, double-click to stop/start like",
 		"space, click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and freezes the tail",
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",

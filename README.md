@@ -36,7 +36,7 @@ the pane.
 table for targets that define `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
-button cell to mute, an entry in the fs drawer to solo its target,
+button cell to mute, an entry in the fs drawer to expand its files,
 shift-click to solo, and a click on the ALL row to clear
 solo. Click a pane line to copy it; drag copies a range and freezes the tail
 (`f`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
@@ -46,11 +46,12 @@ line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
 last change batch held, and its command, with its url linked. The fs drawer
 at the bottom of the left column merges every target's reboot ledger, newest
-first: each header names the target, the spawn time, and the whole batch's
-file count — plus up to three changed files, one `+`/`~`/`−` glyph (created,
-written, removed) and relative path each, and a `+N more` row for the rest. `t`
-toggles the drawer, which grows with the log and never takes more than half
-the column. A target the user stopped or booted off
+first: each collapsed header names the target, its age, and the whole batch's
+file count; clicking an entry expands up to three changed files, one
+`+`/`~`/`−` glyph (created, written, removed) and relative path each, and a
+`+N more` row for the rest.
+`t` toggles the drawer, which grows on demand and never takes more than eight
+lines. A target the user stopped or booted off
 records its changes without using them, as a dim `not rebooted (stopped)` line.
 
 #### Examples:

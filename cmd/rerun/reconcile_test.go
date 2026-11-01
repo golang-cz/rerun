@@ -238,7 +238,7 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	if got := m.rowAt(2, 4); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
-	if got := m.rowAt(2, m.height-1-len(m.layout.drawer)); got != -1 {
+	if got := m.rowAt(2, m.height-2-len(m.layout.drawer)); got != -1 {
 		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 
@@ -291,7 +291,7 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	if got := many.rowAt(2, line); got != many.cursor {
 		t.Fatalf("the cursor row is off screen: line %d maps to %d, want %d", line, got, many.cursor)
 	}
-	if got := many.rowAt(2, many.height-1-len(many.layout.drawer)); got != -1 {
+	if got := many.rowAt(2, many.height-2-len(many.layout.drawer)); got != -1 {
 		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 }

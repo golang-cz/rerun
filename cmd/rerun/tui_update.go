@@ -426,13 +426,19 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	_, inDrawer := m.inDrawer(msg.Y)
+	drow, inDrawer := m.inDrawer(msg.Y)
 	switch {
+	case inDrawer:
+		// A drawer entry's header toggles its file list; its file, `+k more`,
+		// and pending lines do nothing. Solo stays on the target's own row.
+		if drow.kind == drawerSpawn {
+			m.toggleExpanded(drow.id)
+		}
 	case msg.Shift:
 		if row > 0 {
 			m.toggleSolo(row - 1)
 		}
-	case !inDrawer && row > 0 && msg.X == m.layout.leftW-1:
+	case row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
 	default:
 		m.cursor = row
