@@ -44,7 +44,7 @@ Deprecated: -watch, -ignore and -run (use --on, --except and --).
 
 // configHint follows a rerun.yml load failure. The usage wall would bury the
 // parse error, so the fix stays one line and points at -h for the key list.
-const configHint = "fix rerun.yml and re-run — rerun -h lists keys"
+const configHint = "fix rerun.yml and re-run; rerun -h lists keys"
 
 // nestGuard refuses to run when RERUN is set, so a target that runs rerun
 // cannot fork-bomb the machine. It returns the process exit code.
