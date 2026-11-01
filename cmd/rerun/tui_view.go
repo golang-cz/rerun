@@ -585,6 +585,7 @@ func (m *tuiModel) helpView() string {
 		"the selected row's change tree lists its last changed files;",
 		"t or a click on its +/− cell expands and collapses it.",
 		"saving rerun.yml reloads it: the banner names what changed.",
+		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen",
 	} {
 		b.WriteString(m.styles.hint.Render(line) + "\n")
 	}

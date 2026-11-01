@@ -278,9 +278,7 @@ func (m *tuiModel) toggleMute(i int) {
 		return // muting the solo row is a no-op
 	}
 	t.muted = !t.muted
-	if !t.muted {
-		t.unseen = false
-	}
+	m.refreshUnseen()
 	m.mergedDirty = true
 	m.vpDirty = true
 }
@@ -292,7 +290,7 @@ func (m *tuiModel) toggleSolo(i int) {
 	}
 	m.solo = i
 	m.targets[i].muted = false
-	m.targets[i].unseen = false
+	m.refreshUnseen()
 	m.group.setSoloGuard(true)
 	m.mergedDirty = true
 	m.vpDirty = true
@@ -303,11 +301,21 @@ func (m *tuiModel) clearSolo() {
 	if m.solo < 0 {
 		return
 	}
-	m.targets[m.solo].unseen = false // the row's own output is back in the pane
 	m.solo = -1
+	m.refreshUnseen() // the hidden rows' lines are back in the pane
 	m.group.setSoloGuard(false)
 	m.mergedDirty = true
 	m.vpDirty = true
+}
+
+// refreshUnseen drops the badge from every row whose stream is in the pane
+// again. Muted and solo-hidden rows keep theirs: their lines are still out.
+func (m *tuiModel) refreshUnseen() {
+	for i, t := range m.targets {
+		if m.streamsTo(i) {
+			t.unseen = false
+		}
+	}
 }
 
 // treeExpanded reports whether a row's change tree is shown. The cursor's row
@@ -418,6 +426,8 @@ func (m *tuiModel) addLine(i int, line string) {
 			m.pending++ // only lines the pane actually holds
 		}
 	} else {
+		// Output the pane is not showing: muted, or hidden by another solo.
+		t.unseen = true
 		m.mergedDirty = true
 	}
 	m.vpDirty = true
@@ -492,10 +502,6 @@ func (m *tuiModel) applyEvent(ev event) {
 	switch ev.kind {
 	case evOutput:
 		m.addLine(i, ev.line)
-		// Output nobody can see gets the badge.
-		if t.muted {
-			t.unseen = true
-		}
 
 	case evChanged:
 		// Retain the whole batch: the row's change tree renders it and the

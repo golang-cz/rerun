@@ -249,6 +249,65 @@ func TestUnseenExitBadgeClearsOnUnmute(t *testing.T) {
 	}
 }
 
+// While one row is soloed, every other row's output is out of the pane and
+// earns the badge; esc brings the lines back and drops it.
+func TestUnseenBadgeOnSoloHiddenOutput(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
+	m.toggleSolo(0)
+
+	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden by solo"})
+	if !m.targets[1].unseen {
+		t.Fatal("output hidden by another row's solo did not raise the badge")
+	}
+	if !strings.Contains(m.View(), "✱") {
+		t.Error("the ✱ badge is not on screen")
+	}
+
+	// The soloed row's own output is in the pane: no badge.
+	m.applyEvent(event{kind: evOutput, target: "web", line: "visible"})
+	if m.targets[0].unseen {
+		t.Error("the soloed row's visible output raised the badge")
+	}
+
+	press(m, "esc")
+	if m.solo != -1 {
+		t.Fatal("esc did not clear the solo")
+	}
+	if m.targets[1].unseen {
+		t.Error("clearing the solo did not clear the hidden row's badge")
+	}
+}
+
+// Switching the solo from A to B returns A's lines to the pane, so its badge
+// goes; B stays badged until its own lines show.
+func TestUnseenBadgeClearsOnSoloSwitch(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.toggleSolo(0)
+	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden"})
+	if !m.targets[1].unseen {
+		t.Fatal("solo-hidden output did not raise the badge")
+	}
+
+	m.toggleSolo(1)
+	if m.targets[0].unseen {
+		t.Error("web's badge survived the solo switching away from API")
+	}
+	if m.targets[1].unseen {
+		t.Error("the newly soloed row kept a badge")
+	}
+}
+
+func TestHelpLegendLine(t *testing.T) {
+	m := newTestModel(t)
+	m.help = true
+	view := m.View()
+	for _, want := range []string{"● run", "○ stopped", "✓ ok", "✗ exit", "· off", "✱ unseen"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help is missing the legend %q", want)
+		}
+	}
+}
+
 func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	for _, ev := range []event{
