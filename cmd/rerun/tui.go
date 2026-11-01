@@ -161,12 +161,14 @@ type tuiModel struct {
 	// expansion.
 	drawerOpen bool
 
-	// expanded holds the ids of the drawer entries whose file list is open.
-	// Keyed by ledger id, so a new entry never inherits an old one's state.
-	expanded map[int]bool
+	// treeFiles is the drawer's only source: every changed path across all
+	// targets, newest op winning, with the change time the tree sorts and ages
+	// by. treeExpanded holds the folded-out folders, keyed by folder path.
+	treeFiles    map[string]treeFile
+	treeExpanded map[string]bool
 
-	// ledgerSeq stamps every committed ledger entry with a unique id, the key
-	// expansion uses.
+	// ledgerSeq stamps every committed ledger entry with a unique id. The
+	// ledger outlives the entry rendering; the drawer reads the tree instead.
 	ledgerSeq int
 
 	// version and buildTime are the ldflags stamp, rendered on the left
@@ -275,20 +277,21 @@ func newTUI(targets []Target) *tuiModel {
 	group := newTargetGroup(targets, tuiSink(events), "")
 
 	m := &tuiModel{
-		group:      group,
-		events:     events,
-		stop:       make(chan struct{}),
-		version:    version,
-		buildTime:  buildTime,
-		solo:       -1,
-		follow:     true,
-		drawerOpen: true,
-		expanded:   map[int]bool{},
-		now:        time.Now(),
-		lastClick:  -1,
-		hover:      -1,
-		searchRow:  -1,
-		styles:     newTUIStyles(),
+		group:        group,
+		events:       events,
+		stop:         make(chan struct{}),
+		version:      version,
+		buildTime:    buildTime,
+		solo:         -1,
+		follow:       true,
+		drawerOpen:   true,
+		treeFiles:    map[string]treeFile{},
+		treeExpanded: map[string]bool{},
+		now:          time.Now(),
+		lastClick:    -1,
+		hover:        -1,
+		searchRow:    -1,
+		styles:       newTUIStyles(),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
@@ -581,6 +584,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		// pane header counts it. The batch writes no pane line of its own.
 		t.lastChange = ev.change
 		t.recordChange(ev.change)
+		m.recordTree(ev.change)
 
 	case evStarting:
 		// Queued behind the start stagger: the glyph stays running but the
@@ -702,17 +706,44 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.recomputeSearch(false)
 }
 
-// ledgerCap bounds a target's reboot ledger: the three newest spawns. The fs
-// drawer merges what every target keeps here.
+// ledgerCap bounds a target's reboot ledger: the three newest spawns. The
+// drawer no longer reads it, but the row keeps it for the pointer and status.
 const ledgerCap = 3
 
-// drawerCap bounds the drawer's merged ledger: the twenty newest spawns across
-// all targets. Older entries are simply not in the drawer.
-const drawerCap = 20
+// treeCap bounds the drawer's change tree: 200 changed paths. Past the cap the
+// oldest entries are dropped, so the drawer keeps the newest activity.
+const treeCap = 200
 
-// drawerFiles caps one drawer entry's file lines. The `+k more` row carries the
-// rest of the batch, and the header counts the whole batch.
-const drawerFiles = 3
+// treeFile is one path in the drawer's change tree: when it last changed and
+// its fsnotify op, `+` created, `~` written or renamed, `-` removed.
+type treeFile struct {
+	at time.Time
+	op byte
+}
+
+// recordTree merges a change batch into the drawer's global tree: every target
+// feeds the same map, so the drawer is one view of the whole repo. A repeated
+// path keeps its newest time and op; the oldest paths fall out past the cap.
+func (m *tuiModel) recordTree(cs rerun.ChangeSet) {
+	if len(cs.Files) == 0 {
+		return
+	}
+	if m.treeFiles == nil {
+		m.treeFiles = make(map[string]treeFile, len(cs.Files))
+	}
+	for path := range cs.Files {
+		m.treeFiles[cleanTreePath(path)] = treeFile{at: m.now, op: opGlyph(cs.Ops[path])}
+	}
+	for len(m.treeFiles) > treeCap {
+		oldest, oldestAt := "", time.Time{}
+		for path, f := range m.treeFiles {
+			if oldest == "" || f.at.Before(oldestAt) {
+				oldest, oldestAt = path, f.at
+			}
+		}
+		delete(m.treeFiles, oldest)
+	}
+}
 
 // ledgerEntry is one spawn of a target and the file changes that triggered it.
 // Paths stay as the watcher reported them, so a moved watch root is relative

@@ -421,19 +421,23 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.clearSelection()
 
+	// The drawer is a change tree, not a target list: a folder line folds its
+	// children in or out, a file line does nothing. It never solos a target.
+	if msg.X < m.layout.leftW {
+		if drow, inDrawer := m.inDrawer(msg.Y); inDrawer {
+			if drow.kind == drawerFolder {
+				m.toggleTreeFolder(drow.path)
+			}
+			return m, nil
+		}
+	}
+
 	row := m.rowAt(msg.X, msg.Y)
 	if row < 0 {
 		return m, nil
 	}
 
-	drow, inDrawer := m.inDrawer(msg.Y)
 	switch {
-	case inDrawer:
-		// A drawer entry's header toggles its file list; its file, `+k more`,
-		// and pending lines do nothing. Solo stays on the target's own row.
-		if drow.kind == drawerSpawn {
-			m.toggleExpanded(drow.id)
-		}
 	case msg.Shift:
 		if row > 0 {
 			m.toggleSolo(row - 1)
@@ -564,20 +568,15 @@ func (m *tuiModel) copySelection() {
 	m.copyUntil = m.now.Add(hintDuration)
 }
 
-// rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none. A
-// drawer entry resolves to the target it belongs to, so clicking one solos its
-// target the way clicking its row does; the drawer separator and the blank
-// rows past the list belong to no row.
+// rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none.
+// The drawer is not target-scoped: no drawer line resolves to a row.
 func (m *tuiModel) rowAt(x, y int) int {
 	// The last screen row is the version line, never a list row.
 	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
-	if row, ok := m.inDrawer(y); ok {
-		if row.target < 0 {
-			return -1
-		}
-		return row.target + 1
+	if _, ok := m.inDrawer(y); ok {
+		return -1
 	}
 	idx := m.layout.offset + y
 	if idx < 0 || idx >= m.listLen() {

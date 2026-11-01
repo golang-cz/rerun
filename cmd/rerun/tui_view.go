@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -165,161 +165,6 @@ func (m *tuiModel) listOffset() int {
 	return min(offset, max(0, m.listLen()-visible))
 }
 
-// drawerKind is which line of the fs drawer a row draws.
-type drawerKind int
-
-const (
-	drawerSep     drawerKind = iota // `fs ·────────`
-	drawerSpawn                     // `↺ 14:32:07 · api · 3 files`
-	drawerFile                      // `+ pkg/api/types.gen.go`
-	drawerMore                      // `+4 more`
-	drawerPending                   // `· web · 2 files recorded, not rebooted (stopped)`
-)
-
-// drawerRow is one drawn line of the fs drawer. target is the row a click on
-// this line resolves to, or -1 for a line that belongs to no target.
-type drawerRow struct {
-	kind   drawerKind
-	id     int // the drawer entry's ledger id, 0 for the separator and pending
-	target int
-	at     time.Time
-	count  int    // an entry header's file count, or a `+k more` remainder
-	op     string // a file line's fsnotify glyph
-	file   string // a file line's path, relative to the target's watch root
-}
-
-// drawerEntry is one block of the drawer: a spawn of a target, or the changes a
-// stopped target recorded but no spawn will use.
-type drawerEntry struct {
-	id      int
-	target  int
-	at      time.Time
-	files   []changeFile
-	stopped int // > 0 names a stopped target's recorded file count
-}
-
-// drawerEntries is the drawer's content, in draw order: every target's spawns,
-// newest first, then what a stopped target recorded and never rebooted.
-func (m *tuiModel) drawerEntries() []drawerEntry {
-	entries := make([]drawerEntry, 0, len(m.targets))
-	for i := range m.targets {
-		for _, e := range m.targets[i].ledger {
-			entries = append(entries, drawerEntry{id: e.id, target: i, at: e.at, files: e.files})
-		}
-	}
-	sort.SliceStable(entries, func(a, b int) bool { return entries[a].at.After(entries[b].at) })
-	if len(entries) > drawerCap {
-		entries = entries[:drawerCap]
-	}
-	for i := range m.targets {
-		if t := m.targets[i]; t.pendingStopped() {
-			entries = append(entries, drawerEntry{target: i, stopped: len(t.pending)})
-		}
-	}
-	return entries
-}
-
-// drawerMax caps the fs drawer's drawn lines, its `fs ·` separator included.
-// Entries past the cap are simply not drawn; the data stays in the ledger.
-const drawerMax = 8
-
-// drawerRows lays out the fs drawer: the separator, then entries newest first,
-// each collapsed to its header unless the user expanded it. The drawer never
-// exceeds drawerMax lines and stays hidden while nothing has ever changed.
-func (m *tuiModel) drawerRows() []drawerRow {
-	if !m.drawerOpen {
-		return nil
-	}
-	limit := min(drawerMax, max(0, m.height-1)/2)
-	if limit < 2 {
-		return nil // the separator alone would claim the whole drawer
-	}
-	entries := m.drawerEntries()
-	m.pruneExpansions(entries)
-	rows := make([]drawerRow, 0, limit)
-	rows = append(rows, drawerRow{kind: drawerSep, target: -1})
-	for _, e := range entries {
-		if len(rows) >= limit {
-			break
-		}
-		for _, line := range m.drawerEntryRows(e) {
-			if len(rows) >= limit {
-				break
-			}
-			rows = append(rows, line)
-		}
-	}
-	if len(rows) == 1 {
-		return nil
-	}
-	return rows
-}
-
-// pruneExpansions drops the expansion flag of every entry no longer drawn, so
-// an entry pushed out of the cap forgets it, and a reused id cannot revive it.
-func (m *tuiModel) pruneExpansions(entries []drawerEntry) {
-	if len(m.expanded) == 0 {
-		return
-	}
-	live := make(map[int]bool, len(entries))
-	for _, e := range entries {
-		if e.id > 0 {
-			live[e.id] = true
-		}
-	}
-	for id := range m.expanded {
-		if !live[id] {
-			delete(m.expanded, id)
-		}
-	}
-}
-
-// isExpanded reports whether the entry with this id shows its files. The
-// separator's id 0 is never expandable.
-func (m *tuiModel) isExpanded(id int) bool {
-	return id > 0 && m.expanded[id]
-}
-
-// toggleExpanded opens or closes one entry's file list, in place.
-func (m *tuiModel) toggleExpanded(id int) {
-	if id <= 0 {
-		return
-	}
-	if m.expanded[id] {
-		delete(m.expanded, id)
-		return
-	}
-	m.expanded[id] = true
-}
-
-// drawerEntryRows lays out one entry block: its header, then its newest files
-// and a `+k more` row only while the entry is expanded. A stopped target's
-// pending batch stays its one dim line.
-func (m *tuiModel) drawerEntryRows(e drawerEntry) []drawerRow {
-	if e.stopped > 0 {
-		return []drawerRow{{kind: drawerPending, target: e.target, count: e.stopped}}
-	}
-	rows := []drawerRow{{kind: drawerSpawn, id: e.id, target: e.target, at: e.at, count: len(e.files)}}
-	if !m.isExpanded(e.id) {
-		return rows
-	}
-	t := m.targets[e.target]
-	shown := min(len(e.files), drawerFiles)
-	for _, f := range e.files[:shown] {
-		rows = append(rows, drawerRow{
-			kind:   drawerFile,
-			id:     e.id,
-			target: e.target,
-			op:     opText(f.op),
-			file:   relToWatch(t.spec.On, f.path),
-		})
-	}
-	if extra := len(e.files) - shown; extra > 0 {
-		rows = append(rows, drawerRow{kind: drawerMore, id: e.id, target: e.target, count: extra})
-	}
-	return rows
-}
-
 // inDrawer reports whether a screen row is inside the drawer, and which of its
 // lines it is. The drawer sits between the list and the version line.
 func (m *tuiModel) inDrawer(y int) (drawerRow, bool) {
@@ -448,9 +293,9 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	return m.targetLine(idx-1, leftW)
 }
 
-// drawerLine draws one line of the fs drawer: the `fs ·────` separator, an
-// entry header, one of its files, its `+k more` row, or the dim warning of a
-// stopped target that recorded changes no spawn will use.
+// drawerLine draws one line of the fs drawer: its `fs ·────` separator, a
+// folder with its recursive changed-file count, or a file with its op and age.
+// The count and age share a fixed four-cell column at the right edge.
 func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 	switch row.kind {
 	case drawerSep:
@@ -460,42 +305,49 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 		}
 		return m.styles.divider.Render(label)
 
-	case drawerSpawn:
-		t := m.targets[row.target]
+	case drawerFolder:
 		segs := []seg{
-			{text: "↺ " + relAge(m.now.Sub(row.at)) + " · ", color: colorGray},
-			// The name keeps its state color, so a red row reads red here too.
-			{text: t.spec.Name, color: stateColor(t)},
-			{text: " · " + fileCount(row.count), color: colorGray},
+			{text: treeIndent(row.depth)},
+			{text: row.glyph, color: colorGray},
+			{text: " " + row.label},
 		}
-		return renderSegs(segs, m.styles.base, leftW)
+		return m.treeCell(segs, strconv.Itoa(row.count), leftW)
 
 	case drawerFile:
 		segs := []seg{
-			{text: "  "},
+			{text: treeIndent(row.depth)},
 			{text: row.op, color: opColor(row.op)},
-			{text: " " + row.file},
+			{text: " " + row.label},
 		}
-		return renderSegs(segs, m.styles.base, leftW)
-
-	case drawerMore:
-		segs := []seg{{text: fmt.Sprintf("  +%d more", row.count), color: colorGray}}
-		return renderSegs(segs, m.styles.base, leftW)
-
-	case drawerPending:
-		t := m.targets[row.target]
-		word := "stopped"
-		if t.state == stateOff {
-			word = "off"
-		}
-		segs := []seg{
-			{text: "· "},
-			{text: t.spec.Name, color: stateColor(t)},
-			{text: " · " + fileCount(row.count) + " recorded, not rebooted (" + word + ")"},
-		}
-		return renderSegs(segs, m.styles.base.Faint(true), leftW)
+		return m.treeCell(segs, relAge(m.now.Sub(row.at)), leftW)
 	}
 	return strings.Repeat(" ", leftW)
+}
+
+// treeIndent is a folder or file line's left margin: two cells for a root, two
+// more per level.
+func treeIndent(depth int) string {
+	return strings.Repeat(" ", 2+2*depth)
+}
+
+// treeSuffixW is the drawer's fixed right column: the recursive count on a
+// folder line, the relative age on a file line.
+const treeSuffixW = 4
+
+// treeCell right-aligns a suffix in the drawer's count column, padding the
+// label out to it. A column narrower than the label truncates the label.
+func (m *tuiModel) treeCell(segs []seg, suffix string, leftW int) string {
+	labelW := 0
+	for _, s := range segs {
+		labelW += displayWidth(s.text)
+	}
+	suffix = truncate(suffix, treeSuffixW)
+	fill := max(0, leftW-treeSuffixW-labelW)
+	pad := max(0, treeSuffixW-displayWidth(suffix))
+	segs = append(segs, seg{text: strings.Repeat(" ", fill)})
+	segs = append(segs, seg{text: strings.Repeat(" ", pad)})
+	segs = append(segs, seg{text: suffix, color: colorGray})
+	return renderSegs(segs, m.styles.base, leftW)
 }
 
 // allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
@@ -870,7 +722,7 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "toggle the fs drawer (entries collapse; click one for its files)"},
+	{"t", "toggle the fs drawer (a change tree; click a folder to expand)"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -894,15 +746,15 @@ func (m *tuiModel) helpView() string {
 	b.WriteString("\n")
 	for _, line := range []string{
 		"mouse: click a row to solo it (again or on ALL to clear), click a",
-		"drawer entry to expand its files, double-click to stop/start like",
-		"space, click a row's button cell to mute.",
+		"drawer folder to expand it, double-click to stop/start like space,",
+		"click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and freezes the tail",
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"the fs drawer at the bottom of the left column merges every target's",
-		"spawns, newest first, each with the files that triggered it; t toggles",
-		"it, and it never takes more than half the column.",
+		"the fs drawer at the bottom of the left column is a change tree of the",
+		"folders rerun.yml watches, with the changed files and their ages; t",
+		"toggles it, and it never takes more than half the column.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
 		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",

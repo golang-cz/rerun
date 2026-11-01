@@ -8,14 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 	"github.com/golang-cz/rerun"
 )
 
-// ledgerClock is a fixed spawn time, so an entry header renders a known
-// HH:MM:SS in the view.
+// ledgerClock is a fixed spawn time, so a tree line renders a known age.
 var ledgerClock = time.Date(2024, 5, 6, 14, 32, 7, 0, time.Local)
 
 // changeBatch is a change set over the given paths with their ops. The sorted
@@ -36,11 +34,26 @@ func oneFile(path string) rerun.ChangeSet {
 	return changeBatch(map[string]fsnotify.Op{path: fsnotify.Write})
 }
 
+// changeAt feeds one change batch at a fixed clock, so the drawer ages it the
+// way a test expects.
+func changeAt(m *tuiModel, name string, at time.Time, ops map[string]fsnotify.Op) {
+	m.now = at
+	m.applyEvent(event{kind: evChanged, target: name, count: len(ops), change: changeBatch(ops)})
+}
+
 // spawnWithChange drives one change batch and the spawn it triggered, the way
 // a target runner reports them.
 func spawnWithChange(m *tuiModel, name string, cs rerun.ChangeSet, at time.Time) {
 	m.applyEvent(event{kind: evChanged, target: name, count: len(cs.Files), first: cs.FirstFile, change: cs})
 	m.applyEvent(event{kind: evStarted, target: name, at: at})
+}
+
+// treeTarget is a target that watches the given on: globs, so the drawer
+// derives roots from them.
+func treeTarget(name string, on ...string) Target {
+	t := target(name)
+	t.On = on
+	return t
 }
 
 // leftPane renders one frame and returns the left column as drawn, styling
@@ -55,12 +68,12 @@ func leftPane(m *tuiModel) []string {
 	return out
 }
 
-// drawerWidth is a column wide enough for a whole entry line, so a test reads
+// drawerWidth is a column wide enough for a whole tree line, so a test reads
 // the drawer's text instead of its truncation.
 const drawerWidth = 60
 
-// drawerOf is the fs drawer as drawn at drawerWidth: its separator and its
-// entries. The blank divider and the version line sit below it.
+// drawerOf is the fs drawer as drawn at drawerWidth. The blank divider and the
+// version line sit below it.
 func drawerOf(m *tuiModel) []string {
 	m.View()
 	n := len(m.layout.drawer)
@@ -71,12 +84,21 @@ func drawerOf(m *tuiModel) []string {
 	return out
 }
 
-// spawnHeaders is the drawer's entry headers, in draw order.
-func spawnHeaders(m *tuiModel) []string {
-	var out []string
-	for _, line := range drawerOf(m) {
-		if strings.HasPrefix(line, "↺") {
-			out = append(out, line)
+// treeText renders one drawer line as the drawer does at drawerWidth: the
+// label padded out, the suffix right-aligned in the fixed four-cell column.
+func treeText(label, suffix string) string {
+	return padRight(label, drawerWidth-treeSuffixW) + fmt.Sprintf("%4s", suffix)
+}
+
+// drawerTop is the screen row of the drawer's separator.
+func drawerTop(m *tuiModel) int { return m.height - 2 - len(m.layout.drawer) }
+
+// folderRows is the drawer's folder lines, in draw order.
+func folderRows(m *tuiModel) []drawerRow {
+	var out []drawerRow
+	for _, r := range m.drawerRows() {
+		if r.kind == drawerFolder {
+			out = append(out, r)
 		}
 	}
 	return out
@@ -150,41 +172,7 @@ func TestPendingMergesRepeatedPaths(t *testing.T) {
 	}
 }
 
-// The drawer merges every target's spawns into one ledger, newest first, and
-// the entry header keeps the target's state color.
-func TestDrawerMergesEveryTargetNewestFirst(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
-	spawnWithChange(m, "api", oneFile("b.go"), ledgerClock.Add(time.Minute))
-	spawnWithChange(m, "web", oneFile("c.go"), ledgerClock.Add(2*time.Minute))
-
-	m.now = ledgerClock.Add(2*time.Minute + 12*time.Second)
-	lines := drawerOf(m)
-	if !strings.HasPrefix(lines[0], "fs ·") {
-		t.Fatalf("the drawer does not lead with its separator: %q", lines[0])
-	}
-	want := []string{
-		"↺ 12s · web · 1 file",
-		"↺ 1m · api · 1 file",
-		"↺ 2m · web · 1 file",
-	}
-	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("drawer headers = %q, want %q", got, want)
-	}
-
-	// A red row reads red in the drawer too.
-	web := m.targets[0]
-	web.state, web.exitCode = stateExited, 1
-	m.View()
-	leftW, _ := m.layoutWidths()
-	header := m.leftLine(m.height-2-len(m.layout.drawer)+1, leftW)
-	if got := m.styles.base.Foreground(lipgloss.Color(colorRed)).Render("web"); !strings.Contains(header, got) {
-		t.Fatalf("the entry header does not carry the row's state color: %q", header)
-	}
-}
-
-// A target keeps its three newest spawns; older ones fall out of the data and
-// so out of the drawer.
+// A target keeps its three newest spawns; older ones fall out of the data.
 func TestLedgerKeepsTheThreeNewestSpawns(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	for i, name := range []string{"a.go", "b.go", "c.go", "d.go"} {
@@ -202,103 +190,234 @@ func TestLedgerKeepsTheThreeNewestSpawns(t *testing.T) {
 			t.Fatalf("entry %d holds %s, want %s: newest first, oldest evicted", i, got, want[i])
 		}
 	}
+}
 
-	// Only what the target still holds reaches the drawer, one collapsed
-	// header each.
-	m.now = ledgerClock.Add(3*time.Minute + 5*time.Second)
-	lines := drawerOf(m)
-	wantLines := []string{
-		"↺ 5s · web · 1 file",
-		"↺ 1m · web · 1 file",
-		"↺ 2m · web · 1 file",
+// Roots come from the on: globs across every target, in yml order, and a root
+// with nothing changed is not drawn.
+func TestTreeRootsFollowYmlOrderAndOnlyShowChanges(t *testing.T) {
+	m := newTestModel(t,
+		treeTarget("web", "schema/**.ridl", "apps/api/etc/**"),
+		treeTarget("api", "pkg/api", "schema/**.ridl"),
+	)
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"schema/a.ridl":        fsnotify.Write,
+		"schema/b.ridl":        fsnotify.Create,
+		"pkg/api/types.gen.go": fsnotify.Write,
+	})
+
+	rows := folderRows(m)
+	if len(rows) != 2 {
+		t.Fatalf("root lines = %d, want 2: %+v", len(rows), rows)
 	}
-	if got := lines[1:]; !reflect.DeepEqual(got, wantLines) {
-		t.Fatalf("drawer entries = %q, want %q", got, wantLines)
+	// apps/api/etc/** watches an empty subtree: it is dropped.
+	if rows[0].label != "schema/" || rows[0].count != 2 || rows[0].glyph != "~" {
+		t.Fatalf("first root = %+v, want schema/ with 2 files and a leaf glyph", rows[0])
+	}
+	if rows[1].label != "pkg/api/" || rows[1].count != 1 {
+		t.Fatalf("second root = %+v, want pkg/api/ in yml order after schema/", rows[1])
 	}
 }
 
-// A new entry renders one header line with a relative age; its files appear
-// only once the entry is expanded, and clicking again collapses it.
-func TestDrawerEntryCollapsesToHeaderAndExpandsOnClick(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
-	m.now = ledgerClock.Add(12 * time.Second)
+// A folder's count is every changed file beneath it, not just its own.
+func TestTreeRootCountsAreRecursive(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"apps/api/a.go": fsnotify.Write,
+		"apps/api/b.go": fsnotify.Write,
+		"apps/web/c.go": fsnotify.Write,
+	})
 
-	want := []string{
-		"fs ·" + strings.Repeat("─", drawerWidth-4),
-		"↺ 12s · web · 1 file",
+	rows := folderRows(m)
+	if len(rows) != 1 || rows[0].label != "apps/" || rows[0].count != 3 {
+		t.Fatalf("root = %+v, want apps/ counting all three files", rows)
 	}
-	if got := drawerOf(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("collapsed drawer = %q, want %q", got, want)
-	}
-	if got := strings.Join(drawerOf(m), "\n"); strings.Contains(got, "a.go") {
-		t.Fatalf("the collapsed entry showed a file:\n%s", got)
-	}
-
-	id := m.targets[0].ledger[0].id
-	m.toggleExpanded(id)
-	lines := drawerOf(m)
-	if len(lines) != 3 || lines[2] != "  ~ a.go" {
-		t.Fatalf("expanded entry = %q, want its one file", lines)
+	if rows[0].glyph != "+" {
+		t.Fatalf("a root with changed sub-dirs shows +, got %q", rows[0].glyph)
 	}
 
-	m.toggleExpanded(id)
-	if got := len(drawerOf(m)); got != 2 {
-		t.Fatalf("re-collapsed entry lines = %d, want the header only", got)
+	m.toggleTreeFolder("apps/")
+	api := folderRows(m)
+	if len(api) != 3 {
+		t.Fatalf("expanded root rows = %+v, want sub-dirs first", api)
+	}
+	if api[1].label != "api/" || api[1].count != 2 || api[2].label != "web/" || api[2].count != 1 {
+		t.Fatalf("child folders = %+v, want api/ then web/ with recursive counts", api)
 	}
 }
 
-// Two entries stay independent: expanding one leaves the other a one-liner.
-func TestExpandingOneEntryLeavesTheOtherCollapsed(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
-	spawnWithChange(m, "web", oneFile("b.go"), ledgerClock.Add(time.Minute))
-	m.now = ledgerClock.Add(2 * time.Minute)
+// Clicking a folder line folds its children out beneath it: sub-dirs first
+// alphabetically, then files. Clicking again folds. A file line is a no-op.
+func TestTreeFolderClicksFoldChildren(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"apps/api/x.go": fsnotify.Write,
+		"apps/web/z.go": fsnotify.Write,
+		"apps/root.go":  fsnotify.Write,
+	})
+	m.View()
 
-	m.toggleExpanded(m.targets[0].ledger[0].id) // the newest, b.go
+	top := drawerTop(m)
+	m.handleMouse(mouse(2, top+1, false))
+	m.View()
+	got := drawerOf(m)
 	want := []string{
-		"fs ·" + strings.Repeat("─", drawerWidth-4),
-		"↺ 1m · web · 1 file",
-		"  ~ b.go",
-		"↺ 2m · web · 1 file",
+		treeText("  − apps/", "3"),
+		treeText("    ~ api/", "1"),
+		treeText("    ~ web/", "1"),
+		treeText("    ~ root.go", "0s"),
 	}
-	if got := drawerOf(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("drawer = %q, want %q", got, want)
+	if !reflect.DeepEqual(got[1:], want) {
+		t.Fatalf("expanded tree = %q, want %q", got[1:], want)
+	}
+
+	// A file line does nothing: the tree stays open.
+	m.handleMouse(mouse(4, top+4, false))
+	m.View()
+	if got := len(m.layout.drawer); got != 5 {
+		t.Fatalf("a file click changed the tree: %d rows", got)
+	}
+
+	// A second click on the root folds it back to one root line.
+	top = drawerTop(m)
+	m.handleMouse(mouse(2, top+1, false))
+	m.View()
+	if got := len(m.layout.drawer); got != 2 {
+		t.Fatalf("re-folded drawer rows = %d, want the separator and the root", got)
 	}
 }
 
-// An expanded entry lists three files and counts the rest in a `+k more` row.
-func TestDrawerShowsThreeFilesAndAMoreRow(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
-	m.now = ledgerClock.Add(2 * time.Minute)
-	m.toggleExpanded(m.targets[0].ledger[0].id)
-
-	want := []string{
-		"fs ·" + strings.Repeat("─", drawerWidth-4),
-		"↺ 2m · web · 7 files",
-		"  + a.go",
-		"  ~ b.go",
-		"  ~ c.go",
-		"  +4 more",
-	}
-	if got := drawerOf(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("drawer = %q, want %q", got, want)
+// Expansion is keyed by folder path, so a new change arriving under an open
+// folder leaves it open.
+func TestTreeExpansionSurvivesNewArrivals(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
+	m.toggleTreeFolder("apps/")
+	m.View()
+	if !strings.Contains(strings.Join(drawerOf(m), "\n"), "a.go") {
+		t.Fatal("setup: the folder did not expand")
 	}
 
-	// A spawned removal becomes the newest entry: singular, with `−`.
-	spawnWithChange(m, "web", changeBatch(map[string]fsnotify.Op{"b.go": fsnotify.Remove}), ledgerClock.Add(time.Minute))
-	m.toggleExpanded(m.targets[0].ledger[0].id)
-	lines := drawerOf(m)
-	if len(lines) < 3 || lines[1] != "↺ 1m · web · 1 file" || lines[2] != "  − b.go" {
-		t.Fatalf("newest entry lines = %q, want `1 file` singular and the removal glyph", lines)
+	changeAt(m, "web", ledgerClock.Add(time.Minute), map[string]fsnotify.Op{"apps/b.go": fsnotify.Write})
+	lines := strings.Join(drawerOf(m), "\n")
+	if !strings.Contains(lines, "a.go") || !strings.Contains(lines, "b.go") {
+		t.Fatalf("the open folder forgot its state on a new arrival:\n%s", lines)
+	}
+}
+
+// An expanded folder pushed out of the 200-path cap forgets its expansion, and
+// no folder that survives inherits it.
+func TestTreeExpansionForgetsPrunedPaths(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/old/x.go": fsnotify.Write})
+	m.toggleTreeFolder("apps/old/")
+	if !m.isTreeExpanded("apps/old/") {
+		t.Fatal("setup: the old folder did not expand")
+	}
+
+	for i := 0; i < treeCap; i++ {
+		at := ledgerClock.Add(time.Duration(i+1) * time.Second)
+		changeAt(m, "web", at, map[string]fsnotify.Op{fmt.Sprintf("apps/new/f%d.go", i): fsnotify.Write})
+	}
+	m.View()
+	if len(m.treeFiles) != treeCap {
+		t.Fatalf("tree paths = %d, want the %d cap", len(m.treeFiles), treeCap)
+	}
+	if m.isTreeExpanded("apps/old/") {
+		t.Fatal("a folder pushed out of the cap kept its expansion")
+	}
+	for _, r := range folderRows(m) {
+		if m.isTreeExpanded(r.path) {
+			t.Fatalf("folder %q read as expanded", r.path)
+		}
+	}
+}
+
+// The folder glyph tells the three states apart: a leaf folder, a collapsed
+// folder with changed sub-dirs, and an expanded one.
+func TestTreeFolderGlyphsPerState(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"apps/root.go":  fsnotify.Write,
+		"apps/sub/x.go": fsnotify.Write,
+	})
+
+	rows := folderRows(m)
+	if rows[0].label != "apps/" || rows[0].glyph != "+" {
+		t.Fatalf("collapsed folder with sub-dirs = %+v, want +", rows[0])
+	}
+	m.toggleTreeFolder("apps/")
+	rows = folderRows(m)
+	if rows[0].glyph != "−" {
+		t.Fatalf("expanded folder glyph = %q, want −", rows[0].glyph)
+	}
+	if rows[1].label != "sub/" || rows[1].glyph != "~" {
+		t.Fatalf("leaf folder = %+v, want sub/ with ~", rows[1])
+	}
+}
+
+// A file line carries its op glyph and its age from the fixed clock.
+func TestTreeFileLineCarriesOpAndAge(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"apps/new.go":  fsnotify.Create,
+		"apps/gone.go": fsnotify.Remove,
+	})
+	m.now = ledgerClock.Add(4 * time.Minute)
+	m.toggleTreeFolder("apps/")
+
+	if got := drawerOf(m); !reflect.DeepEqual(got[1:], []string{
+		treeText("  − apps/", "2"),
+		treeText("    − gone.go", "4m"),
+		treeText("    + new.go", "4m"),
+	}) {
+		t.Fatalf("file lines = %q, want sorted names with the 4m age", got[1:])
+	}
+}
+
+// The drawer never draws more than eight lines, separator included. With more
+// roots than room, the newest roots win and the oldest is not drawn.
+func TestTreeDrawerRendersAtMostEightLines(t *testing.T) {
+	defs := make([]Target, 0, 10)
+	for i := 0; i < 10; i++ {
+		defs = append(defs, treeTarget(fmt.Sprintf("t%d", i), fmt.Sprintf("root%d", i)))
+	}
+	m := newTestModel(t, defs...)
+	for i, d := range defs {
+		at := ledgerClock.Add(time.Duration(i) * time.Second)
+		changeAt(m, d.Name, at, map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
+	}
+	m.now = ledgerClock.Add(9 * time.Second)
+	m.View()
+
+	if got := len(m.layout.drawer); got != drawerMax {
+		t.Fatalf("drawer lines = %d, want the %d-line cap", got, drawerMax)
+	}
+	labels := map[string]bool{}
+	for _, r := range folderRows(m) {
+		labels[r.label] = true
+	}
+	if labels["root0/"] || labels["root1/"] || labels["root2/"] {
+		t.Fatalf("the oldest roots were drawn despite the cap: %v", labels)
+	}
+	if !labels["root9/"] {
+		t.Fatalf("the newest root is missing: %v", labels)
+	}
+
+	// An expansion renders inside the cap: the file is drawn, nothing exceeds 8.
+	m.toggleTreeFolder("root9/")
+	m.View()
+	if got := len(m.layout.drawer); got != drawerMax {
+		t.Fatalf("expanded drawer lines = %d, want the %d-line cap", got, drawerMax)
+	}
+	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "a.go") {
+		t.Fatalf("the newest root's expanded file is missing:\n%s", got)
 	}
 }
 
 // The drawer stays hidden while nothing has ever changed: the list then owns
-// every row above the version line. The first spawn grows it.
-func TestDrawerStaysHiddenUntilSomethingChanged(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
+// every row above the version line. The first change grows it.
+func TestTreeDrawerStaysHiddenUntilSomethingChanged(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"), target("api"))
 	m.View()
 	if got := len(m.layout.drawer); got != 0 {
 		t.Fatalf("drawer rows with no changes = %d, want none", got)
@@ -306,130 +425,56 @@ func TestDrawerStaysHiddenUntilSomethingChanged(t *testing.T) {
 	if got := m.listHeight(); got != m.height-1 {
 		t.Fatalf("list height with no drawer = %d, want %d", got, m.height-1)
 	}
-	if got := len(drawerOf(m)); got != 0 {
-		t.Fatalf("drawer lines with no changes = %d, want none", got)
-	}
 
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 	m.View()
 	if got := len(m.layout.drawer); got == 0 {
-		t.Fatal("the drawer did not grow with the first spawn")
+		t.Fatal("the drawer did not grow with the first change")
 	}
 	if got := m.listHeight(); got >= m.height-1 {
 		t.Fatalf("the drawer took no rows from the list: list height = %d", got)
 	}
-
-	// Every ledger line lives in the drawer; the list is one line per target.
-	seen := 0
-	for _, line := range leftPane(m)[:m.listHeight()] {
-		if line == "" {
-			continue
-		}
-		seen++
-		if strings.Contains(line, "↺") || strings.HasPrefix(line, "  +") {
-			t.Fatalf("a ledger line leaked into the target list: %q", line)
-		}
-	}
-	if seen != m.listLen() {
-		t.Fatalf("list lines = %d, want one per row plus ALL (%d)", seen, m.listLen())
-	}
 }
 
-// The drawer never claims more than half the column: entries past the cap are
-// not drawn, and the rows they belong to keep them.
-func TestDrawerIsCappedAtHalfTheColumnHeight(t *testing.T) {
-	defs := make([]Target, 0, 6)
-	for i := 0; i < 6; i++ {
-		defs = append(defs, target(fmt.Sprintf("t%d", i)))
-	}
-	m := newTestModel(t, defs...)
-	m.height = 12
-	for i, d := range defs {
-		spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i)*time.Second))
-	}
-	m.now = ledgerClock.Add(5 * time.Second)
-	m.View()
-
-	limit := (m.height - 1) / 2
-	drawer := m.layout.drawer
-	if len(drawer) == 0 || len(drawer) > limit {
-		t.Fatalf("drawer rows = %d, want between 1 and half of %d", len(drawer), m.height-1)
-	}
-	// The newest entries win the rows; the ones that do not fit are not drawn.
-	want := []string{
-		"↺ 0s · t5 · 1 file",
-		"↺ 1s · t4 · 1 file",
-		"↺ 2s · t3 · 1 file",
-		"↺ 3s · t2 · 1 file",
-	}
-	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("drawn entries = %q, want the newest that fit %q", got, want)
-	}
-
-	// The data behind the overflow is intact.
-	for i := range m.targets {
-		if got := len(m.targets[i].ledger); got != 1 {
-			t.Fatalf("target %d holds %d entries, want its spawn kept", i, got)
-		}
-	}
-	if got := len(m.drawerEntries()); got != 6 {
-		t.Fatalf("merged entries = %d, want all 6", got)
-	}
-}
-
-// A change that lands while the target is stopped waits in pending: the drawer
-// says so in a dim line, and a manual start files the batch.
-func TestStoppedTargetRecordsChangesWithoutSpawning(t *testing.T) {
-	m := newTestModel(t, target("web"))
+// A change that lands while the target is stopped still feeds the tree like any
+// other change. The old dim pending line is gone.
+func TestStoppedTargetFeedsTheTree(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
 	m.cursor = 1
 	press(m, " ") // stop
-	if m.targets[0].state != stateStopped {
-		t.Fatalf("state = %v, want stopped", m.targets[0].state)
-	}
 
-	m.applyEvent(event{kind: evChanged, target: "web", count: 2, first: "a.go", change: changeBatch(map[string]fsnotify.Op{
-		"a.go": fsnotify.Write,
-		"b.go": fsnotify.Write,
-	})})
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		"apps/a.go": fsnotify.Write,
+		"apps/b.go": fsnotify.Write,
+	})
 	if got := m.targets[0].ledger; len(got) != 0 {
 		t.Fatalf("a stopped target filed %+v, want nothing in the ledger", got)
 	}
 	if got := m.targets[0].pending; len(got) != 2 {
 		t.Fatalf("pending = %v, want the two recorded files", got)
 	}
-	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "· web · 2 files recorded, not rebooted (stopped)") {
-		t.Fatalf("the dim pending line is missing from the drawer:\n%s", got)
+	rows := folderRows(m)
+	if len(rows) != 1 || rows[0].label != "apps/" || rows[0].count != 2 {
+		t.Fatalf("stopped changes = %+v, want apps/ with 2 files in the tree", rows)
+	}
+	if got := strings.Join(drawerOf(m), "\n"); strings.Contains(got, "not rebooted") {
+		t.Fatalf("the pending one-liner still renders:\n%s", got)
 	}
 
-	// Space starts it; the spawn files the batch and the warning goes away.
+	// Space starts it; the spawn files the batch.
 	press(m, " ")
 	m.applyEvent(event{kind: evStarted, target: "web", at: ledgerClock})
 	if got := m.targets[0].ledger; len(got) != 1 || len(got[0].files) != 2 {
 		t.Fatalf("ledger after the start = %+v, want one two-file entry", got)
 	}
-	if got := strings.Join(drawerOf(m), "\n"); strings.Contains(got, "not rebooted") {
-		t.Fatalf("the pending warning survived the spawn:\n%s", got)
-	}
-}
-
-// A row the group holds down (off) words its pending line `(off)`, not
-// `(stopped)`: pending carried across a reload must read as group-held.
-func TestPendingLineWordsOffForGroupHeldRows(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	m.targets[0].state = stateOff
-	m.applyEvent(event{kind: evChanged, target: "web", count: 1, first: "a.go", change: oneFile("a.go")})
-
-	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "· web · 1 file recorded, not rebooted (off)") {
-		t.Fatalf("an off row's pending line = %q, want the (off) word", got)
-	}
 }
 
 // t is one global toggle: it opens and closes the drawer from any row, and the
 // target list stays one line per row either way.
-func TestDrawerTogglesGloballyWithT(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	spawnWithChange(m, "web", oneFile("a.go"), ledgerClock)
-	spawnWithChange(m, "api", oneFile("b.go"), ledgerClock.Add(time.Minute))
+func TestTreeDrawerTogglesGloballyWithT(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"), treeTarget("api", "pkg"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
+	changeAt(m, "api", ledgerClock.Add(time.Minute), map[string]fsnotify.Op{"pkg/b.go": fsnotify.Write})
 	m.View()
 	if got := len(m.layout.drawer); got == 0 {
 		t.Fatal("the drawer is closed by default")
@@ -442,7 +487,6 @@ func TestDrawerTogglesGloballyWithT(t *testing.T) {
 		}
 	}
 
-	// The ALL row toggles it too.
 	m.cursor = 0
 	press(m, "t")
 	m.View()
@@ -459,78 +503,39 @@ func TestDrawerTogglesGloballyWithT(t *testing.T) {
 	}
 }
 
-// Clicking a drawer entry's header expands its files in place and clicking it
-// again collapses it. It never solos the target or moves the cursor: a file
-// line, the separator, and the pending line all do nothing.
-func TestDrawerEntryClickExpandsItsFiles(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
-	spawnWithChange(m, "api", oneFile("b.go"), ledgerClock.Add(time.Minute))
-	m.now = ledgerClock.Add(time.Minute + 30*time.Second)
+// A folder click toggles the tree and never solos a target or moves the cursor.
+func TestTreeFolderClickDoesNotSolo(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"), target("api"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 	m.View()
 
-	drawer := m.layout.drawer
-	if len(drawer) < 3 || drawer[1].kind != drawerSpawn || drawer[1].target != 1 {
-		t.Fatalf("setup: the newest entry (api) is not right under the separator: %+v", drawer)
-	}
-	top := m.height - 2 - len(drawer) // the separator's screen row
+	top := drawerTop(m)
 	if got := m.rowAt(2, top); got != -1 {
-		t.Fatalf("the separator resolves to row %d, want no row", got)
+		t.Fatalf("the separator resolves to row %d, want none", got)
 	}
-	if got := m.rowAt(2, top+1); got != 2 {
-		t.Fatalf("the api entry header resolves to row %d, want 2", got)
+	if got := m.rowAt(2, top+1); got != -1 {
+		t.Fatalf("a folder line resolves to row %d, want none", got)
 	}
-
 	m.handleMouse(mouse(2, top+1, false))
 	if m.solo != -1 || m.cursor != 0 {
 		t.Fatalf("the drawer click soloed or moved the cursor: solo=%d cursor=%d", m.solo, m.cursor)
 	}
-	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "  ~ b.go") {
-		t.Fatalf("the expanded entry did not show its file:\n%s", got)
-	}
-
-	// The file line of the expanded entry does nothing.
-	top = m.height - 2 - len(m.layout.drawer)
-	m.handleMouse(mouse(2, top+2, false))
-	if got := strings.Join(drawerOf(m), "\n"); !strings.Contains(got, "  ~ b.go") {
-		t.Fatalf("clicking the file line collapsed the entry:\n%s", got)
-	}
-
-	// A second click on the header collapses it.
-	m.handleMouse(mouse(2, top+1, false))
-	lines := drawerOf(m)
-	if got := strings.Join(lines, "\n"); strings.Contains(got, "  ~ b.go") {
-		t.Fatal("the second click did not collapse the entry")
-	}
-
-	// The last column of an entry is inside the drawer, not a mute cell.
-	top = m.height - 2 - len(m.layout.drawer)
-	slowClick(m)
-	m.handleMouse(mouse(m.layout.leftW-1, top+1, false))
-	if m.targets[1].muted {
-		t.Fatal("clicking a drawer entry muted the target")
-	}
-
-	// The separator belongs to no row.
-	m.clearSolo()
-	m.handleMouse(mouse(2, top, false))
-	if m.solo != -1 || m.cursor != 0 {
-		t.Fatalf("the separator click did something: solo=%d cursor=%d", m.solo, m.cursor)
+	if !m.isTreeExpanded("apps/") {
+		t.Fatal("the folder click did not expand the folder")
 	}
 }
 
-// The cursor row stays visible in the list area above a tall drawer, and the
-// drawer never takes more than half the column.
+// The cursor row stays visible in the list area above a tall drawer.
 func TestListScrollKeepsTheCursorVisibleUnderATallDrawer(t *testing.T) {
 	defs := make([]Target, 0, 9)
 	for i := 0; i < 9; i++ {
-		defs = append(defs, target(fmt.Sprintf("t%d", i)))
+		defs = append(defs, treeTarget(fmt.Sprintf("t%d", i), fmt.Sprintf("root%d", i)))
 	}
 	m := newTestModel(t, defs...)
 	m.height = 10
 	m.cursor = len(m.targets)
-	for _, d := range defs {
-		spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock)
+	for i, d := range defs {
+		changeAt(m, d.Name, ledgerClock, map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
 	}
 	m.View()
 
@@ -554,10 +559,14 @@ func TestListScrollKeepsTheCursorVisibleUnderATallDrawer(t *testing.T) {
 // column truncates rather than wraps.
 func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 	for _, width := range []int{24, 30, 100} {
-		m := newTestModel(t, target("web"), target("backoffice-webapp"))
+		m := newTestModel(t, treeTarget("web", "apps"), target("backoffice-webapp"))
 		m.width = width
 		m.cursor = 2
-		spawnWithChange(m, "web", sevenFiles(), ledgerClock)
+		changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+			"apps/api/deep/types.gen.go": fsnotify.Write,
+			"apps/root.go":               fsnotify.Write,
+		})
+		m.toggleTreeFolder("apps/")
 		m.View()
 
 		leftW, _ := m.layoutWidths()
@@ -577,11 +586,11 @@ func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 }
 
 // The version line still owns the bottom row, one blank divider above it, with
-// the drawer's separator starting above that blank.
-func TestVersionLineOwnsTheBottomRowUnderTheDrawer(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	m.height = 14 // room for the separator, the header, the blank, and the version
-	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
+// the drawer starting above that blank.
+func TestVersionLineOwnsTheBottomRowUnderTheTree(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	m.height = 14
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 	lines := leftPane(m)
 
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
@@ -599,78 +608,6 @@ func TestVersionLineOwnsTheBottomRowUnderTheDrawer(t *testing.T) {
 	}
 }
 
-// Ten entries render at most the eight drawer lines: seven headers under the
-// separator, newest first, and the rest are simply not drawn.
-func TestDrawerRendersAtMostEightLines(t *testing.T) {
-	defs := make([]Target, 0, 10)
-	for i := 0; i < 10; i++ {
-		defs = append(defs, target(fmt.Sprintf("t%d", i)))
-	}
-	m := newTestModel(t, defs...)
-	for i, d := range defs {
-		spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i)*time.Second))
-	}
-	m.now = ledgerClock.Add(9 * time.Second)
-	m.View()
-
-	if got := len(m.layout.drawer); got != drawerMax {
-		t.Fatalf("drawer lines = %d, want the %d-line cap", got, drawerMax)
-	}
-	want := []string{
-		"↺ 0s · t9 · 1 file",
-		"↺ 1s · t8 · 1 file",
-		"↺ 2s · t7 · 1 file",
-		"↺ 3s · t6 · 1 file",
-		"↺ 4s · t5 · 1 file",
-		"↺ 5s · t4 · 1 file",
-		"↺ 6s · t3 · 1 file",
-	}
-	if got := spawnHeaders(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("drawn entries = %q, want the newest %d %q", got, len(want), want)
-	}
-	if got := len(m.drawerEntries()); got != 10 {
-		t.Fatalf("merged entries = %d, want all 10 kept in the data", got)
-	}
-}
-
-// An entry pushed out of the twenty-entry cap forgets its expansion, and no
-// surviving entry inherits it.
-func TestDrawerExpansionForgetsEntriesPushedOutOfTheCap(t *testing.T) {
-	defs := make([]Target, 0, 8)
-	for i := 0; i < 8; i++ {
-		defs = append(defs, target(fmt.Sprintf("t%d", i)))
-	}
-	m := newTestModel(t, defs...)
-	for i, d := range defs {
-		for j := 0; j < 3; j++ {
-			spawnWithChange(m, d.Name, oneFile("a.go"), ledgerClock.Add(time.Duration(i*3+j)*time.Second))
-		}
-	}
-	m.View()
-
-	entries := m.drawerEntries()
-	if len(entries) != drawerCap {
-		t.Fatalf("merged entries = %d, want the %d-entry cap", len(entries), drawerCap)
-	}
-	oldest := entries[len(entries)-1].id
-	m.toggleExpanded(oldest)
-	if !m.isExpanded(oldest) {
-		t.Fatal("setup: the oldest entry did not expand")
-	}
-
-	// A newer spawn pushes the oldest entry out of the cap.
-	spawnWithChange(m, "t0", oneFile("z.go"), ledgerClock.Add(time.Hour))
-	m.View()
-	if m.isExpanded(oldest) {
-		t.Fatal("an entry pushed out of the cap kept its expansion")
-	}
-	for _, e := range m.drawerEntries() {
-		if m.isExpanded(e.id) {
-			t.Fatalf("entry %d read as expanded", e.id)
-		}
-	}
-}
-
 // A backoff-delayed spawn still files the batch: the change waits, the entry is
 // stamped with the spawn time.
 func TestBackoffDelayedSpawnCommitsToTheLedger(t *testing.T) {
@@ -682,11 +619,6 @@ func TestBackoffDelayedSpawnCommitsToTheLedger(t *testing.T) {
 	if got := m.targets[0].ledger; len(got) != 0 {
 		t.Fatalf("a backoff filed %+v, want the batch still pending", got)
 	}
-	// Waiting out a backoff is not a stop: no `not rebooted` warning.
-	if got := strings.Join(drawerOf(m), "\n"); strings.Contains(got, "not rebooted") {
-		t.Fatalf("a backoff target reads as stopped:\n%s", got)
-	}
-
 	spawn := ledgerClock.Add(5 * time.Second)
 	m.applyEvent(event{kind: evStarted, target: "web", at: spawn})
 	if got := m.targets[0].ledger; len(got) != 1 || !got[0].at.Equal(spawn) {
