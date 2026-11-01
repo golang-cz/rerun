@@ -33,11 +33,15 @@ reviewer gate → one commit. Copy/self-watch/reconcile already shipped
 - Help gains one legend line: `● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen`.
 - Verify: badge on solo-hidden output; cleared on esc; legend in helpView.
 
-## T4 — ringbuf
+## T4 — ringbuf — REJECTED (2026-11-01)
 
-- Swap `appendCapped` slices for golang-cz/ringbuf (v0.6.0, in go.mod):
-  target lines and merged, 10k cap each. `paneLines()` semantics unchanged.
-- Verify: cap behavior identical (10k newest kept, O(1) append), suite green.
+- golang-cz/ringbuf v0.6.0 has no indexed access and clamps replay to
+  90% of the buffer; the only workaround oversizes to 20k — strictly
+  worse than the current amortized-O(1) `appendCapped` slices.
+- Decision: keep the slices. Real simplification shipped instead:
+  deleted the dead `tuiTarget.lines` field (zero consumers — every
+  consumer reads `visible`/`visibleRaw`/`merged`).
+- 10k caps and `paneLines()` semantics unchanged.
 
 ## T5 — search + filter bar
 

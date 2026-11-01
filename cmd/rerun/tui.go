@@ -123,8 +123,6 @@ type tuiTarget struct {
 	// cursor's own row expands on its own, a pinned row keeps its own state.
 	treePinned bool
 	treeOpen   bool
-
-	lines []string
 }
 
 // tuiModel is the whole screen: the target list on the left, the stream on
@@ -417,7 +415,6 @@ func (m *tuiModel) openTarget(i int) {
 // that target streams into it.
 func (m *tuiModel) addLine(i int, line string) {
 	t := m.targets[i]
-	t.lines = appendCapped(t.lines, line)
 	m.merged = appendCapped(m.merged, mergedLine{target: i, name: t.spec.Name, text: line})
 	if m.streamsTo(i) {
 		m.visible = appendCapped(m.visible, m.prefixed(mergedLine{target: i, name: t.spec.Name, text: line}))
