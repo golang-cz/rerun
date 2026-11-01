@@ -265,8 +265,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none.
 func (m *tuiModel) rowAt(x, y int) int {
-	// The bottom left line is the command footer, not a row.
-	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
+	if y < 0 || y >= m.height || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
 	row := m.layout.offset + y

@@ -49,7 +49,8 @@ rerun frontend api     # run a subset
 rerun test             # run one target (flags allowed: rerun test -delay 500ms)
 ```
 
-Each target gets its own watcher and command; output is prefixed `[name]`.
+Each target gets its own watcher and command; non-TTY output prefixes each
+line with the target's name.
 A target that exits by itself stays down until its next matching file change.
 
 Naming targets sets what starts, not what is listed. In the TUI every rerun.yml
@@ -64,9 +65,11 @@ Press `?` inside it for the full key list.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `s` or `enter` solo a target's stream (`esc` or a second press clears), `o` open
 the url, `G` live output. The right pane is always the merged stream; soloing
-narrows it to one target, keeping the `[name]` prefixes. Mouse: click a row to
-solo it, double-click to stop/start like `space`, the button cell to mute,
-shift-click to solo, and a click on the ALL row to clear solo.
+narrows it to one target, keeping the name prefixes; each line pads the name to
+the longest target so messages start in a fixed column. The pane's top line is
+the cursor row's command, with its url linked. Mouse: click a row to solo it,
+double-click to stop/start like `space`, the button cell to mute, shift-click
+to solo, and a click on the ALL row to clear solo.
 
 ## Building rerun.yml
 

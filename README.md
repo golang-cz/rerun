@@ -29,8 +29,10 @@ Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `m` mute a
 stream, `s` or `enter` solo (`esc` clears), `o` open the url, `G` live output.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, shift-click to solo, and a click on the ALL row to clear
-solo. The right pane is always the merged stream; soloing
-narrows it to one target, keeping the `[name]` prefixes.
+solo. The right pane is always the merged stream; soloing narrows it to one
+target, keeping the name prefixes. Each line pads the name to the longest
+target, so every message starts in the same column. The pane's top line shows
+the cursor row's command and links its url.
 
 #### Examples:
 ```bash

@@ -126,6 +126,10 @@ type tuiModel struct {
 	visible     []string
 	mergedDirty bool
 
+	// prefixW is the pane prefix column: the longest target name, so every
+	// stream line starts its message in the same column.
+	prefixW int
+
 	vp      viewport.Model
 	vpDirty bool
 
@@ -180,6 +184,9 @@ func newTUI(targets []Target) *tuiModel {
 			row.state = stateOff
 		}
 		m.targets = append(m.targets, row)
+	}
+	for _, t := range m.targets {
+		m.prefixW = max(m.prefixW, displayWidth(t.spec.Name))
 	}
 	return m
 }
@@ -426,10 +433,11 @@ type mergedLine struct {
 }
 
 func (m *tuiModel) prefixed(i int, text string) string {
-	if name := m.targets[i].spec.Name; name != "" {
-		return "[" + name + "] " + text
+	name := m.targets[i].spec.Name
+	if name == "" {
+		return text
 	}
-	return text
+	return padRight(name, m.prefixW) + "  " + text
 }
 
 func (m *tuiModel) rebuildMerged() {

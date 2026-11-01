@@ -53,7 +53,7 @@ func TestFollowPinsPaneToNewestLine(t *testing.T) {
 		if want := len(m.visible) - m.vp.Height; m.vp.YOffset != want {
 			t.Fatalf("batch %d: YOffset = %d, want maxYOffset %d", batch, m.vp.YOffset, want)
 		}
-		want := fmt.Sprintf("[api] api%d-29", batch)
+		want := fmt.Sprintf("api  api%d-29", batch)
 		if got := newestPaneLine(m); got != want {
 			t.Fatalf("batch %d: the pane's last line = %q, want the newest line %q", batch, got, want)
 		}
@@ -74,7 +74,7 @@ func TestFollowPinsSoloedPaneToNewestLine(t *testing.T) {
 		if !m.vp.AtBottom() {
 			t.Fatalf("batch %d: the soloed pane is not at the bottom", batch)
 		}
-		want := fmt.Sprintf("[web] solo%d-24", batch)
+		want := fmt.Sprintf("web  solo%d-24", batch)
 		if got := newestPaneLine(m); got != want {
 			t.Fatalf("batch %d: soloed pane's last line = %q, want %q", batch, got, want)
 		}
@@ -93,7 +93,7 @@ func TestFollowAdvancesThroughEventsMsgPath(t *testing.T) {
 		m.Update(streamEvents("web", fmt.Sprintf("f%d", frame), 12))
 		m.View()
 
-		want := fmt.Sprintf("[web] f%d-11", frame)
+		want := fmt.Sprintf("web  f%d-11", frame)
 		if got := newestPaneLine(m); got != want {
 			t.Fatalf("frame %d: the pane's last line = %q, want %q", frame, got, want)
 		}
@@ -159,7 +159,7 @@ func TestScrollUpWithNothingAboveKeepsTailing(t *testing.T) {
 			if !m.vp.AtBottom() {
 				t.Fatalf("%s: the pane is not pinned to the newest line", g.name)
 			}
-			if got, want := newestPaneLine(m), "[web] late-39"; got != want {
+			if got, want := newestPaneLine(m), "web  late-39"; got != want {
 				t.Fatalf("%s: the pane stopped advancing: last line = %q, want %q", g.name, got, want)
 			}
 		})
@@ -194,7 +194,7 @@ func TestGResumesLiveTailAfterFreeze(t *testing.T) {
 	if !m.follow || m.pending != 0 {
 		t.Fatalf("G did not resume: follow=%v pending=%d", m.follow, m.pending)
 	}
-	if got, want := newestPaneLine(m), "[web] new-4"; got != want {
+	if got, want := newestPaneLine(m), "web  new-4"; got != want {
 		t.Fatalf("after G the pane's last line = %q, want %q", got, want)
 	}
 }

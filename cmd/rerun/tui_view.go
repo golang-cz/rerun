@@ -16,8 +16,10 @@ const (
 	colorSolo   = "6"
 )
 
-// Left column geometry: glyph, space, name, space, status, space, button.
-const statusW = 12
+// Left column geometry: glyph, space, name, badge, status, space, button —
+// nameW + 14 cells. The longest real status is `exit segv` and the longest
+// uptime form is `4d03h`.
+const statusW = 9
 
 type tuiStyles struct {
 	base    lipgloss.Style
@@ -106,9 +108,9 @@ func (m *tuiModel) View() string {
 
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
-	nameW := 8 // "ALL" plus the badge
+	nameW := 4 // "ALL" plus the badge
 	for _, t := range m.targets {
-		nameW = max(nameW, displayWidth(t.spec.Name)+2)
+		nameW = max(nameW, displayWidth(t.spec.Name))
 	}
 	leftW = nameW + statusW + 5
 	if limit := max(8, m.width/2); leftW > limit {
@@ -123,9 +125,18 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 // nameWidth is the name cell's width for a given left column width.
 func nameWidth(leftW int) int { return max(0, leftW-statusW-5) }
 
+// badge is the name column's trailing cell: a marker for hidden output, else
+// a plain separator, so the status column never shifts.
+func badge(unseen bool) string {
+	if unseen {
+		return "✱"
+	}
+	return " "
+}
+
 // listOffset scrolls the list so the highlighted row stays visible.
 func (m *tuiModel) listOffset() int {
-	visible := max(1, m.height-1) // the footer is the command line, not a row
+	visible := max(1, m.height)
 	rows := len(m.targets) + 1
 	offset := 0
 	if m.cursor >= visible {
@@ -135,9 +146,6 @@ func (m *tuiModel) listOffset() int {
 }
 
 func (m *tuiModel) leftLine(y, leftW int) string {
-	if y == m.height-1 {
-		return m.cmdLine(leftW)
-	}
 	row := m.layout.offset + y
 	switch {
 	case row == 0:
@@ -148,22 +156,13 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	return m.targetLine(row, leftW)
 }
 
-// cmdLine is the left column's footer: the cursor row's command, dim, or blank
-// on the ALL rollup.
-func (m *tuiModel) cmdLine(leftW int) string {
-	if m.cursor == 0 {
-		return strings.Repeat(" ", leftW)
-	}
-	return m.styles.hint.Render(padRight("$ "+m.targets[m.cursor-1].spec.Cmd, leftW))
-}
-
 // allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
 func (m *tuiModel) allLine(leftW int) string {
 	segs := []seg{
 		{text: " "},
 		{text: " "},
-		{text: nameCell("ALL", m.anyUnseen(), nameWidth(leftW))},
-		{text: " "},
+		{text: padRight("ALL", nameWidth(leftW))},
+		{text: badge(m.anyUnseen())},
 	}
 	segs = append(segs, m.rollupSegs()...)
 	return renderSegs(segs, m.rowStyle(0), leftW)
@@ -185,29 +184,13 @@ func (m *tuiModel) targetLine(row, leftW int) string {
 	segs := []seg{
 		{text: t.glyph(), color: stateColor(t)},
 		{text: " "},
-		{text: nameCell(t.spec.Name, t.unseen, nameWidth(leftW)), link: t.spec.URL},
-		{text: " "},
+		{text: padRight(t.spec.Name, nameWidth(leftW)), link: t.spec.URL},
+		{text: badge(t.unseen)},
 		{text: padRight(m.status(t), statusW), color: statusColor(t)},
 		{text: " "},
 		{text: btn, color: btnColor},
 	}
 	return renderSegs(segs, m.rowStyle(row), leftW)
-}
-
-// nameCell pads a target name to w cells, keeping two cells for the badge so
-// rows do not shift when it appears.
-func nameCell(name string, unseen bool, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if w <= 2 {
-		return padRight(name, w)
-	}
-	badge := " "
-	if unseen {
-		badge = "✱"
-	}
-	return padRight(name, w-2) + " " + badge
 }
 
 func (m *tuiModel) rowStyle(row int) lipgloss.Style {
@@ -274,11 +257,19 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 	return b.String()
 }
 
-// rightLines is the stream pane, exactly m.height lines tall. Its bottom line
-// carries the new-lines marker, else the ALL-row hint.
+// rightLines is the stream pane, exactly m.height lines tall. The cursor row
+// owns a title line at the top; the bottom line carries the new-lines marker,
+// else the ALL-row hint.
 func (m *tuiModel) rightLines(w int) []string {
+	titleH := 0
+	var title string
+	if m.cursor > 0 {
+		title = m.titleLine(w)
+		titleH = 1
+	}
+
 	m.vp.Width = w
-	m.vp.Height = max(1, m.height)
+	m.vp.Height = max(1, m.height-titleH)
 	m.syncContent()
 
 	out := strings.Split(m.vp.View(), "\n")
@@ -287,16 +278,36 @@ func (m *tuiModel) rightLines(w int) []string {
 		case !m.follow && m.pending > 0:
 			marker := fmt.Sprintf("↓ %d new", m.pending)
 			out[len(out)-1] = lipgloss.NewStyle().Width(w).Render(m.styles.marker.Render(marker))
-			m.layout.marker = rect{x: m.layout.leftW + 1, y: m.vp.Height - 1, w: w, h: 1}
+			m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + m.vp.Height - 1, w: w, h: 1}
 		case m.now.Before(m.hintUntil):
 			out[len(out)-1] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(allRowHint, w)))
 		}
 	}
 
-	for len(out) < m.height {
-		out = append(out, strings.Repeat(" ", w))
+	lines := make([]string, 0, m.height)
+	if titleH == 1 {
+		lines = append(lines, title)
 	}
-	return out[:m.height]
+	lines = append(lines, out...)
+	for len(lines) < m.height {
+		lines = append(lines, strings.Repeat(" ", w))
+	}
+	return lines[:m.height]
+}
+
+// titleLine is the right pane's first line: the cursor row's command, then two
+// spaces and its linked url when the target has one.
+func (m *tuiModel) titleLine(w int) string {
+	t := m.targets[m.cursor-1]
+	cmd := truncate("$ "+t.spec.Cmd, w)
+	line := m.styles.title.Render(cmd)
+	if t.spec.URL != "" {
+		room := max(0, w-displayWidth(cmd)-2)
+		if url := truncate(t.spec.URL, room); url != "" {
+			line += m.styles.title.Render("  " + osc8(t.spec.URL, url))
+		}
+	}
+	return lipgloss.NewStyle().Width(w).Render(line)
 }
 
 // syncContent rebuilds the viewport only when its content changed, and keeps
@@ -367,6 +378,7 @@ func (m *tuiModel) helpView() string {
 		"double-click to stop/start like space, click its button cell to",
 		"mute, shift-click to solo.",
 		"shift-drag selects text with the terminal's own copy.",
+		"the pane's top line is the cursor row's cmd, its url linked.",
 	} {
 		b.WriteString(m.styles.hint.Render(line) + "\n")
 	}

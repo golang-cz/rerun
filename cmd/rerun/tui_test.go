@@ -259,27 +259,59 @@ func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 		m.applyEvent(ev)
 	}
 
-	if got, want := m.paneLines(), []string{"[web] w1", "[api] a1", "[worker] k1"}; !reflect.DeepEqual(got, want) {
+	// Names pad to the longest of web/api/worker, so every message starts at
+	// the same column.
+	if got, want := m.paneLines(), []string{"web     w1", "api     a1", "worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged = %q, want %q", got, want)
+	}
+	if a, b := strings.Index(m.paneLines()[0], "w1"), strings.Index(m.paneLines()[1], "a1"); a != b {
+		t.Fatalf("message columns differ: %d vs %d", a, b)
 	}
 
 	m.toggleMute(1)
-	if got, want := m.paneLines(), []string{"[web] w1", "[worker] k1"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"web     w1", "worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged after mute = %q, want %q", got, want)
 	}
 
 	m.toggleSolo(2)
-	if got, want := m.paneLines(), []string{"[worker] k1"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
 	// Clearing solo brings the muted row back as muted, not streaming.
 	m.toggleSolo(2)
-	if got, want := m.paneLines(), []string{"[web] w1", "[worker] k1"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"web     w1", "worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged after solo cleared = %q, want %q", got, want)
 	}
 	if !m.targets[1].muted {
 		t.Error("solo dropped the muted state it had to keep inside")
+	}
+}
+
+// The pane prefix is the bare name padded to the longest target, then a fixed
+// two-space gap. No brackets: JSON logs make punctuation ambiguous.
+func TestMergedStreamPadsPrefixesToAConstantColumn(t *testing.T) {
+	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
+	m.applyEvent(event{kind: evOutput, target: "omsx", line: "GET /v1/ping"})
+	m.applyEvent(event{kind: evOutput, target: "backoffice-webapp", line: "GET /v1/ping"})
+
+	if got, want := m.prefixW, len("backoffice-webapp"); got != want {
+		t.Fatalf("prefixW = %d, want %d", got, want)
+	}
+	lines := m.paneLines()
+	if got, want := lines[0], "omsx"+strings.Repeat(" ", 15)+"GET /v1/ping"; got != want {
+		t.Fatalf("omsx line = %q, want %q", got, want)
+	}
+	if got, want := lines[1], "backoffice-webapp  GET /v1/ping"; got != want {
+		t.Fatalf("backoffice line = %q, want %q", got, want)
+	}
+	if a, b := strings.Index(lines[0], "GET"), strings.Index(lines[1], "GET"); a != b {
+		t.Fatalf("message columns differ: %d vs %d", a, b)
+	}
+	for _, line := range lines {
+		if strings.ContainsAny(line, "[]|") || strings.Contains(line, ":") {
+			t.Fatalf("prefix still uses punctuation: %q", line)
+		}
 	}
 }
 
@@ -293,7 +325,7 @@ func TestMergedStreamKeepsArrivalOrder(t *testing.T) {
 		m.applyEvent(ev)
 	}
 
-	want := []string{"[web] w1", "[api] a1", "[web] w2"}
+	want := []string{"web  w1", "api  a1", "web  w2"}
 	if got := m.paneLines(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged = %q, want %q", got, want)
 	}
@@ -329,35 +361,130 @@ func TestSoloPaneKeepsPrefix(t *testing.T) {
 	m.applyEvent(event{kind: evOutput, target: "api", line: "world"})
 
 	m.toggleSolo(0)
-	if got, want := m.paneLines(), []string{"[web] hello"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"web  hello"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
 	m.clearSolo()
-	if got, want := m.paneLines(), []string{"[web] hello", "[api] world"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"web  hello", "api  world"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged pane after un-solo = %q, want %q", got, want)
 	}
 }
 
-func TestCommandLineShowsCursorRowCommandOnLeftColumnBottom(t *testing.T) {
+// The right pane's first line is the cursor row's command, not the name the
+// left column already prints.
+func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "vite dev"
 	m := newTestModel(t, web, target("api"))
-	m.View()
 
-	leftW := m.layout.leftW
 	m.cursor = 1
-	line := m.leftLine(m.height-1, leftW)
-	if !strings.Contains(line, "$ vite dev") {
-		t.Fatalf("command line = %q, want the cursor row's command", line)
+	_, rightW := m.layoutWidths()
+	lines := paneOf(m)
+
+	if !strings.Contains(lines[0], "$ vite dev") {
+		t.Fatalf("title = %q, want the cursor row's command", lines[0])
 	}
-	if got := displayWidth(line); got != leftW {
-		t.Fatalf("command line width = %d, want %d", got, leftW)
+	if got := displayWidth(lines[0]); got != rightW {
+		t.Fatalf("title width = %d, want %d", got, rightW)
+	}
+	if m.vp.Height != m.height-1 {
+		t.Fatalf("viewport height = %d, want %d with a title row", m.vp.Height, m.height-1)
+	}
+
+	// The title follows the cursor row.
+	m.cursor = 2
+	if line := paneOf(m)[0]; !strings.Contains(line, "$ sleep 1") {
+		t.Fatalf("title after moving = %q, want the api row's command", line)
+	}
+}
+
+func TestRightPaneTitleLinksTheURL(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "vite dev"
+	web.URL = "http://localhost:5173"
+	m := newTestModel(t, web, target("api"))
+	m.cursor = 1
+
+	_, rightW := m.layoutWidths()
+	line := paneOf(m)[0]
+	if !strings.Contains(line, osc8(web.URL, web.URL)) {
+		t.Fatalf("title = %q, want the linked url", line)
+	}
+	if got := displayWidth(line); got != rightW {
+		t.Fatalf("title width = %d, want %d", got, rightW)
+	}
+}
+
+func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "a-very-long-command-that-will-not-fit"
+	web.URL = "http://localhost:5173/very/long/path"
+	m := newTestModel(t, web, target("api"))
+	m.width = 30
+	m.cursor = 1
+
+	_, rightW := m.layoutWidths()
+	line := paneOf(m)[0]
+	if got := displayWidth(line); got != rightW {
+		t.Fatalf("title width = %d, want %d: %q", got, rightW, line)
+	}
+	if strings.Contains(line, "\n") {
+		t.Fatalf("title wrapped: %q", line)
+	}
+}
+
+func TestNoTitleOnAllRowAndPaneUsesFullHeight(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "vite dev"
+	m := newTestModel(t, web, target("api"))
+	m.applyEvent(event{kind: evOutput, target: "frontend", line: "hello"})
+
+	m.cursor = 1
+	m.View()
+	if m.vp.Height != m.height-1 {
+		t.Fatalf("setup: viewport height = %d, want %d", m.vp.Height, m.height-1)
 	}
 
 	m.cursor = 0
-	if line := m.leftLine(m.height-1, leftW); strings.TrimSpace(line) != "" {
-		t.Fatalf("command line on ALL = %q, want blank", line)
+	lines := paneOf(m)
+	if m.vp.Height != m.height {
+		t.Fatalf("ALL row viewport height = %d, want the full %d", m.vp.Height, m.height)
+	}
+	if strings.Contains(lines[0], "$ vite dev") {
+		t.Fatalf("ALL row still shows a title: %q", lines[0])
+	}
+}
+
+// The left column has no command footer now, so its bottom line is a row.
+func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.height = 3
+	m.View()
+
+	if row := m.rowAt(2, m.height-1); row != 2 {
+		t.Fatalf("rowAt at the bottom = %d, want 2", row)
+	}
+	m.handleMouse(mouse(2, m.height-1, false))
+	if m.cursor != 2 {
+		t.Fatalf("cursor = %d, want 2 after a click on the bottom row", m.cursor)
+	}
+}
+
+// The left column is nameW + the fixed glyph, separators, status, and button.
+func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
+	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
+	leftW, _ := m.layoutWidths()
+
+	wantName := len("backoffice-webapp")
+	if got := nameWidth(leftW); got != wantName {
+		t.Fatalf("name width = %d, want %d", got, wantName)
+	}
+	if leftW != wantName+14 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+14)
+	}
+	if statusW != 9 {
+		t.Fatalf("statusW = %d, want 9", statusW)
 	}
 }
 
