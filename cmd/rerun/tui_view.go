@@ -578,7 +578,7 @@ func (m *tuiModel) helpView() string {
 		"mouse: click a row to solo it (again or on ALL to clear),",
 		"double-click to stop/start like space, click its button cell to",
 		"mute, shift-click to solo.",
-		"a click in the live pane freezes the tail, then anchors the copy.",
+		"a click in the live pane copies without freezing; a drag freezes it.",
 		"frozen copy: click or drag; OSC 52 works over ssh and tmux.",
 		"shift-drag selects text with the terminal's own copy.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",

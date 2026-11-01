@@ -154,21 +154,24 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 	}
 }
 
-// A press in the live pane freezes the tail and copies that one line on
-// release; the left pane's row clicks are unaffected.
-func TestLivePaneClickFreezesAndCopies(t *testing.T) {
+// A press and release in the live pane copies one raw line without freezing
+// the tail; the left pane's row clicks are unaffected.
+func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 40).events)
 	m.View()
+	if !m.follow {
+		t.Fatal("setup: the pane is not following")
+	}
 
 	x := paneX(m)
+	want := m.visibleRaw[m.vp.YOffset+2] + "\n"
 	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(release(x, 2))
 
-	if m.follow {
-		t.Fatal("the live-pane click did not freeze the pane")
+	if !m.follow {
+		t.Fatal("the live-pane click froze the pane")
 	}
-	want := m.visibleRaw[m.vp.YOffset+2] + "\n"
 	if got := decodeCopy(t, m.copySeq); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
 	}
@@ -450,9 +453,9 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 	}
 }
 
-// A press in the live pane freezes the tail as it anchors the selection, so one
-// press-drag-release both holds the frame and copies the range.
-func TestLivePanePressFreezesAndAnchors(t *testing.T) {
+// A drag in the live pane freezes the tail on its first motion, then copies
+// the range on release.
+func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.View()
@@ -460,23 +463,31 @@ func TestLivePanePressFreezesAndAnchors(t *testing.T) {
 		t.Fatal("setup: the pane is not following")
 	}
 	x := paneX(m)
+	yOff := m.vp.YOffset
 
 	m.handleMouse(mouse(x, 2, false))
-	if m.follow {
-		t.Fatal("the live-pane press did not freeze the tail")
+	if !m.follow {
+		t.Fatal("the press alone froze the tail")
 	}
-	if m.pending != 0 {
-		t.Fatalf("pending = %d, want 0 on a press that freezes", m.pending)
-	}
-	if m.selAnchor == nil || *m.selAnchor != m.vp.YOffset+2 {
-		t.Fatalf("anchor = %v, want the pressed row %d", m.selAnchor, m.vp.YOffset+2)
+	if m.selAnchor == nil || *m.selAnchor != yOff+2 {
+		t.Fatalf("anchor = %v, want the pressed row %d", m.selAnchor, yOff+2)
 	}
 
 	m.handleMouse(motion(x, 5))
+	if m.follow {
+		t.Fatal("the first drag motion did not freeze the tail")
+	}
+	if m.pending != 0 {
+		t.Fatalf("pending = %d, want 0 after a drag freeze", m.pending)
+	}
+	if m.vp.YOffset != yOff {
+		t.Fatalf("the frame moved on freeze: %d -> %d", yOff, m.vp.YOffset)
+	}
+
 	m.handleMouse(release(x, 5))
 
-	lo := m.vp.YOffset + 2
-	hi := m.vp.YOffset + 5
+	lo := yOff + 2
+	hi := yOff + 5
 	if got, want := decodeCopy(t, m.copySeq), strings.Join(m.visibleRaw[lo:hi+1], "\n")+"\n"; got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
 	}

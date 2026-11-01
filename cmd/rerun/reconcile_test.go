@@ -599,6 +599,22 @@ func TestReconcileBannerStaysOneLine(t *testing.T) {
 	}
 }
 
+// A banner past the pane width is clamped, so it cannot wrap the frame.
+func TestReconcileBannerClampsToPaneWidth(t *testing.T) {
+	m := newTestModel(t, recTarget("web", "sleep 1"))
+	line := reconcileSummary([]reconcileAction{{name: strings.Repeat("verylongname", 20), kind: recAdd}})
+	if w := m.paneWidth(); displayWidth(line) <= w {
+		t.Fatalf("the fixture banner is %d cells, not past the pane width %d", displayWidth(line), w)
+	}
+
+	m.addNotice(line)
+
+	got := m.visibleRaw[len(m.visibleRaw)-1]
+	if w := m.paneWidth(); displayWidth(got) > w {
+		t.Fatalf("banner = %q (%d cells), want at most the pane width %d", got, displayWidth(got), w)
+	}
+}
+
 // waitForEvent waits for a runner to report a kind.
 func waitForEvent(t *testing.T, sink *recordingSink, kind eventKind, target string, timeout time.Duration) {
 	t.Helper()

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/golang-cz/rerun"
 )
 
 type safeBuffer struct {
@@ -385,6 +388,51 @@ func TestShutdownLeavesNoChildProcess(t *testing.T) {
 				assertDead(t, pid, sig.String())
 			}
 		})
+	}
+}
+
+// A file event racing a config removal must not restart a dropped target: the
+// retire wins over the change.
+func TestRetiredRunnerDoesNotRespawnOnChange(t *testing.T) {
+	r := newTargetRunner(Target{
+		Name:     "svc",
+		Cmd:      "sleep 30",
+		On:       []string{"src"},
+		Grace:    rerun.DefaultGrace,
+		Selected: true,
+	}, newPlainSink(io.Discard))
+	close(r.retire)
+
+	r.handleChange(context.Background(), rerun.ChangeSet{Files: map[string]struct{}{"a.go": {}}})
+
+	if cmd := r.currentCmd(); cmd != nil {
+		_ = cmd.Kill()
+		t.Fatal("a retired runner respawned on a change event")
+	}
+}
+
+// A burst of queued spec swaps collapses to the newest, and a control queued
+// behind it waits in stash instead of being lost.
+func TestDrainSpecsKeepsLatestAndStashesOthers(t *testing.T) {
+	r := newTargetRunner(recTarget("web", "web"), &recordingSink{})
+	newer := recTarget("web", "web-v2")
+	newest := recTarget("web", "web-v3")
+	r.ctrlCh <- ctrlMsg{kind: ctrlSpec, target: &newer}
+	r.ctrlCh <- ctrlMsg{kind: ctrlSpec, target: &newest}
+	r.ctrlCh <- ctrlMsg{kind: ctrlStop}
+
+	r.drainSpecs()
+
+	if r.target.Cmd != "web-v3" {
+		t.Fatalf("spec cmd = %q, want the newest swap", r.target.Cmd)
+	}
+	if r.stash == nil || r.stash.kind != ctrlStop {
+		t.Fatalf("stash = %+v, want the queued stop", r.stash)
+	}
+	select {
+	case c := <-r.ctrlCh:
+		t.Fatalf("drain left %+v queued, want the channel empty", c)
+	default:
 	}
 }
 

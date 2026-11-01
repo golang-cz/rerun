@@ -419,6 +419,11 @@ func (m *tuiModel) addNotice(line string) {
 	if line == "" {
 		return
 	}
+	// A banner owns one pane row: past the width it would wrap and break the
+	// frame's grid.
+	if w := m.paneWidth(); w > 0 {
+		line = truncate(line, w)
+	}
 	m.merged = appendCapped(m.merged, mergedLine{target: -1, text: line})
 	m.visible = appendCapped(m.visible, line)
 	m.visibleRaw = appendCapped(m.visibleRaw, line)
@@ -426,6 +431,15 @@ func (m *tuiModel) addNotice(line string) {
 		m.pending++
 	}
 	m.vpDirty = true
+}
+
+// paneWidth is the stream pane's width, or 0 before the first size message.
+func (m *tuiModel) paneWidth() int {
+	if m.width <= 0 {
+		return 0
+	}
+	leftW, _ := m.layoutWidths()
+	return m.width - leftW - 1
 }
 
 // appendCapped keeps the newest cap lines. The slice is re-sliced rather than

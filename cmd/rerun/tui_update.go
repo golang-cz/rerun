@@ -273,14 +273,10 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A press in the log pane copies instead of acting on rows: it freezes the
-	// tail as it anchors, so one press-drag-release holds the frame and copies
-	// it. Past the content, the press does nothing.
+	// A press in the log pane anchors a selection instead of acting on rows.
+	// The tail freezes on the first drag motion, so a plain click copies the
+	// line and keeps the stream live. Past the content, the press does nothing.
 	if m.inPane(msg.X, msg.Y) {
-		if m.follow {
-			m.follow = false
-			m.pending = 0
-		}
 		if idx := m.paneRow(msg.X, msg.Y); idx >= 0 {
 			anchor := idx
 			m.selAnchor = &anchor
@@ -379,6 +375,12 @@ func (m *tuiModel) paneRowAt(y int) int {
 func (m *tuiModel) dragSelection(y int) {
 	if m.selAnchor == nil {
 		return
+	}
+	// The drag, not the press, freezes the tail: only a real selection gesture
+	// stops the stream.
+	if m.follow {
+		m.follow = false
+		m.pending = 0
 	}
 	if idx := m.paneRowAt(y); idx >= 0 {
 		m.selEnd = idx

@@ -31,8 +31,8 @@ clears), `o` open the url, `G` live output, `f` freeze or resume the pane.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, the `+/−` cell to expand or collapse that row's change
 tree, shift-click to solo, and a click on the ALL row to clear
-solo. A click or drag in the live pane freezes the tail first, so the
-copy gesture works in one motion; in a frozen pane, click or drag a line to
+solo. A click in the live pane copies without freezing; a drag freezes the
+tail as it selects. In a frozen pane, click or drag a line to
 copy it, sent as OSC 52 so it works over ssh and tmux. The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same

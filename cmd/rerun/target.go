@@ -224,6 +224,9 @@ type targetRunner struct {
 	retire chan struct{}
 	// watchDone releases the watcher-closing goroutine when run returns.
 	watchDone chan struct{}
+	// stash is a control drainSpecs pulled out of the queue behind a spec swap,
+	// waiting for the run loop to handle it in order. Run goroutine only.
+	stash *ctrlMsg
 	// watcher is the live file watcher, published so a shutdown can abort the
 	// walk Watch starts even while the run goroutine is stuck in it.
 	watcher atomic.Pointer[rerun.Watcher]
@@ -275,6 +278,13 @@ func (r *targetRunner) controlSpec(kind ctrlKind, target Target) bool {
 }
 
 func (r *targetRunner) send(msg ctrlMsg) bool {
+	// A finished runner reports the miss first: ctrlCh can still be writable,
+	// and a random select would otherwise claim a send that nobody reads.
+	select {
+	case <-r.finished:
+		return false
+	default:
+	}
 	select {
 	case r.ctrlCh <- msg:
 		return true
@@ -352,6 +362,22 @@ func (r *targetRunner) run(ctx context.Context) error {
 
 	changes := r.startWatch(watcher)
 
+	handleCtrl := func(c ctrlMsg) {
+		if c.kind == ctrlRewatch {
+			if c.target != nil {
+				r.target = *c.target
+			}
+			if w, ch, err := r.rewatch(); err != nil {
+				r.sink.emit(event{kind: evWatcherErr, target: r.target.Name, err: err})
+			} else {
+				_ = watcher.Close()
+				watcher, changes = w, ch
+			}
+			return
+		}
+		r.handleControl(ctx, c)
+	}
+
 	// Start before the watch walk delivers: the walk can take seconds on a big
 	// tree, and the command's output must not wait for it. A run cancelled
 	// while the watcher was built starts nothing.
@@ -365,6 +391,12 @@ func (r *targetRunner) run(ctx context.Context) error {
 	}
 
 	for {
+		if r.stash != nil {
+			c := *r.stash
+			r.stash = nil
+			handleCtrl(c)
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			r.killCurrent(context.Background())
@@ -383,19 +415,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 			r.handleChange(ctx, changeSet)
 
 		case c := <-r.ctrlCh:
-			if c.kind == ctrlRewatch {
-				if c.target != nil {
-					r.target = *c.target
-				}
-				if w, ch, err := r.rewatch(); err != nil {
-					r.sink.emit(event{kind: evWatcherErr, target: r.target.Name, err: err})
-				} else {
-					_ = watcher.Close()
-					watcher, changes = w, ch
-				}
-				continue
-			}
-			r.handleControl(ctx, c)
+			handleCtrl(c)
 
 		case <-r.exited:
 			r.reportExit()
@@ -440,12 +460,34 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		r.restart(ctx)
 
 	case ctrlSpec:
-		// Its cmd changed. A target the user stopped only takes the new spec:
-		// a config edit never surprises a stopped target into running.
-		if r.userStopped() {
+		// A burst of queued reloads collapses into one bounce: only the newest
+		// spec needs its own restart.
+		r.drainSpecs()
+		// A target the user stopped only takes the new spec: a config edit
+		// never surprises a stopped target into running.
+		if !r.userStopped() {
+			r.restart(ctx)
+		}
+	}
+}
+
+// drainSpecs consumes queued spec swaps and keeps the newest. The first
+// control of another kind waits in stash for the run loop, so a rewatch or a
+// stop queued behind the burst is not lost.
+func (r *targetRunner) drainSpecs() {
+	for {
+		select {
+		case c := <-r.ctrlCh:
+			if c.kind != ctrlSpec {
+				r.stash = &c
+				return
+			}
+			if c.target != nil {
+				r.target = *c.target
+			}
+		default:
 			return
 		}
-		r.restart(ctx)
 	}
 }
 
@@ -473,7 +515,7 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 	r.killCurrent(ctx)
 
 	r.waitCooldown(ctx)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || r.retired() {
 		return
 	}
 
