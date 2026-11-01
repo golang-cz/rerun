@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"github.com/golang-cz/rerun"
 )
 
 // eventKind is what a target runner just did.
@@ -18,6 +20,8 @@ const (
 	evWatcherErr                  // the file watcher failed
 	evRunnerErr                   // rerun could not start a generation
 	evCleared                     // the screen clear the ad-hoc mode prints
+	evReconcile                   // a rerun.yml reload changed the target list
+	evNotice                      // rerun's own line: a config error, no target
 )
 
 // event is everything a target runner reports. The front-ends render it: the
@@ -32,6 +36,23 @@ type event struct {
 	code   int
 	err    error
 	at     time.Time
+	// change is the whole batch behind evChanged, which the TUI keeps so the
+	// row can show the files it last reacted to.
+	change rerun.ChangeSet
+	// cfg is the reconciled target list behind evReconcile.
+	cfg *configChange
+}
+
+// configChange is a freshly reconciled target list. The TUI adopts it
+// wholesale, because a reload can add, drop, and reorder rows.
+//
+// targets, runners, and stopped are index-parallel.
+type configChange struct {
+	targets []Target
+	runners []*targetRunner
+	// stopped is true for a target that must not be running: `selected: false`
+	// in the config, a target the user stopped, or one added under a solo.
+	stopped []bool
 }
 
 // sink is the front-end a target runner writes its events to.
@@ -98,6 +119,14 @@ func (s *plainSink) render(ev event) string {
 		if raw {
 			return clearTerminal + "\n"
 		}
+
+	case evReconcile, evNotice:
+		// rerun's own line about the config, never a target's output. A reload
+		// with nothing to report prints nothing.
+		if ev.line == "" {
+			return ""
+		}
+		return ev.line + "\n"
 	}
 
 	return ""

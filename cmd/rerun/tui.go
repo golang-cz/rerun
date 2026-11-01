@@ -1,13 +1,17 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/golang-cz/rerun"
 )
 
 // lineCap bounds each target's scrollback and the merged ALL stream. Phase B
@@ -18,13 +22,15 @@ const lineCap = 10_000
 // chatty target cannot force a redraw per line.
 const maxEventBatch = 256
 
-// runTUI runs the targets behind the bubbletea TUI. It returns 0 after a
-// graceful quit and 130 when a second signal forced the kill.
-func runTUI(targets []Target, signals <-chan os.Signal) int {
+// runTUI runs the targets behind the bubbletea TUI. configPath is the
+// rerun.yml the run reloads itself from; "" turns the config watch off. It
+// returns 0 after a graceful quit and 130 when a second signal forced the kill.
+func runTUI(targets []Target, configPath string, signals <-chan os.Signal) int {
 	signals, stopSignals := signalChannel(signals)
 	defer stopSignals()
 
 	model := newTUI(targets)
+	model.group.configPath = configPath
 	model.group.start()
 
 	program := tea.NewProgram(model,
@@ -98,6 +104,16 @@ type tuiTarget struct {
 	unseen bool
 	opened bool
 
+	// lastChange is the newest change batch the target reacted to; changeRows
+	// is that set as the tree's rows, sorted once here rather than per frame.
+	lastChange rerun.ChangeSet
+	changeRows []changeRow
+
+	// treePinned and treeOpen are the manual override of the change tree: the
+	// cursor's own row expands on its own, a pinned row keeps its own state.
+	treePinned bool
+	treeOpen   bool
+
 	lines []string
 }
 
@@ -120,11 +136,27 @@ type tuiModel struct {
 	follow  bool
 	pending int
 
+	// copySeq is the last copy's OSC 52 sequence and copyHint its message.
+	// Both render only while m.now is before copyUntil, which is kept apart
+	// from hintUntil so the m/s hint cannot resurrect a stale copy.
+	copySeq   string
+	copyHint  string
+	copyUntil time.Time
+
+	// selAnchor is the content index a frozen drag started on; nil means no
+	// selection. selEnd is the drag row's current content index.
+	selAnchor *int
+	selEnd    int
+
 	// merged is every line in arrival order; visible is the pane's
 	// materialized view of it, which muting and soloing filter.
 	merged      []mergedLine
 	visible     []string
 	mergedDirty bool
+
+	// visibleRaw mirrors visible without target prefixes, so a copy yields the
+	// target's own text. len(visibleRaw) always equals len(visible).
+	visibleRaw []string
 
 	// prefixW is the pane prefix column: the longest target name, so every
 	// stream line starts its message in the same column.
@@ -157,7 +189,7 @@ func (s tuiSink) emit(ev event) { s <- ev }
 
 func newTUI(targets []Target) *tuiModel {
 	events := make(chan event, 4096)
-	group := newTargetGroup(targets, tuiSink(events))
+	group := newTargetGroup(targets, tuiSink(events), "")
 
 	m := &tuiModel{
 		group:     group,
@@ -169,6 +201,8 @@ func newTUI(targets []Target) *tuiModel {
 		lastClick: -1,
 		hover:     -1,
 		styles:    newTUIStyles(),
+		// Kept non-nil: copy code walks this list in parallel with visible.
+		visibleRaw: []string{},
 	}
 	m.vp = viewport.New(80, 20)
 
@@ -203,8 +237,11 @@ func (m *tuiModel) rowOf(name string) int {
 
 // streamsTo reports whether the target's output belongs in the merged ALL
 // stream: muted targets are out, and while one target is soloed every other
-// target is out.
+// target is out. rerun's own lines and lines whose row is gone always show.
 func (m *tuiModel) streamsTo(i int) bool {
+	if i < 0 || i >= len(m.targets) {
+		return true
+	}
 	if m.targets[i].muted {
 		return false
 	}
@@ -246,6 +283,7 @@ func (m *tuiModel) toggleSolo(i int) {
 	m.solo = i
 	m.targets[i].muted = false
 	m.targets[i].unseen = false
+	m.group.setSoloGuard(true)
 	m.mergedDirty = true
 	m.vpDirty = true
 }
@@ -257,8 +295,39 @@ func (m *tuiModel) clearSolo() {
 	}
 	m.targets[m.solo].unseen = false // the row's own output is back in the pane
 	m.solo = -1
+	m.group.setSoloGuard(false)
 	m.mergedDirty = true
 	m.vpDirty = true
+}
+
+// treeExpanded reports whether a row's change tree is shown. The cursor's row
+// opens on its own; a manual toggle pins a row either way.
+func (m *tuiModel) treeExpanded(i int) bool {
+	t := m.targets[i]
+	if t.treePinned {
+		return t.treeOpen
+	}
+	return m.cursor == i+1
+}
+
+// toggleTree pins a row's change tree to the opposite of what it shows now.
+func (m *tuiModel) toggleTree(i int) {
+	t := m.targets[i]
+	was := m.treeExpanded(i)
+	t.treePinned = true
+	t.treeOpen = !was
+}
+
+// treeCell is the row's change-tree indicator: `−` while its tree is open, `+`
+// while a retained change set stays collapsed, and blank without one.
+func (m *tuiModel) treeCell(i int) string {
+	if len(m.targets[i].changeRows) == 0 {
+		return " "
+	}
+	if m.treeExpanded(i) {
+		return "−"
+	}
+	return "+"
 }
 
 // showTargetHint flags that m/s need a row, not the ALL rollup.
@@ -331,14 +400,30 @@ func (m *tuiModel) openTarget(i int) {
 func (m *tuiModel) addLine(i int, line string) {
 	t := m.targets[i]
 	t.lines = appendCapped(t.lines, line)
-	m.merged = appendCapped(m.merged, mergedLine{target: i, text: line})
+	m.merged = appendCapped(m.merged, mergedLine{target: i, name: t.spec.Name, text: line})
 	if m.streamsTo(i) {
-		m.visible = appendCapped(m.visible, m.prefixed(i, line))
+		m.visible = appendCapped(m.visible, m.prefixed(mergedLine{target: i, name: t.spec.Name, text: line}))
+		m.visibleRaw = appendCapped(m.visibleRaw, line)
 		if !m.follow {
 			m.pending++ // only lines the pane actually holds
 		}
 	} else {
 		m.mergedDirty = true
+	}
+	m.vpDirty = true
+}
+
+// addNotice appends one of rerun's own lines to the pane: a config banner, not
+// a target's output. The mute and solo filters never hide it.
+func (m *tuiModel) addNotice(line string) {
+	if line == "" {
+		return
+	}
+	m.merged = appendCapped(m.merged, mergedLine{target: -1, text: line})
+	m.visible = appendCapped(m.visible, line)
+	m.visibleRaw = appendCapped(m.visibleRaw, line)
+	if !m.follow {
+		m.pending++
 	}
 	m.vpDirty = true
 }
@@ -359,6 +444,20 @@ func (m *tuiModel) applyEvents(events []event) {
 }
 
 func (m *tuiModel) applyEvent(ev event) {
+	switch ev.kind {
+	case evReconcile:
+		// Adopt the list first, so the banner lands in the new pane.
+		if ev.cfg != nil {
+			m.rebuildRows(ev.cfg)
+		}
+		m.addNotice(ev.line)
+		return
+
+	case evNotice:
+		m.addNotice(ev.line)
+		return
+	}
+
 	row := m.rowOf(ev.target)
 	if row <= 0 {
 		return
@@ -375,6 +474,10 @@ func (m *tuiModel) applyEvent(ev event) {
 		}
 
 	case evChanged:
+		// Retain the whole batch: the row's change tree renders it and the
+		// pane header counts it.
+		t.lastChange = ev.change
+		t.changeRows = m.changeRowsFor(t)
 		plural := ""
 		if ev.count > 1 {
 			plural = "s"
@@ -417,6 +520,95 @@ func (m *tuiModel) applyEvent(ev event) {
 	}
 }
 
+// rebuildRows adopts a reconciled target list. Rows are matched by name, so a
+// row keeps its stream, its mute, and its change tree across a reload; only a
+// name that just appeared gets a new row.
+func (m *tuiModel) rebuildRows(c *configChange) {
+	old := m.targets
+	byName := make(map[string]*tuiTarget, len(old))
+	for _, t := range old {
+		byName[t.spec.Name] = t
+	}
+
+	// The cursor and the solo follow a target by name, never by index: a reload
+	// can reorder, add, and drop rows underneath them.
+	curName, soloName := "", ""
+	if m.cursor > 0 && m.cursor <= len(old) {
+		curName = old[m.cursor-1].spec.Name
+	}
+	if m.solo >= 0 && m.solo < len(old) {
+		soloName = old[m.solo].spec.Name
+	}
+
+	rows := make([]*tuiTarget, 0, len(c.targets))
+	index := make(map[string]int, len(c.targets))
+	for i, spec := range c.targets {
+		row, known := byName[spec.Name]
+		if !known {
+			row = &tuiTarget{runner: c.runners[i], state: stateRunning, exitCode: -1, lastStart: m.now}
+			if i < len(c.stopped) && c.stopped[i] {
+				row.state = stateOff // the group holds it down until space or r
+			}
+		}
+		rootMoved := !slices.Equal(row.spec.On, spec.On)
+		row.spec = spec
+		if rootMoved {
+			// The tree's paths are relative to the watch root, which moved.
+			row.changeRows = m.changeRowsFor(row)
+		}
+		rows = append(rows, row)
+		index[spec.Name] = i
+	}
+
+	// Stream lines carry a row index, so every retained line is remapped. A
+	// line whose target left the config keeps its text and its prefix, and
+	// loses only its row: it stops answering to mute and solo.
+	for k := range m.merged {
+		if m.merged[k].target < 0 {
+			continue
+		}
+		m.merged[k].target = -1
+		if j, ok := index[m.merged[k].name]; ok {
+			m.merged[k].target = j
+		}
+	}
+
+	m.targets = rows
+	m.cursor = 0
+	if j, ok := index[curName]; ok {
+		m.cursor = j + 1
+	}
+	m.solo = -1
+	if j, ok := index[soloName]; ok {
+		m.solo = j
+	}
+	m.prefixW = 0
+	for _, row := range rows {
+		m.prefixW = max(m.prefixW, displayWidth(row.spec.Name))
+	}
+	m.hover = -1
+	m.lastClick = -1
+	m.mergedDirty = true
+	m.vpDirty = true
+}
+
+// changeRowsFor turns a row's retained change set into tree rows: paths
+// relative to the target's watch root, sorted, one fsnotify glyph each.
+func (m *tuiModel) changeRowsFor(t *tuiTarget) []changeRow {
+	if len(t.lastChange.Files) == 0 {
+		return nil
+	}
+	rows := make([]changeRow, 0, len(t.lastChange.Files))
+	for path := range t.lastChange.Files {
+		rows = append(rows, changeRow{
+			op:   opGlyph(t.lastChange.Ops[path]),
+			path: relToWatch(t.spec.On, path),
+		})
+	}
+	sort.Slice(rows, func(a, b int) bool { return rows[a].path < rows[b].path })
+	return rows
+}
+
 // paneLines is the merged stream, rebuilt when muting or soloing changed
 // what belongs in it.
 func (m *tuiModel) paneLines() []string {
@@ -426,27 +618,31 @@ func (m *tuiModel) paneLines() []string {
 	return m.visible
 }
 
-// mergedLine is one line of the arrival-ordered log the ALL pane filters.
+// mergedLine is one line of the arrival-ordered log the ALL pane filters. The
+// name is the target's name at arrival, so a line whose row is gone keeps its
+// prefix instead of jumping to whatever row took its index.
 type mergedLine struct {
 	target int
+	name   string
 	text   string
 }
 
-func (m *tuiModel) prefixed(i int, text string) string {
-	name := m.targets[i].spec.Name
-	if name == "" {
-		return text
+func (m *tuiModel) prefixed(line mergedLine) string {
+	if line.name == "" {
+		return line.text
 	}
-	return padRight(name, m.prefixW) + "  " + text
+	return padRight(line.name, m.prefixW) + "  " + line.text
 }
 
 func (m *tuiModel) rebuildMerged() {
 	m.visible = m.visible[:0]
+	m.visibleRaw = m.visibleRaw[:0]
 	for _, line := range m.merged {
 		if !m.streamsTo(line.target) {
 			continue
 		}
-		m.visible = appendCapped(m.visible, m.prefixed(line.target, line.text))
+		m.visible = appendCapped(m.visible, m.prefixed(line))
+		m.visibleRaw = appendCapped(m.visibleRaw, line.text)
 	}
 	m.mergedDirty = false
 }
@@ -546,6 +742,55 @@ func (m *tuiModel) anyUnseen() bool {
 // clickable. Others render the text as-is.
 func osc8(url, text string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
+}
+
+// osc52 wraps a payload in the OSC 52 clipboard sequence. Terminals that
+// support it copy remotely, so it works over ssh; others ignore it.
+func osc52(payload string) string {
+	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(payload)) + "\x1b\\"
+}
+
+// copyCap bounds one clipboard payload, so a huge selection cannot stall the
+// terminal's paste buffer.
+const copyCap = 64 << 10
+
+// copyPayload joins whole raw lines for the clipboard, capped at copyCap
+// bytes. Lines are kept from the top of the selection; the rest is dropped and
+// reported as truncated. A single over-cap line copies as nothing.
+func copyPayload(lines []string) (payload string, n int, truncated bool) {
+	var b strings.Builder
+	for _, line := range lines {
+		add := len(line)
+		if n > 0 {
+			add++ // the separator newline
+		}
+		if b.Len()+add > copyCap {
+			truncated = true
+			break
+		}
+		if n > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(line)
+		n++
+	}
+	if n == 0 {
+		return "", 0, false
+	}
+	b.WriteByte('\n')
+	return b.String(), n, truncated
+}
+
+// copyMessage names how many lines reached the clipboard.
+func copyMessage(n int, truncated bool) string {
+	s := fmt.Sprintf("copied %d lines", n)
+	if n == 1 {
+		s = "copied 1 line"
+	}
+	if truncated {
+		s += " (truncated)"
+	}
+	return s
 }
 
 // padRight truncates or pads plain text to exactly w display cells.

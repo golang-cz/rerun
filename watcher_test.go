@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 func writeFiles(t *testing.T, paths ...string) {
@@ -147,6 +149,31 @@ func TestWatchGlobDeliversChanges(t *testing.T) {
 	// b.go is not matched by the glob, so no watch covers it.
 	writeFiles(t, b)
 	assertNoChange(t, changes, 300*time.Millisecond)
+}
+
+// A change set carries what happened to each file, so a front-end can tell a
+// created file from a written one.
+func TestWatchRecordsTheOpPerFile(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a_test.go")
+	writeFiles(t, a)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	change := writeUntilChange(t, changes, a, 2*time.Second)
+	op, ok := change.Ops[a]
+	if !ok {
+		t.Fatalf("Ops is missing %s: %v", a, change.Ops)
+	}
+	if !op.Has(fsnotify.Write) && !op.Has(fsnotify.Create) {
+		t.Fatalf("op for %s = %v, want a create or a write", a, op)
+	}
 }
 
 func TestMatchGlobPattern(t *testing.T) {

@@ -50,7 +50,7 @@ func startRunner(t *testing.T, yml string) (*safeBuffer, func() int, string) {
 	out := &safeBuffer{}
 	signals := make(chan os.Signal, 2)
 	code := make(chan int, 1)
-	go func() { code <- runTargets(cfg.Targets, out, signals) }()
+	go func() { code <- runTargets(cfg.Targets, out, cfg.Path, signals) }()
 
 	var once sync.Once
 	exitCode := -1
@@ -217,4 +217,90 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+// lineWith is the first output line containing sub.
+func lineWith(out *safeBuffer, sub string) (string, bool) {
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, sub) {
+			return line, true
+		}
+	}
+	return "", false
+}
+
+// saveUntilLine saves a config and waits for the line it should produce. The
+// save is repeated: like writeUntilChange, a fresh watch can miss the very
+// first event, and a repeated identical save is a no-op for the targets.
+func saveUntilLine(t *testing.T, out *safeBuffer, path, yml, sub string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		writeFile(t, path, yml)
+		wait := 300 * time.Millisecond
+		if left := time.Until(deadline); left < wait {
+			wait = left
+		}
+		time.Sleep(wait)
+		if line, ok := lineWith(out, sub); ok {
+			return line
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for a line with %q; output:\n%s", sub, out.String())
+		}
+	}
+}
+
+// The config file is watched: saving it reconciles the running targets and
+// reports the delta as one banner line, and a config rerun cannot parse leaves
+// every running target alone.
+func TestRunTargetsReloadsTheConfig(t *testing.T) {
+	out, stop, dir := startRunner(t, `web:
+  on: src
+  cmd: echo web-up && sleep 30
+
+api:
+  on: src
+  cmd: echo api-up && sleep 30
+`)
+
+	waitForOutput(t, out, "[web] web-up", 3*time.Second)
+	waitForOutput(t, out, "[api] api-up", 3*time.Second)
+
+	// One save: web's cmd changes and worker appears; api is untouched.
+	reloaded := `web:
+  on: src
+  cmd: echo web-v2 && sleep 30
+
+api:
+  on: src
+  cmd: echo api-up && sleep 30
+
+worker:
+  on: src
+  cmd: echo worker-up && sleep 30
+`
+	banner := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), reloaded, "config reloaded", 5*time.Second)
+	if !strings.Contains(banner, "~web(cmd)") || !strings.Contains(banner, "+worker") {
+		t.Fatalf("banner = %q, want the cmd restart and the added target", banner)
+	}
+	waitForOutput(t, out, "[web] web-v2", 5*time.Second)
+	waitForOutput(t, out, "[worker] worker-up", 5*time.Second)
+	if got := out.String(); strings.Contains(got, "[api] exited") {
+		t.Fatalf("an unrelated config change restarted api:\n%s", got)
+	}
+
+	// A save rerun cannot parse only reports itself.
+	line := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), "web:\n  cmd:\n", "config reload failed", 5*time.Second)
+	if !strings.Contains(line, `target "web"`) {
+		t.Fatalf("error line = %q, want the parse error naming web", line)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if got := out.String(); strings.Contains(got, "[web] exited") || strings.Contains(got, "[worker] exited") {
+		t.Fatalf("a broken config touched a running target:\n%s", got)
+	}
+
+	if got := stop(); got != 0 {
+		t.Errorf("exit code = %d, want 0", got)
+	}
 }

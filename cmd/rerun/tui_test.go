@@ -371,8 +371,9 @@ func TestSoloPaneKeepsPrefix(t *testing.T) {
 	}
 }
 
-// The right pane's first line is the cursor row's command, not the name the
-// left column already prints.
+// The right pane's first line is the cursor row's header: its status, the size
+// of its last change batch, and its command. The left column already prints
+// the name.
 func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "vite dev"
@@ -382,8 +383,8 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	_, rightW := m.layoutWidths()
 	lines := paneOf(m)
 
-	if !strings.Contains(lines[0], "$ vite dev") {
-		t.Fatalf("title = %q, want the cursor row's command", lines[0])
+	if !strings.HasPrefix(lines[0], "0s · 0 files · vite dev") {
+		t.Fatalf("title = %q, want the cursor row's uptime, files, and command", lines[0])
 	}
 	if got := displayWidth(lines[0]); got != rightW {
 		t.Fatalf("title width = %d, want %d", got, rightW)
@@ -392,9 +393,21 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 		t.Fatalf("viewport height = %d, want %d with a title row", m.vp.Height, m.height-1)
 	}
 
+	// The file count is the row's retained change batch.
+	m.applyEvent(event{
+		kind:   evChanged,
+		target: "frontend",
+		count:  3,
+		first:  "src/a.go",
+		change: rerun.ChangeSet{Files: map[string]struct{}{"src/a.go": {}, "src/b.go": {}, "src/c.go": {}}},
+	})
+	if line := paneOf(m)[0]; !strings.HasPrefix(line, "0s · 3 files · vite dev") {
+		t.Fatalf("title after a change = %q, want the file count", line)
+	}
+
 	// The title follows the cursor row.
 	m.cursor = 2
-	if line := paneOf(m)[0]; !strings.Contains(line, "$ sleep 1") {
+	if line := paneOf(m)[0]; !strings.Contains(line, "· sleep 1") {
 		t.Fatalf("title after moving = %q, want the api row's command", line)
 	}
 }
@@ -471,7 +484,8 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	}
 }
 
-// The left column is nameW + the fixed glyph, separators, status, and button.
+// The left column is nameW + the fixed glyph, badge, tree cell, separators,
+// status, and button.
 func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
 	leftW, _ := m.layoutWidths()
@@ -480,11 +494,15 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	if got := nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+14 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+14)
+	if leftW != wantName+15 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+15)
 	}
 	if statusW != 9 {
 		t.Fatalf("statusW = %d, want 9", statusW)
+	}
+	// The tree cell sits between the name's badge and the status column.
+	if got := treeX(leftW); got != wantName+3 {
+		t.Fatalf("tree cell x = %d, want %d", got, wantName+3)
 	}
 }
 
@@ -1197,9 +1215,9 @@ func TestSelfExitedTargetWaitsForChange(t *testing.T) {
 	}
 }
 
-// f, c, and / are reserved for Phase B, so pressing one must change nothing.
+// c and / are reserved for Phase B, so pressing one must change nothing.
 func TestUnboundKeysChangeNothing(t *testing.T) {
-	for _, key := range []string{"f", "c", "/"} {
+	for _, key := range []string{"c", "/"} {
 		t.Run(key, func(t *testing.T) {
 			m := newTestModel(t)
 			m.cursor = 2
@@ -1264,14 +1282,14 @@ func TestReadLinesReportsScannerError(t *testing.T) {
 		_, _ = pw.Write(bytes.Repeat([]byte("x"), 2*1024*1024))
 	}()
 
-	r.readLines(pr)
+	r.readLines(pr, "t")
 
 	got := sink.all()
 	if len(got) != 1 {
 		t.Fatalf("events = %d, want the one scanner error line", len(got))
 	}
-	if got[0].kind != evOutput || !strings.Contains(got[0].line, "token too long") {
-		t.Fatalf("event = %+v, want an output line naming the scanner error", got[0])
+	if got[0].kind != evOutput || got[0].target != "t" || !strings.Contains(got[0].line, "token too long") {
+		t.Fatalf("event = %+v, want the t output line naming the scanner error", got[0])
 	}
 }
 

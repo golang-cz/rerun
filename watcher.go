@@ -38,7 +38,10 @@ type Watcher struct {
 type ChangeSet struct {
 	FirstFile string
 	Files     map[string]struct{}
-	Error     error
+	// Ops is the fsnotify operation last seen for each file in Files, so a
+	// front-end can tell a created file from a written or removed one.
+	Ops   map[string]fsnotify.Op
+	Error error
 }
 
 func NewWatcher() (*Watcher, error) {
@@ -142,6 +145,7 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 			for {
 				change := ChangeSet{
 					Files: make(map[string]struct{}),
+					Ops:   make(map[string]fsnotify.Op),
 				}
 
 				// A nil timeoutC blocks forever, so no timer is needed before
@@ -188,6 +192,9 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							change.FirstFile = event.Name
 						}
 						change.Files[event.Name] = struct{}{}
+						// Merged, not replaced: a create arrives with its write, and the
+						// create is the interesting half.
+						change.Ops[event.Name] |= event.Op
 
 					case err, ok := <-w.watcher.Errors:
 						if !ok {
