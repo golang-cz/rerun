@@ -35,6 +35,16 @@ type Column struct {
 	Expr string
 }
 
+// startMode is when a target first runs. The zero value is startAuto, so a
+// Target literal that names no mode behaves exactly like `start: auto`.
+type startMode string
+
+const (
+	startAuto     startMode = ""
+	startOnChange startMode = "onchange"
+	startManual   startMode = "manual"
+)
+
 type Target struct {
 	Name     string
 	Desc     string
@@ -46,6 +56,9 @@ type Target struct {
 	Delay    time.Duration
 	Cooldown time.Duration
 	Grace    time.Duration
+	// Start is when the target first runs: startAuto at session start,
+	// startOnChange at the first file change, startManual on r only.
+	Start startMode
 	// NoGitignore turns off .gitignore filtering for this target.
 	NoGitignore bool
 	// Selected is false for `selected: false` targets: they exist in the
@@ -270,7 +283,7 @@ func ParseConfig(path string) (*Config, error) {
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsMatchParser
 // fails when the two drift apart.
-var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "open", "selected", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "open", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Target, error) {
 	node = deref(node)
@@ -333,6 +346,22 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Targ
 				cols = append(cols, col)
 			}
 			target.Columns = cols
+
+		case "start":
+			s, err := scalarField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			switch s {
+			case "auto":
+				target.Start = startAuto
+			case "onchange":
+				target.Start = startOnChange
+			case "manual":
+				target.Start = startManual
+			default:
+				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: expected auto, onchange, or manual, got %q", name, field, s))
+			}
 
 		case "open", "selected":
 			b, err := boolField(src, name, field, value)

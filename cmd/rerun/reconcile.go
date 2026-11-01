@@ -67,12 +67,14 @@ func diffTargets(old, new []Target) []reconcileAction {
 }
 
 // watchSpecDiffers reports whether the fields the file watcher is built from
-// changed, which leaves the running watch list stale.
+// changed, which leaves the running watch list stale. A new start mode is one
+// of them: manual drops the watcher, the others build one.
 func watchSpecDiffers(a, b Target) bool {
 	return !slices.Equal(a.On, b.On) ||
 		!slices.Equal(a.Except, b.Except) ||
 		a.Delay != b.Delay ||
-		a.NoGitignore != b.NoGitignore
+		a.NoGitignore != b.NoGitignore ||
+		a.Start != b.Start
 }
 
 // reconcileSummary renders the actions as one banner line:

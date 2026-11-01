@@ -362,8 +362,9 @@ const (
 	ctrlStop ctrlKind = iota
 	ctrlStart
 	ctrlReboot
-	// ctrlSpec swaps in a spec whose cmd changed: the process restarts unless
-	// the user stopped the target.
+	// ctrlSpec swaps in a spec whose cmd changed: a running generation bounces
+	// so the new cmd applies, and an auto target restarts even if it exited.
+	// Nothing wakes a target with no generation of its own.
 	ctrlSpec
 	// ctrlRewatch swaps in a spec whose watched set changed: only the file
 	// watcher is rebuilt, the process is left alone.
@@ -522,7 +523,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 	defer close(r.finished)
 	defer close(r.watchDone)
 
-	watcher, err := r.newWatcher()
+	watcher, changes, err := r.rewatch()
 	if err != nil {
 		return err
 	}
@@ -546,18 +547,23 @@ func (r *targetRunner) run(ctx context.Context) error {
 		}
 	}()
 
-	changes := r.startWatch(watcher)
-
 	handleCtrl := func(c ctrlMsg) {
 		if c.kind == ctrlRewatch {
+			wasAuto := r.target.Start == startAuto
 			if c.target != nil {
 				r.target = *c.target
 			}
 			if w, ch, err := r.rewatch(); err != nil {
 				r.sink.emit(event{kind: evWatcherErr, target: r.target.Name, err: err})
 			} else {
-				_ = watcher.Close()
+				if watcher != nil {
+					_ = watcher.Close()
+				}
 				watcher, changes = w, ch
+			}
+			// A target switched to auto that never ran starts now.
+			if r.target.Start == startAuto && !wasAuto && !r.userStopped() && r.currentCmd() == nil {
+				r.spawn(ctx)
 			}
 			return
 		}
@@ -566,9 +572,10 @@ func (r *targetRunner) run(ctx context.Context) error {
 
 	// Start before the watch walk delivers: the walk can take seconds on a big
 	// tree, and the command's output must not wait for it. A run cancelled
-	// while the watcher was built starts nothing.
+	// while the watcher was built starts nothing. onchange and manual keep the
+	// first generation back, for a change and for r.
 	if ctx.Err() == nil {
-		if !r.userStopped() {
+		if !r.userStopped() && r.target.Start == startAuto {
 			if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 				return err
 			}
@@ -610,9 +617,12 @@ func (r *targetRunner) run(ctx context.Context) error {
 	}
 }
 
-// rewatch rebuilds the target's watcher from its current spec, leaving the
-// running process alone.
+// rewatch builds the target's watcher from its current spec, leaving the
+// running process alone. A manual target watches nothing: no watcher, no walk.
 func (r *targetRunner) rewatch() (*rerun.Watcher, <-chan rerun.ChangeSet, error) {
+	if r.target.Start == startManual {
+		return nil, nil, nil
+	}
 	watcher, err := r.newWatcher()
 	if err != nil {
 		return nil, nil, err
@@ -653,8 +663,12 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		// spec needs its own restart.
 		r.drainSpecs()
 		// A target the user stopped only takes the new spec: a config edit
-		// never surprises a stopped target into running.
-		if !r.userStopped() {
+		// never surprises a stopped target into running, and a manual target
+		// only ever starts on r. An onchange target waits for its
+		// change just the same.
+		cmd := r.currentCmd()
+		running := cmd != nil && !cmd.Exited()
+		if !r.userStopped() && (r.target.Start == startAuto || running) {
 			r.restart(ctx)
 		}
 	}

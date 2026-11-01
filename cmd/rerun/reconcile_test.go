@@ -32,6 +32,8 @@ func TestDiffTargetsReconcileActions(t *testing.T) {
 	delayChanged.Delay = time.Second
 	ignoreChanged := recTarget("api", "api")
 	ignoreChanged.NoGitignore = true
+	startChanged := recTarget("api", "api")
+	startChanged.Start = startManual
 	cosmetic := recTarget("api", "api")
 	cosmetic.Desc = "the api"
 	cosmetic.URL = "http://localhost:8080"
@@ -91,6 +93,12 @@ func TestDiffTargetsReconcileActions(t *testing.T) {
 			name: "changed no-gitignore rewires the watcher",
 			old:  []Target{web, api},
 			new:  []Target{web, ignoreChanged},
+			want: []reconcileAction{{name: "api", kind: recRewatch}},
+		},
+		{
+			name: "changed start mode rewires the watcher",
+			old:  []Target{web, api},
+			new:  []Target{web, startChanged},
 			want: []reconcileAction{{name: "api", kind: recRewatch}},
 		},
 		{
@@ -426,6 +434,44 @@ func TestColumnsChangeIsCosmeticAndReachesTheTUI(t *testing.T) {
 	}
 }
 
+// A row that never ran takes its spec's new start mode across a reload.
+func TestReconcileUpdatesAnUnstartedRowsStartMode(t *testing.T) {
+	manual := recTarget("web", "web")
+	manual.Start = startManual
+	onchange := manual
+	onchange.Start = startOnChange
+
+	m := newTestModel(t, manual)
+	m.applyEvent(event{kind: evReconcile, cfg: &configChange{
+		targets: []Target{onchange},
+		runners: []*targetRunner{m.targets[0].runner},
+		stopped: []bool{false},
+	}})
+
+	if got := m.status(m.targets[0]); got != "onchange" {
+		t.Fatalf("status = %q, want onchange after the reload", got)
+	}
+}
+
+// A manual target takes the new cmd but never starts itself: only r does.
+func TestChangedCmdNeverStartsAManualTarget(t *testing.T) {
+	manual := recTarget("web", "web")
+	manual.Start = startManual
+	sink := &recordingSink{}
+	r := newTargetRunner(manual, sink)
+
+	fresh := recTarget("web", "web-v2")
+	fresh.Start = startManual
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlSpec, target: &fresh})
+
+	if r.target.Cmd != "web-v2" {
+		t.Fatalf("spec cmd = %q, want the new one", r.target.Cmd)
+	}
+	if got := sink.all(); len(got) != 0 {
+		t.Fatalf("a manual target reported %+v, want no start", got)
+	}
+}
+
 // nextCtrl pops the control a runner's loop would have taken.
 func nextCtrl(t *testing.T, r *targetRunner) ctrlMsg {
 	t.Helper()
@@ -453,6 +499,52 @@ func TestChangedCmdNeverStartsAStoppedTarget(t *testing.T) {
 	if got := sink.all(); len(got) != 0 {
 		t.Fatalf("a stopped target restarted on a config edit: %+v", got)
 	}
+}
+
+// An onchange target takes the new cmd but keeps waiting for the
+// change that starts it: a config edit is not that change.
+func TestChangedCmdNeverStartsAnOnChangeTarget(t *testing.T) {
+	onchange := recTarget("web", "web")
+	onchange.Start = startOnChange
+	sink := &recordingSink{}
+	r := newTargetRunner(onchange, sink)
+
+	fresh := recTarget("web", "web-v2")
+	fresh.Start = startOnChange
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlSpec, target: &fresh})
+
+	if r.target.Cmd != "web-v2" {
+		t.Fatalf("spec cmd = %q, want the new one", r.target.Cmd)
+	}
+	if got := sink.all(); len(got) != 0 {
+		t.Fatalf("an onchange target reported %+v, want no start", got)
+	}
+}
+
+// An auto target whose process already exited still restarts on a config edit:
+// its new cmd has to apply.
+func TestChangedCmdRestartsAnExitedAutoTarget(t *testing.T) {
+	sink := &recordingSink{}
+	r := newTargetRunner(recTarget("web", "true"), sink)
+
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlStart})
+	first := r.currentCmd()
+	if first == nil {
+		t.Fatal("the target did not start")
+	}
+	select {
+	case <-r.exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the first generation did not exit")
+	}
+
+	fresh := recTarget("web", "sleep 30")
+	r.handleControl(context.Background(), ctrlMsg{kind: ctrlSpec, target: &fresh})
+	restarted := r.currentCmd()
+	if restarted == nil || restarted == first || restarted.Exited() {
+		t.Fatal("an auto target that had exited did not restart on a config edit")
+	}
+	r.killCurrent(context.Background())
 }
 
 // reload is the config watch's whole body: parse, diff, apply, report. It is

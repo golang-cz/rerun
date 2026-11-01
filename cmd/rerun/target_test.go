@@ -948,3 +948,232 @@ func TestStartGateDoesNotLetANewcomerJumpTheQueue(t *testing.T) {
 		t.Fatal("a newcomer took a free slot ahead of a queued waiter")
 	}
 }
+
+// startRunnerGroup boots the targets from a rerun.yml fixture in a temp cwd and
+// hands back the group, so a test can drive one runner directly.
+func startRunnerGroup(t *testing.T, yml string) (*targetGroup, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFileName), yml)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	g := newTargetGroup(cfg.Targets, &recordingSink{}, "")
+	g.start()
+	t.Cleanup(func() {
+		g.cancel()
+		<-g.done
+	})
+	return g, dir
+}
+
+// waitForWatcher waits until the runner's watcher is published, since the tree
+// walk can still be running when the group is up.
+func waitForWatcher(t *testing.T, r *targetRunner) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if r.watcher.Load() != nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the runner built no watcher within 3s")
+}
+
+// waitForCmd waits for the runner's current generation.
+func waitForCmd(t *testing.T, r *targetRunner) rerun.Command {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cmd := r.currentCmd(); cmd != nil {
+			return cmd
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the runner started no generation within 3s")
+	return nil
+}
+
+// waitForNewCmd waits for the runner to replace the generation it had.
+func waitForNewCmd(t *testing.T, r *targetRunner, old rerun.Command) rerun.Command {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cmd := r.currentCmd(); cmd != nil && cmd != old {
+			return cmd
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the runner kept its old generation for 3s")
+	return nil
+}
+
+// writeUntil rewrites the file until cond holds: a fresh watcher's walk can
+// still be running when the first write lands, and that event is then missed.
+// The pause between attempts is past the watcher's debounce, which a faster
+// stream of writes would keep resetting and never deliver.
+func writeUntil(t *testing.T, path string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		writeFile(t, path, "x")
+		time.Sleep(300 * time.Millisecond)
+		if cond() {
+			return
+		}
+	}
+	t.Fatal("timed out waiting for the runner to react to a file change")
+}
+
+// start: auto is the default: the target spawns at session start and a change
+// restarts it.
+func TestAutoStartsAtSessionStart(t *testing.T) {
+	g, dir := startRunnerGroup(t, `t:
+  on: src
+  cmd: sleep 30
+`)
+	r := g.runners[0]
+	first := waitForCmd(t, r)
+
+	writeUntil(t, filepath.Join(dir, "src", "a.txt"), func() bool { return r.currentCmd() != first })
+}
+
+// start: onchange holds the first generation back until a file changes, then
+// behaves like auto.
+func TestOnChangeWaitsForTheFirstChange(t *testing.T) {
+	g, dir := startRunnerGroup(t, `t:
+  on: src
+  start: onchange
+  cmd: sleep 30
+`)
+	r := g.runners[0]
+	waitForWatcher(t, r)
+	if cmd := r.currentCmd(); cmd != nil {
+		t.Fatal("an onchange target started at session start")
+	}
+
+	writeUntil(t, filepath.Join(dir, "src", "a.txt"), func() bool { return r.currentCmd() != nil })
+	first := r.currentCmd()
+
+	writeUntil(t, filepath.Join(dir, "src", "b.txt"), func() bool { return r.currentCmd() != first })
+}
+
+// A running onchange target still bounces on a config edit, so its new cmd
+// applies. An onchange one keeps waiting instead.
+func TestRunningOnChangeTargetBouncesOnASpecChange(t *testing.T) {
+	g, dir := startRunnerGroup(t, `t:
+  on: src
+  start: onchange
+  cmd: sleep 30
+`)
+	r := g.runners[0]
+	waitForWatcher(t, r)
+	writeUntil(t, filepath.Join(dir, "src", "a.txt"), func() bool { return r.currentCmd() != nil })
+	first := r.currentCmd()
+
+	spec := recTarget("t", "sleep 31")
+	spec.Start = startOnChange
+	if !r.controlSpec(ctrlSpec, spec) {
+		t.Fatal("the spec control was not queued")
+	}
+
+	waitForNewCmd(t, r, first)
+	if !first.Exited() {
+		t.Fatal("the old generation outlived the bounce")
+	}
+}
+
+// start: manual never builds a watcher, so no change can start it; r does.
+func TestManualWaitsForControl(t *testing.T) {
+	g, dir := startRunnerGroup(t, `t:
+  on: src
+  start: manual
+  cmd: sleep 30
+`)
+	r := g.runners[0]
+
+	time.Sleep(300 * time.Millisecond)
+	if w := r.watcher.Load(); w != nil {
+		t.Fatal("a manual target built a watcher")
+	}
+	if cmd := r.currentCmd(); cmd != nil {
+		t.Fatal("a manual target started at session start")
+	}
+
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		writeFile(t, filepath.Join(dir, "src", name), "x")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if cmd := r.currentCmd(); cmd != nil {
+		t.Fatal("a manual target started on a file change")
+	}
+
+	if !r.control(ctrlStart) {
+		t.Fatal("ctrlStart did not reach the runner")
+	}
+	waitForCmd(t, r)
+}
+
+// A reload that switches a running target to manual leaves its process alone
+// and drops its watcher, so a change no longer restarts it.
+func TestRunTargetsReloadToManualKeepsTheProcess(t *testing.T) {
+	out, stop, dir := startRunner(t, `t:
+  on: src
+  cmd: echo tick >> count.txt; sleep 30
+`)
+	count := filepath.Join(dir, "count.txt")
+	waitForCount(t, count, 1, 3*time.Second)
+
+	manual := `t:
+  on: src
+  start: manual
+  cmd: echo tick >> count.txt; sleep 30
+`
+	banner := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), manual, "config reloaded", 5*time.Second)
+	if !strings.Contains(banner, "↺t(watch)") {
+		t.Fatalf("banner = %q, want the watcher rewire", banner)
+	}
+
+	time.Sleep(300 * time.Millisecond) // the runner drops its watcher behind the banner
+	if got := out.String(); strings.Contains(got, "[t] exited") {
+		t.Fatalf("switching to manual killed the running process:\n%s", got)
+	}
+
+	writeFile(t, filepath.Join(dir, "src", "a.txt"), "a")
+	waitForStableCount(t, count, 1, 500*time.Millisecond)
+
+	if got := stop(); got != 0 {
+		t.Errorf("exit code = %d, want 0", got)
+	}
+}
+
+// A reload from manual to auto starts a target that never ran.
+func TestRunTargetsReloadToAutoStarts(t *testing.T) {
+	out, stop, dir := startRunner(t, `t:
+  on: src
+  start: manual
+  cmd: echo tick >> count.txt
+`)
+	count := filepath.Join(dir, "count.txt")
+	waitForStableCount(t, count, 0, 300*time.Millisecond)
+
+	auto := `t:
+  on: src
+  start: auto
+  cmd: echo tick >> count.txt
+`
+	saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), auto, "config reloaded", 5*time.Second)
+	waitForCount(t, count, 1, 3*time.Second)
+
+	if got := stop(); got != 0 {
+		t.Errorf("exit code = %d, want 0", got)
+	}
+}

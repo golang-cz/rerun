@@ -1226,6 +1226,70 @@ func TestRowStatusText(t *testing.T) {
 	}
 }
 
+// A row that has not run yet shows its start mode's own status word.
+func TestRowStatusTextForStartModes(t *testing.T) {
+	onchange := target("api")
+	onchange.Start = startOnChange
+	manual := target("job")
+	manual.Start = startManual
+	m := newTestModel(t, onchange, manual)
+
+	if got := m.targets[0].state; got != stateOnChange {
+		t.Fatalf("state = %v, want onchange", got)
+	}
+	if got := m.status(m.targets[0]); got != "onchange" {
+		t.Errorf("status = %q, want onchange", got)
+	}
+	if got := m.status(m.targets[1]); got != "manual" {
+		t.Errorf("status = %q, want manual", got)
+	}
+	if got := m.targets[0].glyph(); got != "·" {
+		t.Errorf("glyph = %q, want ·", got)
+	}
+	frame := strings.Split(m.View(), "\n")
+	if got := frame[1]; !strings.Contains(got, "onchange") {
+		t.Errorf("row 1 = %q, want the onchange status", got)
+	}
+	if got := frame[2]; !strings.Contains(got, "manual") {
+		t.Errorf("row 2 = %q, want the manual status", got)
+	}
+
+	// The first run takes the row to the ordinary running state.
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: m.now}})
+	if got := m.status(m.targets[0]); got != "0s" {
+		t.Errorf("status after the first run = %q, want 0s", got)
+	}
+}
+
+// r starts a target whatever its start mode: an onchange target and a
+// manual one both come up on the control.
+func TestControlStartBootsEveryStartMode(t *testing.T) {
+	for _, mode := range []struct {
+		name string
+		mode startMode
+	}{
+		{name: "onchange", mode: startOnChange},
+		{name: "manual", mode: startManual},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, kind := range []ctrlKind{ctrlStart, ctrlReboot} {
+				sink := &recordingSink{}
+				r := newTargetRunner(Target{Name: "t", Cmd: "true", Selected: true, Start: mode.mode, Grace: rerun.DefaultGrace}, sink)
+
+				r.handleControl(context.Background(), ctrlMsg{kind: kind})
+
+				var started bool
+				for _, ev := range sink.all() {
+					started = started || ev.kind == evStarted
+				}
+				if !started {
+					t.Fatalf("ctrl %v did not start a %s target", kind, mode.name)
+				}
+			}
+		})
+	}
+}
+
 func TestAppendCappedKeepsNewestLines(t *testing.T) {
 	var lines []string
 	for i := 0; i < lineCap+5; i++ {

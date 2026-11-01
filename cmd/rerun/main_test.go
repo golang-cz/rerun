@@ -60,7 +60,7 @@ func captureStdio(t *testing.T, run func() int) (stdout, stderr string, code int
 // hint. Stdout stays empty and the usage wall never appears.
 func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  cmd: echo hi\n  start: true\n")
+	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  cmd: echo hi\n  bogus: true\n")
 	t.Chdir(dir)
 
 	stdout, stderr, code := captureStdio(t, func() int { return runConfigMode(Args{}) })
@@ -71,8 +71,8 @@ func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	want := "rerun: " + filepath.Join(dir, ConfigFileName) + ":3:3: target \"api\": unknown field \"start\"\n\n" +
-		"  3 |   start: true\n" +
+	want := "rerun: " + filepath.Join(dir, ConfigFileName) + ":3:3: target \"api\": unknown field \"bogus\"\n\n" +
+		"  3 |   bogus: true\n" +
 		"    |   ^^^^^\n" +
 		"fields: " + strings.Join(targetFields, ", ") + "\n\n" +
 		"rerun: hint: " + configHint + "\n"

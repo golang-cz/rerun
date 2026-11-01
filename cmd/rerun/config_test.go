@@ -132,7 +132,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, open, selected, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, open, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "bad duration",
@@ -260,9 +260,9 @@ func TestParseConfigErrorPositions(t *testing.T) {
 	}{
 		{
 			name:    "unknown field",
-			content: "codegen:\n  cmd: make generate\n  start: true\n",
-			head:    `:3:3: target "codegen": unknown field "start"`,
-			excerpt: []string{"  3 |   start: true", "    |   ^^^^^", "fields: " + strings.Join(targetFields, ", ")},
+			content: "codegen:\n  cmd: make generate\n  bogus: true\n",
+			head:    `:3:3: target "codegen": unknown field "bogus"`,
+			excerpt: []string{"  3 |   bogus: true", "    |   ^^^^^", "fields: " + strings.Join(targetFields, ", ")},
 		},
 		{
 			name:    "duplicate field",
@@ -591,6 +591,52 @@ api:
 	}
 }
 
+func TestParseConfigStartMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, `plain:
+  cmd: echo plain
+
+svc:
+  cmd: echo svc
+  start: auto
+
+worker:
+  cmd: echo worker
+  start: onchange
+
+job:
+  cmd: echo job
+  start: manual
+`)
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	want := []startMode{startAuto, startAuto, startOnChange, startManual}
+	for i, mode := range want {
+		if got := cfg.Targets[i].Start; got != mode {
+			t.Errorf("%s start = %q, want %q", cfg.Targets[i].Name, got, mode)
+		}
+	}
+}
+
+func TestParseConfigRejectsUnknownStartMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\n  start: sometimes\n")
+
+	_, err := ParseConfig(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	for _, sub := range []string{`target "api"`, `field "start"`, `expected auto, onchange, or manual, got "sometimes"`} {
+		if !strings.Contains(err.Error(), sub) {
+			t.Errorf("error = %q, want substring %q", err.Error(), sub)
+		}
+	}
+}
+
 func TestParseConfigBoolFieldErrors(t *testing.T) {
 	for _, field := range []string{"open", "selected"} {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
@@ -620,6 +666,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"columns":  `["a {.b}"]`,
 		"open":     "true",
 		"selected": "false",
+		"start":    "onchange",
 		"delay":    "1s",
 		"cooldown": "1s",
 		"grace":    "1s",

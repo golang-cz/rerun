@@ -120,6 +120,7 @@ Each top-level key is one target. Fields:
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `[method {.request.method}, status {.response.status}]` |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
+| `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
 | `delay` | batch window before restarting (default 200ms) |
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |

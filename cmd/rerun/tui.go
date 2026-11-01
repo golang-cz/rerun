@@ -98,12 +98,30 @@ const (
 	stateBackoff
 	stateExited
 	stateStopped
+	// stateOnChange is an onchange target before its first file change.
+	stateOnChange
+	// stateManual is a manual target before its first r.
+	stateManual
 )
 
 // up reports whether a state means the target is running, getting ready to
 // run, or waiting out a restart backoff.
 func (s procState) up() bool {
 	return s == stateRunning || s == stateStarting || s == stateBackoff
+}
+
+// initialState is the state a row is born with: off when the config does not
+// select it, and the start mode's own word until its first run.
+func initialState(spec Target) procState {
+	switch {
+	case !spec.Selected:
+		return stateOff
+	case spec.Start == startOnChange:
+		return stateOnChange
+	case spec.Start == startManual:
+		return stateManual
+	}
+	return stateRunning
 }
 
 // tuiTarget is one row: its process state, its stream state, and its output.
@@ -311,12 +329,9 @@ func newTUI(targets []Target) *tuiModel {
 		row := &tuiTarget{
 			spec:      target,
 			runner:    group.runners[i],
-			state:     stateRunning,
+			state:     initialState(target),
 			exitCode:  -1,
 			lastStart: m.now,
-		}
-		if !target.Selected {
-			row.state = stateOff
 		}
 		m.targets = append(m.targets, row)
 	}
@@ -671,12 +686,16 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	for i, spec := range c.targets {
 		row, known := byName[spec.Name]
 		if !known {
-			row = &tuiTarget{runner: c.runners[i], state: stateRunning, exitCode: -1, lastStart: m.now}
-			if i < len(c.stopped) && c.stopped[i] {
+			row = &tuiTarget{runner: c.runners[i], state: initialState(spec), exitCode: -1, lastStart: m.now}
+			if i < len(c.stopped) && c.stopped[i] && row.state == stateRunning {
 				row.state = stateOff // the group holds it down until space or r
 			}
 		}
 		row.spec = spec
+		// A row that never ran takes its spec's new start mode.
+		if row.state == stateOnChange || row.state == stateManual {
+			row.state = initialState(spec)
+		}
 		rows = append(rows, row)
 		index[spec.Name] = i
 	}
@@ -1069,6 +1088,10 @@ func (m *tuiModel) status(t *tuiTarget) string {
 		return t.exitLabel
 	case stateStopped:
 		return "stopped"
+	case stateOnChange:
+		return "onchange"
+	case stateManual:
+		return "manual"
 	}
 	return "off"
 }

@@ -97,12 +97,15 @@ test:
   on: ['**/*.go']
   cmd: go test ./...
   delay: 500ms
+  start: onchange               # auto (default), onchange, or manual
 ```
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
-`selected: true`, `open: false`.
+`selected: true`, `open: false`, `start: auto`.
 Naming a target on the command line overrides `selected` either way: named ones
 start, unnamed ones stay off (still listed, still startable with `space`).
+`start: onchange` holds the first run back until a file changes, and
+`start: manual` watches nothing and runs only when `r` asks for it.
 Unknown fields, duplicate fields, and non-string values are errors.
 
 ## Flags
