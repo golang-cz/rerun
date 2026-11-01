@@ -132,7 +132,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, open, selected, delay, cooldown, grace"},
 		},
 		{
 			name:    "bad duration",
@@ -495,6 +495,41 @@ func TestParseConfigBoolFieldErrors(t *testing.T) {
 			if !strings.Contains(err.Error(), sub) {
 				t.Errorf("%s: error = %q, want substring %q", field, err.Error(), sub)
 			}
+		}
+	}
+}
+
+// Every key the hint offers must actually parse, so the list cannot drift
+// from the parser. Add a row here when a field joins the switch in parseTarget.
+func TestTargetFieldsAllAccepted(t *testing.T) {
+	values := map[string]string{
+		"desc":     "x",
+		"on":       "src",
+		"except":   "vendor",
+		"cmd":      "echo hi",
+		"url":      "http://localhost:1",
+		"columns":  `["a {.b}"]`,
+		"open":     "true",
+		"selected": "false",
+		"delay":    "1s",
+		"cooldown": "1s",
+		"grace":    "1s",
+	}
+	for _, field := range targetFields {
+		value, ok := values[field]
+		if !ok {
+			t.Errorf("field %q has no test value", field)
+			continue
+		}
+		path := filepath.Join(t.TempDir(), ConfigFileName)
+		line := "  " + field + ": " + value
+		if field == "cmd" {
+			line = "" // the base already writes cmd once
+		}
+		writeFile(t, path, "api:\n  cmd: echo hi\n"+line+"\n")
+
+		if _, err := ParseConfig(path); err != nil {
+			t.Errorf("field %q: ParseConfig = %v, want nil", field, err)
 		}
 	}
 }

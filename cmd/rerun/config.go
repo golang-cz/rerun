@@ -161,6 +161,11 @@ func ParseConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// targetFields is the accepted rerun.yml target keys, in the order the docs
+// list them. It mirrors the switch in parseTarget; TestTargetFieldsMatchParser
+// fails when the two drift apart.
+var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "open", "selected", "delay", "cooldown", "grace"}
+
 func parseTarget(path, name string, node *yaml.Node) (Target, error) {
 	node = deref(node)
 	if node.Kind != yaml.MappingNode {
@@ -248,7 +253,7 @@ func parseTarget(path, name string, node *yaml.Node) (Target, error) {
 			}
 
 		default:
-			return Target{}, fmt.Errorf("%s: target %q: unknown field %q", path, name, field)
+			return Target{}, fmt.Errorf("%s: target %q: unknown field %q (fields: %s)", path, name, field, strings.Join(targetFields, ", "))
 		}
 	}
 

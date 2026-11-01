@@ -1,7 +1,9 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,6 +20,71 @@ api:
 test:
   cmd: go test ./...
 `
+
+// captureStdio points os.Stdout/os.Stderr at temp files for the duration of
+// run and returns what it wrote, so error paths can be checked line by line.
+func captureStdio(t *testing.T, run func() int) (stdout, stderr string, code int) {
+	t.Helper()
+	outFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errFile, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outFile, errFile
+	defer func() { os.Stdout, os.Stderr = origOut, origErr }()
+
+	code = run()
+
+	for _, f := range []*os.File{outFile, errFile} {
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := os.ReadFile(outFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	errOut, err := os.ReadFile(errFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out), string(errOut), code
+}
+
+// A broken rerun.yml prints the parse error and one hint on stderr. Stdout
+// stays empty and the usage wall never appears.
+func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  cmd: echo hi\n  start: true\n")
+	t.Chdir(dir)
+
+	stdout, stderr, code := captureStdio(t, func() int { return runConfigMode(Args{}) })
+
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("stderr has %d lines, want 2: %q", len(lines), stderr)
+	}
+	if !strings.HasPrefix(lines[0], "rerun: ") || !strings.Contains(lines[0], `unknown field "start"`) {
+		t.Errorf("first line = %q, want the parse error", lines[0])
+	}
+	if lines[1] != "rerun: "+configHint {
+		t.Errorf("second line = %q, want %q", lines[1], "rerun: "+configHint)
+	}
+	if strings.Contains(stderr, "Usage:") {
+		t.Errorf("stderr leaks the usage wall: %q", stderr)
+	}
+}
 
 func configFromYAML(t *testing.T, yml string) *Config {
 	t.Helper()
