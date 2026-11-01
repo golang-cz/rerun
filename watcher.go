@@ -20,16 +20,18 @@ import (
 var errClosed = errors.New("watcher closed")
 
 type Watcher struct {
-	watcher     *fsnotify.Watcher
-	watch       map[string]struct{}
-	ignore      map[string]struct{}
-	ignoreDirs  map[string]struct{}
-	ignoreFiles map[string]struct{}
-	gitignores  map[string]*gitignoreFile // dir -> its .gitignore, when one exists
-	pinned      map[string]struct{}       // explicit on: roots, never ignored themselves
-	done        chan struct{}
-	watchOnce   sync.Once
-	closeOnce   sync.Once
+	watcher      *fsnotify.Watcher
+	watch        map[string]struct{}
+	ignore       map[string]struct{}
+	ignoreDirs   map[string]struct{}
+	ignoreFiles  map[string]struct{}
+	gitignores   map[string]*gitignoreFile      // dir -> its .gitignore, when one exists
+	pinned       map[string]struct{}            // explicit on: roots, never ignored themselves
+	fileOnlyDirs map[string]map[string]struct{} // dir -> single-file roots watched through it
+	fullyWatched map[string]struct{}            // dirs watched by the directory walk
+	done         chan struct{}
+	watchOnce    sync.Once
+	closeOnce    sync.Once
 
 	respectGitignore bool
 	stderr           io.Writer
@@ -58,6 +60,8 @@ func NewWatcher() (*Watcher, error) {
 		ignoreFiles:      make(map[string]struct{}),
 		gitignores:       make(map[string]*gitignoreFile),
 		pinned:           make(map[string]struct{}),
+		fileOnlyDirs:     make(map[string]map[string]struct{}),
+		fullyWatched:     make(map[string]struct{}),
 		respectGitignore: true,
 		stderr:           os.Stderr,
 		done:             make(chan struct{}),
@@ -172,6 +176,10 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							continue
 						}
 
+						if !w.keepsEvent(event.Name) {
+							continue
+						}
+
 						// NOTE: ignoreDirs is already ignored because it's never added to the watcher.
 						if _, ok := w.ignoreFiles[event.Name]; ok {
 							continue
@@ -262,9 +270,9 @@ func (w *Watcher) walkRoot(root string) {
 				return nil
 			}
 
-			// Watch single-file targets directly; fsnotify only watches dirs otherwise.
+			// Watch the parent: an atomic save renames over the file and orphans a watch on its inode.
 			if path == root {
-				w.watcher.Add(path)
+				w.addFileOnly(path)
 			}
 
 			return nil
@@ -295,9 +303,36 @@ func (w *Watcher) walkRoot(root string) {
 
 		// A .gitignore covers a directory's contents, never the directory itself.
 		w.loadGitignore(filepath.Clean(path))
+		w.fullyWatched[filepath.Clean(path)] = struct{}{}
 		w.watcher.Add(path)
 		return nil
 	})
+}
+
+// addFileOnly watches file's parent dir and keeps only events for file.
+func (w *Watcher) addFileOnly(file string) {
+	clean := filepath.Clean(file)
+	dir := filepath.Dir(clean)
+	w.watcher.Add(dir)
+	if w.fileOnlyDirs[dir] == nil {
+		w.fileOnlyDirs[dir] = make(map[string]struct{})
+	}
+	w.fileOnlyDirs[dir][clean] = struct{}{}
+}
+
+// keepsEvent reports whether an event for name passes the single-file filter.
+func (w *Watcher) keepsEvent(name string) bool {
+	clean := filepath.Clean(name)
+	dir := filepath.Dir(clean)
+	files, ok := w.fileOnlyDirs[dir]
+	if !ok {
+		return true
+	}
+	if _, ok := w.fullyWatched[dir]; ok {
+		return true
+	}
+	_, ok = files[clean]
+	return ok
 }
 
 // gitignoreFile is a parsed .gitignore anchored at base.

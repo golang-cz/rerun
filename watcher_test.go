@@ -77,9 +77,24 @@ func TestExpandGlobPathsLiteralMetachars(t *testing.T) {
 // intentionally drops, so a single write is not a reliable probe there.
 func writeUntilChange(t *testing.T, changes <-chan ChangeSet, file string, deadline time.Duration) ChangeSet {
 	t.Helper()
+	return pokeUntilChange(t, changes, file, deadline, func() { writeFiles(t, file) })
+}
+
+// renameSwap replaces target the way editors and pnpm save: write a temp file, rename it over target.
+func renameSwap(t *testing.T, target string) {
+	t.Helper()
+	tmp := target + ".tmp"
+	writeFiles(t, tmp)
+	if err := os.Rename(tmp, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func pokeUntilChange(t *testing.T, changes <-chan ChangeSet, file string, deadline time.Duration, poke func()) ChangeSet {
+	t.Helper()
 	stop := time.Now().Add(deadline)
 	for {
-		writeFiles(t, file)
+		poke()
 
 		wait := 200 * time.Millisecond
 		if left := time.Until(stop); left < wait {
@@ -107,6 +122,75 @@ func assertNoChange(t *testing.T, changes <-chan ChangeSet, window time.Duration
 	}
 }
 
+// A single-file root must keep firing after its file is replaced by rename.
+func TestWatchSingleFileSurvivesRenameSwap(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "rerun.yml")
+	writeFiles(t, target)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(target)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	first := pokeUntilChange(t, changes, target, 2*time.Second, func() { renameSwap(t, target) })
+	if _, ok := first.Files[target]; !ok {
+		t.Fatalf("first ChangeSet files = %v, want %s", first.Files, target)
+	}
+
+	second := pokeUntilChange(t, changes, target, 2*time.Second, func() { renameSwap(t, target) })
+	if _, ok := second.Files[target]; !ok {
+		t.Fatalf("second ChangeSet files = %v, want %s", second.Files, target)
+	}
+}
+
+func TestWatchSingleFileIgnoresSiblingInSameDir(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "rerun.yml")
+	sibling := filepath.Join(dir, "other.txt")
+	writeFiles(t, target, sibling)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(target)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, sibling)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	// Proves the watch is alive, so the silence above means the filter worked.
+	change := pokeUntilChange(t, changes, target, 2*time.Second, func() { renameSwap(t, target) })
+	if _, ok := change.Files[target]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, target)
+	}
+}
+
+func TestWatchSingleFileWithParentRootDeliversSiblings(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "rerun.yml")
+	sibling := filepath.Join(dir, "other.txt")
+	writeFiles(t, target, sibling)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(target, dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	change := writeUntilChange(t, changes, sibling, 2*time.Second)
+	if _, ok := change.Files[sibling]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, sibling)
+	}
+}
+
 func TestWatchGlobOnlyWatchesMatches(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a_test.go")
@@ -122,8 +206,8 @@ func TestWatchGlobOnlyWatchesMatches(t *testing.T) {
 	defer w.Close()
 
 	list := w.watcher.WatchList()
-	if len(list) != 1 || list[0] != a {
-		t.Fatalf("watch list = %v, want [%s]", list, a)
+	if len(list) != 1 || list[0] != dir {
+		t.Fatalf("watch list = %v, want [%s]", list, dir)
 	}
 }
 
