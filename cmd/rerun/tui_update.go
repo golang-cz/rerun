@@ -9,6 +9,9 @@ import (
 // hintDuration is how long the ALL-row m/s hint stays in the bottom line.
 const hintDuration = 3 * time.Second
 
+// doubleClickWindow is how close two row clicks must be to stop/start the row.
+const doubleClickWindow = 400 * time.Millisecond
+
 // allRowHint is the one transient message, shown when m/s hit the ALL rollup.
 const allRowHint = "m/s need a target row - j/k to select"
 
@@ -236,11 +239,21 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.toggleMute(row - 1)
 	default:
 		m.cursor = row
-		if row > 0 {
-			m.toggleSolo(row - 1)
+		// The pair's first click already soloed the row; the second click
+		// stops/starts it, and the solo stays.
+		double := row > 0 && m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
+		if double {
+			m.toggleTarget(row - 1)
+			m.lastClick = -1 // a fast third click must not read as another double
 		} else {
-			m.clearSolo()
+			if row > 0 {
+				m.toggleSolo(row - 1)
+			} else {
+				m.clearSolo()
+			}
+			m.lastClick = row
 		}
+		m.lastClickAt = time.Now()
 	}
 	return m, nil
 }

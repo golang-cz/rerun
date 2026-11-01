@@ -364,7 +364,8 @@ func (m *tuiModel) helpView() string {
 	b.WriteString("\n")
 	for _, line := range []string{
 		"mouse: click a row to solo it (again or on ALL to clear),",
-		"its button cell to mute, shift-click to solo.",
+		"double-click to stop/start like space, click its button cell to",
+		"mute, shift-click to solo.",
 		"shift-drag selects text with the terminal's own copy.",
 	} {
 		b.WriteString(m.styles.hint.Render(line) + "\n")

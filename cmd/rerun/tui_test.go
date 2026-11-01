@@ -62,6 +62,12 @@ func motion(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionMotion}
 }
 
+// slowClick expires the double-click window, so the next click reads as a
+// fresh single click.
+func slowClick(m *tuiModel) {
+	m.lastClickAt = m.lastClickAt.Add(-doubleClickWindow)
+}
+
 // buttons is the stream button of every row, in row order.
 func buttons(m *tuiModel) []string {
 	out := make([]string, len(m.targets))
@@ -675,10 +681,12 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 		t.Error("solo dropped the hidden mute state")
 	}
 
-	// A second click on the soloed row clears solo.
+	// A second click on the soloed row clears solo. Slowing it past the
+	// double-click window keeps it a single click; the pair case is below.
+	slowClick(m)
 	m.handleMouse(mouse(2, 2, false))
 	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared after the second click", m.solo)
+		t.Fatalf("solo = %d, want cleared after the second single click", m.solo)
 	}
 	if m.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2 still", m.cursor)
@@ -718,6 +726,104 @@ func TestMouseClickAllRowClearsSolo(t *testing.T) {
 	}
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.View()
+
+	// The pair's first click solos the row; the second stops it.
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
+
+	if m.targets[0].state != stateStopped {
+		t.Fatalf("state = %v, want stopped after a double-click", m.targets[0].state)
+	}
+	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStop {
+		t.Fatalf("control = %v, want ctrlStop", got)
+	}
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want 0 (the first click's solo survives)", m.solo)
+	}
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+	if m.lastClick != -1 {
+		t.Fatalf("lastClick = %d, want -1 after a double-click", m.lastClick)
+	}
+}
+
+func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
+	web := target("web")
+	web.Selected = false
+	m := newTestModel(t, web, target("api"))
+	m.View()
+
+	if m.targets[0].state != stateOff {
+		t.Fatalf("setup: state = %v, want off", m.targets[0].state)
+	}
+
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
+
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("state = %v, want running after a double-click on an off row", m.targets[0].state)
+	}
+	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStart {
+		t.Fatalf("control = %v, want ctrlStart", got)
+	}
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want 0", m.solo)
+	}
+}
+
+func TestMouseDoubleClickOnAllRowDoesNotToggleAll(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.View()
+
+	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 0, false))
+
+	for i, row := range m.targets {
+		if row.state != stateRunning {
+			t.Fatalf("target %d state = %v, want running (ALL is not a service)", i, row.state)
+		}
+		select {
+		case c := <-row.runner.ctrlCh:
+			t.Fatalf("target %d queued %v, want none on an ALL-row double-click", i, c.kind)
+		default:
+		}
+	}
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+}
+
+func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.View()
+
+	// Two quick clicks stop the running row and leave it soloed.
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
+	queuedCtrl(t, m.targets[0].runner) // drain the stop
+
+	// The third click is a fresh single: it toggles solo, never stop/start.
+	m.handleMouse(mouse(2, 1, false))
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared by the third click's solo toggle", m.solo)
+	}
+	if m.targets[0].state != stateStopped {
+		t.Fatalf("state = %v, want stopped still (no start on the third click)", m.targets[0].state)
+	}
+	select {
+	case c := <-m.targets[0].runner.ctrlCh:
+		t.Fatalf("third click queued %v, want none", c.kind)
+	default:
 	}
 }
 

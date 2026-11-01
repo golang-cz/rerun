@@ -134,6 +134,11 @@ type tuiModel struct {
 	// hintUntil bounds the ALL-row m/s hint; the 1s tick expires it.
 	hintUntil time.Time
 
+	// lastClick and lastClickAt track the previous row click, so a second
+	// click within doubleClickWindow reads as a double-click.
+	lastClick   int
+	lastClickAt time.Time
+
 	hover int
 
 	layout tuiLayout
@@ -151,14 +156,15 @@ func newTUI(targets []Target) *tuiModel {
 	group := newTargetGroup(targets, tuiSink(events))
 
 	m := &tuiModel{
-		group:  group,
-		events: events,
-		stop:   make(chan struct{}),
-		solo:   -1,
-		follow: true,
-		now:    time.Now(),
-		hover:  -1,
-		styles: newTUIStyles(),
+		group:     group,
+		events:    events,
+		stop:      make(chan struct{}),
+		solo:      -1,
+		follow:    true,
+		now:       time.Now(),
+		lastClick: -1,
+		hover:     -1,
+		styles:    newTUIStyles(),
 	}
 	m.vp = viewport.New(80, 20)
 
