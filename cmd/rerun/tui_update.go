@@ -6,9 +6,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// doubleClickWindow is how close two row clicks must be to solo the row.
-const doubleClickWindow = 400 * time.Millisecond
-
 // hintDuration is how long the ALL-row m/s hint stays in the bottom line.
 const hintDuration = 3 * time.Second
 
@@ -238,15 +235,12 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
 	default:
-		switch {
-		case m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow && row > 0:
-			m.toggleSolo(row - 1)
-			m.lastClick = -1 // a fast third click must not read as another double
-		default:
-			m.lastClick = row
-		}
 		m.cursor = row
-		m.lastClickAt = time.Now()
+		if row > 0 {
+			m.toggleSolo(row - 1)
+		} else {
+			m.clearSolo()
+		}
 	}
 	return m, nil
 }

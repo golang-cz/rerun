@@ -645,28 +645,43 @@ func TestScrollFreezesTailAndMarkerResumesIt(t *testing.T) {
 	}
 }
 
-func TestMouseClicksMuteSoloAndSelect(t *testing.T) {
+func TestMouseClicksMuteAndSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.View()
 
-	// The stream button cell is the last cell of the left column.
+	// The stream button cell is the last cell of the left column. It mutes
+	// only: no solo, even though the click lands on a target row.
 	btnX := m.layout.leftW - 1
 	m.handleMouse(mouse(btnX, 1, false))
 	if got := m.button(0); got != "M" {
 		t.Fatalf("button after click = %q, want M", got)
 	}
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want none after a button-cell click", m.solo)
+	}
+	if !m.targets[0].muted {
+		t.Error("the button-cell click did not mute")
+	}
 
-	// A click on the name cell selects the row, and a second one solos it.
+	// A single click on a name cell moves the cursor there and solos it.
 	m.handleMouse(mouse(2, 2, false))
 	if m.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2", m.cursor)
 	}
-	m.handleMouse(mouse(2, 2, false))
 	if m.solo != 1 {
-		t.Fatalf("solo = %d, want 1 after a double click", m.solo)
+		t.Fatalf("solo = %d, want 1 after one click", m.solo)
 	}
 	if !m.targets[0].muted {
 		t.Error("solo dropped the hidden mute state")
+	}
+
+	// A second click on the soloed row clears solo.
+	m.handleMouse(mouse(2, 2, false))
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared after the second click", m.solo)
+	}
+	if m.cursor != 2 {
+		t.Fatalf("cursor = %d, want 2 still", m.cursor)
 	}
 
 	// Shift-click solos the row under the pointer.
@@ -674,9 +689,33 @@ func TestMouseClicksMuteSoloAndSelect(t *testing.T) {
 	if got := m.button(0); got != "S" {
 		t.Fatalf("button after shift-click = %q, want S", got)
 	}
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want 0 after shift-click", m.solo)
+	}
 
-	// Clicking the ALL row moves the cursor back to it.
+	// Clicking the ALL row moves the cursor back to it and clears solo.
 	m.handleMouse(mouse(2, 0, false))
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
+	}
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
+	}
+}
+
+func TestMouseClickAllRowClearsSolo(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.View()
+
+	m.handleMouse(mouse(2, 1, false))
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want 0 after one click", m.solo)
+	}
+
+	m.handleMouse(mouse(2, 0, false))
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
+	}
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0", m.cursor)
 	}

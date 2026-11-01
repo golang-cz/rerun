@@ -134,9 +134,7 @@ type tuiModel struct {
 	// hintUntil bounds the ALL-row m/s hint; the 1s tick expires it.
 	hintUntil time.Time
 
-	hover       int
-	lastClick   int
-	lastClickAt time.Time
+	hover int
 
 	layout tuiLayout
 	styles tuiStyles
@@ -153,15 +151,14 @@ func newTUI(targets []Target) *tuiModel {
 	group := newTargetGroup(targets, tuiSink(events))
 
 	m := &tuiModel{
-		group:     group,
-		events:    events,
-		stop:      make(chan struct{}),
-		solo:      -1,
-		follow:    true,
-		now:       time.Now(),
-		hover:     -1,
-		lastClick: -1,
-		styles:    newTUIStyles(),
+		group:  group,
+		events: events,
+		stop:   make(chan struct{}),
+		solo:   -1,
+		follow: true,
+		now:    time.Now(),
+		hover:  -1,
+		styles: newTUIStyles(),
 	}
 	m.vp = viewport.New(80, 20)
 
