@@ -192,6 +192,111 @@ func TestIgnoreDirQualifiedGlob(t *testing.T) {
 	}
 }
 
+// The production rebuild loop: `except: ["**/bin"]` must keep bin/ out of fsnotify.
+func TestIgnoreGlobSkipsDir(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	src := filepath.Join(dir, "src")
+	for _, d := range []string{bin, src} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	binary := filepath.Join(bin, "app")
+	source := filepath.Join(src, "main.go")
+	writeFiles(t, binary, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	w.Ignore("**/bin")
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	for _, watched := range w.watcher.WatchList() {
+		if watched == bin {
+			t.Fatalf("watch list contains ignored dir %s", bin)
+		}
+	}
+
+	writeFiles(t, binary)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
+// An exact-path dir ignore keeps behaving as before the glob check.
+func TestIgnoreExactDirSkipsDir(t *testing.T) {
+	dir := t.TempDir()
+	vendor := filepath.Join(dir, "vendor")
+	src := filepath.Join(dir, "src")
+	for _, d := range []string{vendor, src} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dep := filepath.Join(vendor, "dep.go")
+	source := filepath.Join(src, "main.go")
+	writeFiles(t, dep, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	w.Ignore(vendor)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	for _, watched := range w.watcher.WatchList() {
+		if watched == vendor {
+			t.Fatalf("watch list contains ignored dir %s", vendor)
+		}
+	}
+
+	writeFiles(t, dep)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
+// Skipping glob-ignored dirs must not disable the file-level glob ignore.
+func TestIgnoreGlobFileStillIgnored(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(sub, "run.log")
+	source := filepath.Join(sub, "run.go")
+	writeFiles(t, log, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	w.Ignore("**/*.log")
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, log)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
 // After Close nothing more is delivered; the channel closes instead.
 func TestCloseDuringWatchDropsChanges(t *testing.T) {
 	dir := t.TempDir()

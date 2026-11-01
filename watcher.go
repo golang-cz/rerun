@@ -92,6 +92,14 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							return filepath.SkipDir
 						}
 
+						// Glob-ignored dirs must be skipped, or writes under them retrigger the target.
+						for ignorePath := range w.ignore {
+							if strings.Contains(ignorePath, "*") && matchGlobPattern(ignorePath, path) {
+								w.ignoreDirs[path] = struct{}{}
+								return filepath.SkipDir
+							}
+						}
+
 						w.watcher.Add(path)
 						return nil
 
