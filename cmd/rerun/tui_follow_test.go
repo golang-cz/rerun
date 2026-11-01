@@ -128,7 +128,7 @@ func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 	if m.pending != 10 {
 		t.Fatalf("pending = %d, want 10", m.pending)
 	}
-	if got := strings.TrimRight(lines[len(lines)-1], " "); got != "↓ 10 new · paused (f/G)" {
+	if got := strings.TrimRight(lines[len(lines)-1], " "); got != "↓ 10 new · scrollback (p/G)" {
 		t.Fatalf("the paused pane's last line = %q, want the marker and chip", got)
 	}
 }

@@ -851,8 +851,8 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.View()
-	press(m, "f")
-	if got := bottomPaneLine(m); !strings.Contains(got, "paused (f/G)") {
+	press(m, "p")
+	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G)") {
 		t.Fatalf("bottom line = %q, want the paused chip", got)
 	}
 }
@@ -861,8 +861,8 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 func TestSoloChipAppendsToFrozen(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.toggleSolo(0)
-	press(m, "f")
-	if got := bottomPaneLine(m); !strings.Contains(got, "paused (f/G) · solo web") {
+	press(m, "p")
+	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G) · solo web") {
 		t.Fatalf("bottom line = %q, want paused then solo", got)
 	}
 }
@@ -872,9 +872,9 @@ func TestChipHiddenWhileInputOpen(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.View()
-	press(m, "f")
+	press(m, "p")
 	press(m, "/")
-	if got := bottomPaneLine(m); strings.Contains(got, "paused") || strings.Contains(got, "solo") {
+	if got := bottomPaneLine(m); strings.Contains(got, "scrollback") || strings.Contains(got, "solo") {
 		t.Fatalf("bottom line = %q, want no chip while the bar is open", got)
 	}
 }

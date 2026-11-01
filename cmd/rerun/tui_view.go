@@ -665,7 +665,7 @@ func (m *tuiModel) markerLine(w int, marker string, chip string) string {
 func (m *tuiModel) stateChip() string {
 	parts := make([]string, 0, 2)
 	if !m.follow {
-		parts = append(parts, "paused (f/G)")
+		parts = append(parts, "scrollback (p/G)")
 	}
 	if m.solo >= 0 {
 		parts = append(parts, "solo "+m.targets[m.solo].spec.Name)
@@ -818,7 +818,7 @@ var helpKeys = [][2]string{
 	{"esc", "clear search, then filter, then solo"},
 	{"o", "open the target's url"},
 	{"G", "resume the live tail"},
-	{"f", "pause / resume the pane"},
+	{"p", "browse the scrollback (again/G to live)"},
 	{"/", "search the pane (n/N next/prev, esc clears)"},
 	{"v", "filter (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
@@ -839,7 +839,7 @@ func (m *tuiModel) helpView() string {
 		"drawer folder to expand it, double-click to stop/start like space,",
 		"click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and pauses the tail",
-		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
+		"(p, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
 		"the fs drawer at the bottom of the left column is a change tree of the",

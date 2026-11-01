@@ -252,7 +252,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openTarget(m.cursor - 1)
 		}
 
-	case "f":
+	case "p":
 		m.toggleFreeze()
 
 	case "G":
