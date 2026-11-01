@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -294,8 +293,9 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 }
 
 // drawerLine draws one line of the fs drawer: its `fs ·────` separator, a
-// folder with its recursive changed-file count, or a file with its op and age.
-// The count and age share a fixed four-cell column at the right edge.
+// folder with its recursive changed-file count and age, or a file with its op
+// and age. The count and age share a right-aligned column, the reboot arrow
+// after it.
 func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 	switch row.kind {
 	case drawerSep:
@@ -311,7 +311,8 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 			{text: row.glyph, color: colorGray},
 			{text: " " + row.label},
 		}
-		return m.treeCell(segs, strconv.Itoa(row.count), leftW)
+		suffix := fmt.Sprintf("%d · %s", row.count, relAge(m.now.Sub(row.at)))
+		return m.treeCell(segs, suffix, targetArrow(row.targets), leftW)
 
 	case drawerFile:
 		segs := []seg{
@@ -319,9 +320,18 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 			{text: row.op, color: opColor(row.op)},
 			{text: " " + row.label},
 		}
-		return m.treeCell(segs, relAge(m.now.Sub(row.at)), leftW)
+		return m.treeCell(segs, relAge(m.now.Sub(row.at)), targetArrow(row.targets), leftW)
 	}
 	return strings.Repeat(" ", leftW)
+}
+
+// targetArrow is the drawer line's reboot suffix: the target names, space
+// separated, led by the arrow. No target draws nothing.
+func targetArrow(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return "→ " + strings.Join(names, " ")
 }
 
 // treeIndent is a folder or file line's left margin: a root sits at column 0,
@@ -330,23 +340,32 @@ func treeIndent(depth int) string {
 	return strings.Repeat(" ", depth)
 }
 
-// treeSuffixW is the drawer's fixed right column: the recursive count on a
-// folder line, the relative age on a file line.
-const treeSuffixW = 4
+// treeSuffixW is the drawer's smallest right column: the recursive count and
+// age on a folder line, the age on a file line. A longer suffix widens its own
+// line rather than truncating the number.
+const treeSuffixW = 6
 
-// treeCell right-aligns a suffix in the drawer's count column, padding the
-// label out to it. A column narrower than the label truncates the label.
-func (m *tuiModel) treeCell(segs []seg, suffix string, leftW int) string {
+// treeCell right-aligns a suffix in the drawer's count and age column, padding
+// the label out to it, with the arrow appended after. A column narrower than
+// the label truncates the label, the line renderer the arrow's tail.
+func (m *tuiModel) treeCell(segs []seg, suffix, arrow string, leftW int) string {
 	labelW := 0
 	for _, s := range segs {
 		labelW += displayWidth(s.text)
 	}
-	suffix = truncate(suffix, treeSuffixW)
-	fill := max(0, leftW-treeSuffixW-labelW)
-	pad := max(0, treeSuffixW-displayWidth(suffix))
+	colW := max(treeSuffixW, displayWidth(suffix))
+	tail := ""
+	if arrow != "" {
+		tail = " " + arrow
+	}
+	fill := max(0, leftW-colW-labelW-displayWidth(tail))
+	pad := max(0, colW-displayWidth(suffix))
 	segs = append(segs, seg{text: strings.Repeat(" ", fill)})
 	segs = append(segs, seg{text: strings.Repeat(" ", pad)})
 	segs = append(segs, seg{text: suffix, color: colorGray})
+	if tail != "" {
+		segs = append(segs, seg{text: tail, color: colorGray})
+	}
 	return renderSegs(segs, m.styles.base, leftW)
 }
 

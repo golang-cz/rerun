@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type drawerRow struct {
 	count int
 	at    time.Time
 	op    string
+	// targets names the reboots this line's changes triggered, in yml order.
+	// Empty draws no arrow.
+	targets []string
 }
 
 // treeNode is one folder of a root's folded subtree. dirs holds its changed
@@ -39,11 +43,16 @@ type treeNode struct {
 	dirs  map[string]*treeNode
 	files []treeFileEntry
 	count int
+	// newest is the newest change anywhere in the subtree; changed is every
+	// changed path in it, the join key against the targets' reboot ledgers.
+	newest  time.Time
+	changed []string
 }
 
 // treeFileEntry is one changed file directly under a folder.
 type treeFileEntry struct {
 	name string
+	path string // the full changed path, the ledger join key
 	at   time.Time
 	op   byte
 }
@@ -138,19 +147,21 @@ func addTreeFile(root *treeNode, prefix, path string, tf treeFile) {
 	if name == "" || name == "." {
 		return
 	}
-	node.files = append(node.files, treeFileEntry{name: name, at: tf.at, op: tf.op})
+	node.files = append(node.files, treeFileEntry{name: name, path: path, at: tf.at, op: tf.op})
 }
 
-// finalizeNode fills a subtree's recursive count and newest change time, and
-// returns every folder path it holds.
+// finalizeNode fills a subtree's recursive count, newest change time, and
+// changed paths, and returns every folder path it holds.
 func finalizeNode(n *treeNode) (time.Time, []string) {
 	newest := time.Time{}
 	paths := []string{n.path}
 	n.count = len(n.files)
+	n.changed = nil
 	for _, f := range n.files {
 		if f.at.After(newest) {
 			newest = f.at
 		}
+		n.changed = append(n.changed, f.path)
 	}
 	for _, d := range n.dirs {
 		childNewest, childPaths := finalizeNode(d)
@@ -159,8 +170,40 @@ func finalizeNode(n *treeNode) (time.Time, []string) {
 			newest = childNewest
 		}
 		paths = append(paths, childPaths...)
+		n.changed = append(n.changed, d.changed...)
 	}
+	n.newest = newest
 	return newest, paths
+}
+
+// ledgerTargets names the targets that rebooted on one of the given changed
+// paths, in yml order. A target's ledger holds only committed spawns, so a
+// change that never triggered a reboot names nothing.
+func (m *tuiModel) ledgerTargets(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	held := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		held[cleanTreePath(p)] = true
+	}
+	var out []string
+	for i := range m.targets {
+		for _, e := range m.targets[i].ledger {
+			hit := false
+			for _, f := range e.files {
+				if held[cleanTreePath(f.path)] {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				out = append(out, m.targets[i].spec.Name)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // rootPrefixes is every on: glob's root across all targets, in yml
@@ -343,13 +386,16 @@ func (m *tuiModel) drawerRows() []drawerRow {
 // then its files, both alphabetically.
 func (m *tuiModel) nodeRows(n *treeNode, depth int) []drawerRow {
 	expanded := m.isTreeExpanded(n.path)
+	folderTargets := m.ledgerTargets(n.changed)
 	rows := []drawerRow{{
-		kind:  drawerFolder,
-		path:  n.path,
-		depth: depth,
-		glyph: folderGlyph(n, expanded),
-		label: n.name,
-		count: n.count,
+		kind:    drawerFolder,
+		path:    n.path,
+		depth:   depth,
+		glyph:   folderGlyph(n, expanded),
+		label:   n.name,
+		count:   n.count,
+		at:      n.newest,
+		targets: folderTargets,
 	}}
 	if !expanded {
 		return rows
@@ -365,7 +411,13 @@ func (m *tuiModel) nodeRows(n *treeNode, depth int) []drawerRow {
 	files := append([]treeFileEntry(nil), n.files...)
 	sort.Slice(files, func(a, b int) bool { return files[a].name < files[b].name })
 	for _, f := range files {
-		rows = append(rows, drawerRow{kind: drawerFile, path: n.path, depth: depth + 1, op: opText(f.op), label: f.name, at: f.at})
+		// The parent folder's arrow already names the same reboots, so the file
+		// line stays quiet unless it adds a target.
+		targets := m.ledgerTargets([]string{f.path})
+		if slices.Equal(targets, folderTargets) {
+			targets = nil
+		}
+		rows = append(rows, drawerRow{kind: drawerFile, path: n.path, depth: depth + 1, op: opText(f.op), label: f.name, at: f.at, targets: targets})
 	}
 	return rows
 }

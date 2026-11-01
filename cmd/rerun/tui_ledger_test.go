@@ -85,9 +85,17 @@ func drawerOf(m *tuiModel) []string {
 }
 
 // treeText renders one drawer line as the drawer does at drawerWidth: the
-// label padded out, the suffix right-aligned in the fixed four-cell column.
-func treeText(label, suffix string) string {
-	return padRight(label, drawerWidth-treeSuffixW) + fmt.Sprintf("%4s", suffix)
+// label padded out, the suffix right-aligned in the count and age column, the
+// optional reboot arrow after it.
+func treeText(label, suffix string, arrow ...string) string {
+	colW := max(treeSuffixW, displayWidth(suffix))
+	fill := drawerWidth - colW
+	tail := ""
+	if len(arrow) > 0 && arrow[0] != "" {
+		tail = " → " + arrow[0]
+		fill -= displayWidth(tail)
+	}
+	return padRight(label, fill) + fmt.Sprintf("%*s", colW, suffix) + tail
 }
 
 // drawerTop is the screen row of the drawer's separator.
@@ -261,9 +269,9 @@ func TestTreeFolderClicksFoldChildren(t *testing.T) {
 	m.View()
 	got := drawerOf(m)
 	want := []string{
-		treeText("− apps/", "3"),
-		treeText(" ~ api/", "1"),
-		treeText(" ~ web/", "1"),
+		treeText("− apps/", "3 · 0s"),
+		treeText(" ~ api/", "1 · 0s"),
+		treeText(" ~ web/", "1 · 0s"),
 		treeText(" ~ root.go", "0s"),
 	}
 	if !reflect.DeepEqual(got[1:], want) {
@@ -366,11 +374,86 @@ func TestTreeFileLineCarriesOpAndAge(t *testing.T) {
 	m.toggleTreeFolder("apps/")
 
 	if got := drawerOf(m); !reflect.DeepEqual(got[1:], []string{
-		treeText("− apps/", "2"),
+		treeText("− apps/", "2 · 4m"),
 		treeText(" − gone.go", "4m"),
 		treeText(" + new.go", "4m"),
 	}) {
 		t.Fatalf("file lines = %q, want sorted names with the 4m age", got[1:])
+	}
+}
+
+// A folder line carries the age of the newest change beneath it and the
+// targets whose reboots that change triggered, in yml order.
+func TestTreeFolderLineAgesAndNamesReboots(t *testing.T) {
+	m := newTestModel(t,
+		treeTarget("web", "apps"),
+		treeTarget("api", "apps"),
+		treeTarget("docs", "apps"),
+	)
+	m.now = ledgerClock
+	spawnWithChange(m, "api", oneFile("apps/api/x.go"), ledgerClock)
+	m.now = ledgerClock.Add(time.Minute)
+	spawnWithChange(m, "web", oneFile("apps/web/y.go"), ledgerClock.Add(time.Minute))
+	m.now = ledgerClock.Add(3 * time.Minute)
+	m.toggleTreeFolder("apps/")
+
+	rows := folderRows(m)
+	if len(rows) != 3 {
+		t.Fatalf("folder rows = %+v, want the root and its two sub-dirs", rows)
+	}
+	if got := relAge(m.now.Sub(rows[0].at)); got != "2m" {
+		t.Fatalf("root age = %s, want the newest change beneath it, 2m", got)
+	}
+	if got := targetArrow(rows[0].targets); got != "→ web api" {
+		t.Fatalf("root arrow = %q, want web then api in yml order", got)
+	}
+	if got := targetArrow(rows[1].targets); got != "→ api" {
+		t.Fatalf("api/ arrow = %q, want api", got)
+	}
+	if got := targetArrow(rows[2].targets); got != "→ web" {
+		t.Fatalf("web/ arrow = %q, want web", got)
+	}
+}
+
+// A file line repeats its folder's targets only when it adds one; a file whose
+// own reboot set is the folder's stays quiet.
+func TestTreeFileArrowQuietWhenSameAsParent(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"), treeTarget("api", "apps"))
+	m.now = ledgerClock
+	spawnWithChange(m, "web", oneFile("apps/a.go"), ledgerClock)
+	m.now = ledgerClock.Add(time.Minute)
+	spawnWithChange(m, "api", oneFile("apps/a.go"), ledgerClock.Add(time.Minute))
+	m.now = ledgerClock.Add(30 * time.Second)
+	spawnWithChange(m, "web", oneFile("apps/b.go"), ledgerClock.Add(30*time.Second))
+	m.now = ledgerClock.Add(2 * time.Minute)
+	m.toggleTreeFolder("apps/")
+
+	got := drawerOf(m)
+	want := []string{
+		treeText("− apps/", "2 · 1m", "web api"),
+		treeText(" ~ a.go", "1m"),
+		treeText(" ~ b.go", "1m", "web"),
+	}
+	if !reflect.DeepEqual(got[1:], want) {
+		t.Fatalf("file arrows = %q, want a.go quiet and b.go naming web", got[1:])
+	}
+}
+
+// A change that never triggered a reboot keeps its count and age without an
+// arrow: a stopped target's pending batch, or a spawn whose entry aged out.
+func TestTreeNoArrowWithoutAReboot(t *testing.T) {
+	m := newTestModel(t, treeTarget("web", "apps"))
+	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
+	m.now = ledgerClock.Add(time.Minute)
+	m.toggleTreeFolder("apps/")
+
+	got := drawerOf(m)
+	want := []string{
+		treeText("− apps/", "1 · 1m"),
+		treeText(" ~ a.go", "1m"),
+	}
+	if !reflect.DeepEqual(got[1:], want) {
+		t.Fatalf("no-reboot tree = %q, want %q", got[1:], want)
 	}
 }
 
