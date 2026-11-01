@@ -9,7 +9,12 @@ import (
 	"github.com/golang-cz/rerun"
 )
 
-var version = "dev"
+// version and buildTime are stamped by ldflags. An unbuilt dev binary keeps
+// version = "dev" and an empty buildTime, so no age is shown.
+var (
+	version   = "dev"
+	buildTime string
+)
 
 const usage = `rerun - re-run a command on file system changes
 

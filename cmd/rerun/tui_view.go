@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/fsnotify/fsnotify"
@@ -143,7 +144,8 @@ func badge(unseen bool) string {
 // listOffset scrolls the list so the cursor's row stays visible, and its
 // change tree with it when both fit. The row itself wins when they do not.
 func (m *tuiModel) listOffset(rows []visualRow) int {
-	visible := max(1, m.height)
+	// The version line's row is never part of the list.
+	visible := max(1, m.height-1)
 	start := visualIndex(rows, m.cursor)
 	end := start
 	for end+1 < len(rows) && start > 0 && rows[end+1].target == m.cursor-1 {
@@ -216,6 +218,58 @@ func (m *tuiModel) treeRows(i int) []visualRow {
 	return rows
 }
 
+// versionCell draws the left column's bottom line: the version text and the
+// help cue, hint styled and left aligned, with plain padding out to the
+// divider column. A column too narrow for the cue keeps the bare version.
+func (m *tuiModel) versionCell(leftW int) string {
+	cue := 0
+	if leftW >= 8 {
+		cue = 4 // " · ?" always fits: the version text truncates to make room
+	}
+	text := truncate(m.versionText(), leftW-cue)
+	if cue > 0 {
+		text += " · ?"
+	}
+	return m.styles.hint.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
+}
+
+// versionText names the binary: the release tag, the dev build with its age,
+// or the plain dev fallback. A missing or unparseable buildTime drops the age.
+func (m *tuiModel) versionText() string {
+	switch {
+	case strings.HasPrefix(m.version, "v"):
+		return "rerun · " + m.version
+	case strings.HasPrefix(m.version, "dev-"):
+		if age, ok := buildAge(m.buildTime, m.now); ok {
+			return fmt.Sprintf("rerun · %s (%s)", m.version, age)
+		}
+		return "rerun · " + m.version
+	}
+	return "rerun · dev"
+}
+
+// buildAge renders how long ago the binary was built. A build time in the
+// future reads as `just now`, the way a clock skew should.
+func buildAge(buildTime string, now time.Time) (string, bool) {
+	built, err := time.Parse(time.RFC3339, buildTime)
+	if err != nil {
+		return "", false
+	}
+	d := now.Sub(built)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return "just now", true
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes())), true
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours())), true
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours())/24), true
+}
+
 // changeRow is one file of a target's last change set, ready to render.
 type changeRow struct {
 	op   string
@@ -257,6 +311,10 @@ func relToWatch(roots []string, path string) string {
 }
 
 func (m *tuiModel) leftLine(y, leftW int, rows []visualRow) string {
+	// The list reserves the screen's very last row; the version line owns it.
+	if y == m.height-1 {
+		return m.versionCell(leftW)
+	}
 	idx := m.layout.offset + y
 	if idx < 0 || idx >= len(rows) {
 		return strings.Repeat(" ", leftW)

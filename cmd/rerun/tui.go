@@ -153,6 +153,11 @@ type tuiModel struct {
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
 	help   bool
+
+	// version and buildTime are the ldflags stamp, rendered on the left
+	// column's bottom line; buildTime is empty in a dev binary.
+	version   string
+	buildTime string
 	// solo is the soloed target index, or -1.
 	solo int
 
@@ -258,6 +263,8 @@ func newTUI(targets []Target) *tuiModel {
 		group:     group,
 		events:    events,
 		stop:      make(chan struct{}),
+		version:   version,
+		buildTime: buildTime,
 		solo:      -1,
 		follow:    true,
 		now:       time.Now(),

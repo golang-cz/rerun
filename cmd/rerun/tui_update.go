@@ -565,7 +565,8 @@ func (m *tuiModel) copySelection() {
 // change-tree line resolves to the target row it hangs under, so clicks and
 // hovers never land on a file.
 func (m *tuiModel) rowAt(x, y int) int {
-	if y < 0 || y >= m.height || x < 0 || x >= m.layout.leftW {
+	// The last screen row is the version line, never a list row.
+	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
 	rows := m.visualRows()

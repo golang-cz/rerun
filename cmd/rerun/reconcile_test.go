@@ -346,8 +346,8 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m.height = 4
 	m.View()
 
-	if got := m.rowAt(2, m.height-1); got != 3 {
-		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-1, got)
+	if got := m.rowAt(2, m.height-2); got != 3 {
+		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
 	}
 
 	m.cursor = 1 // web with its six tree lines and room for four

@@ -4,7 +4,7 @@ help:
 
 .PHONY: install
 install:
-	go install ./cmd/rerun
+	go install -ldflags "-X main.version=dev-$$(git rev-parse --short HEAD) -X main.buildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/rerun
 
 .PHONY: build
 build:
