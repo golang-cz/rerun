@@ -172,12 +172,17 @@ func (m *tuiModel) toggleTarget(i int) {
 }
 
 // scrollUp freezes the tail: new lines collect behind the `↓ N new` marker.
+// A gesture that cannot move the window (nothing above it) leaves the tail live.
 func (m *tuiModel) scrollUp(n int) {
+	before := m.vp.YOffset
+	m.vp.SetYOffset(before - n)
+	if m.vp.YOffset == before {
+		return
+	}
 	if m.follow {
 		m.follow = false
 		m.pending = 0
 	}
-	m.vp.SetYOffset(m.vp.YOffset - n)
 }
 
 // scrollDown resumes following once the pane is back at the bottom.
