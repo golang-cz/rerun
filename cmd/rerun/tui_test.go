@@ -1405,7 +1405,7 @@ func TestReadLinesReportsScannerError(t *testing.T) {
 		_, _ = pw.Write(bytes.Repeat([]byte("x"), 2*1024*1024))
 	}()
 
-	r.readLines(pr, "t", nil, nil)
+	r.readLines(pr, "t", nil)
 
 	got := sink.all()
 	if len(got) != 1 {
