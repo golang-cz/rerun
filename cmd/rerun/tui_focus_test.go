@@ -210,7 +210,9 @@ func TestPaneColClampsToWidestLine(t *testing.T) {
 	}
 }
 
-func TestDividerBoldOnlyWhenFocused(t *testing.T) {
+// The focused divider switches to the heavy bar in cyan; the list keeps the
+// plain gray bar.
+func TestFocusedDividerIsHeavyCyan(t *testing.T) {
 	// TrueColor (termenv.Profile 0), named here so termenv stays an indirect
 	// dependency. Without it the renderer strips styling off a pipe.
 	prev := lipgloss.ColorProfile()
@@ -218,19 +220,24 @@ func TestDividerBoldOnlyWhenFocused(t *testing.T) {
 	defer lipgloss.SetColorProfile(prev)
 
 	m := newTestModel(t, target("web"))
-	focused := m.styles.dividerFocus.Render("│")
+	focused := m.styles.dividerFocus.Render("┃")
 	plain := m.styles.divider.Render("│")
-	if focused == plain {
-		t.Fatalf("focused and plain dividers render identically: %q", plain)
+	if !strings.Contains(focused, "┃") || !strings.Contains(focused, "\x1b[36m") {
+		t.Fatalf("focused divider = %q, want the heavy bar in cyan", focused)
 	}
 
-	if strings.Contains(m.View(), focused) {
-		t.Fatal("divider is bold while the list has focus")
-	}
-	press(m, "right")
 	view := m.View()
+	if !strings.Contains(view, plain) {
+		t.Fatal("divider is not the plain bar while the list has focus")
+	}
+	if strings.Contains(view, focused) {
+		t.Fatal("heavy divider drawn while the list has focus")
+	}
+
+	press(m, "right")
+	view = m.View()
 	if !strings.Contains(view, focused) {
-		t.Fatal("divider is not bold while the pane has focus")
+		t.Fatal("divider is not the heavy cyan bar while the pane has focus")
 	}
 	if strings.Contains(view, plain) {
 		t.Fatal("plain divider still drawn while the pane has focus")

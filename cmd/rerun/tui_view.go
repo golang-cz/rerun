@@ -45,7 +45,7 @@ func newTUIStyles() tuiStyles {
 	return tuiStyles{
 		base:         lipgloss.NewStyle(),
 		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true),
+		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		cursor:       lipgloss.NewStyle().Background(lipgloss.Color("237")),
 		hover:        lipgloss.NewStyle().Background(lipgloss.Color("235")),
 		muted:        lipgloss.NewStyle().Faint(true),
@@ -102,15 +102,15 @@ func (m *tuiModel) View() string {
 	m.layout.offset = m.listOffset()
 	right := m.rightLines(rightW)
 
-	divider := m.styles.divider
+	divider, glyph := m.styles.divider, "│"
 	if m.paneFocus {
-		divider = m.styles.dividerFocus
+		divider, glyph = m.styles.dividerFocus, "┃"
 	}
 
 	var b strings.Builder
 	for y := 0; y < m.height; y++ {
 		b.WriteString(m.leftLine(y, leftW))
-		b.WriteString(divider.Render("│"))
+		b.WriteString(divider.Render(glyph))
 		b.WriteString(right[y])
 		if y < m.height-1 {
 			b.WriteByte('\n')
@@ -123,11 +123,16 @@ func (m *tuiModel) View() string {
 	return frame
 }
 
-// confirmQuitView is the small centered `q` modal, drawn over the live frame.
+// confirmQuitView is the centered quit modal, drawn over the live frame.
 func (m *tuiModel) confirmQuitView() string {
-	body := m.styles.title.Render("quit rerun?") + "\n" +
-		"enter quits · any other key stays"
-	return m.styles.box.Render(body)
+	quit := lipgloss.NewStyle().Background(lipgloss.Color("1")).Foreground(lipgloss.Color("15")).Bold(true).Render("[ Quit ]")
+	cancel := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[ Cancel ]")
+	body := m.styles.title.Render("Quit rerun?") + "\n" +
+		m.styles.hint.Render("Every target is terminated and every watcher stops.") + "\n\n" +
+		quit + "  " + cancel + "\n\n" +
+		m.styles.hint.Render("enter quits · esc cancels · ctrl+c again quits")
+	// Width fits the body line on one row; 44 would wrap and split the sentence.
+	return m.styles.box.Padding(1, 2).Width(56).Render(body)
 }
 
 // overlayCenter splices box into frame at the canvas center, so the stream and
@@ -660,7 +665,7 @@ func (m *tuiModel) markerLine(w int, marker string, chip string) string {
 func (m *tuiModel) stateChip() string {
 	parts := make([]string, 0, 2)
 	if !m.follow {
-		parts = append(parts, "frozen (f/G)")
+		parts = append(parts, "paused (f/G)")
 	}
 	if m.solo >= 0 {
 		parts = append(parts, "solo "+m.targets[m.solo].spec.Name)
@@ -812,14 +817,14 @@ var helpKeys = [][2]string{
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
 	{"o", "open the target's url"},
-	{"G", "jump to live output"},
-	{"f", "freeze / resume the pane"},
+	{"G", "resume the live tail"},
+	{"f", "pause / resume the pane"},
 	{"/", "search the pane (n/N next/prev, esc clears)"},
 	{"v", "filter (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"?", "close this help"},
-	{"q ^C", "q confirm quit · ^C quit now"},
+	{"q ^C", "q/^C confirm quit · enter/^C again quits · esc cancels"},
 }
 
 func (m *tuiModel) helpView() string {
@@ -833,7 +838,7 @@ func (m *tuiModel) helpView() string {
 		"mouse: click a row to solo it (again or on ALL to clear), click a",
 		"drawer folder to expand it, double-click to stop/start like space,",
 		"click a row's button cell to mute.",
-		"click a pane line to copy it; drag copies a range and freezes the tail",
+		"click a pane line to copy it; drag copies a range and pauses the tail",
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",

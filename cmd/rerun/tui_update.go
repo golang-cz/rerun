@@ -101,18 +101,21 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A pending quit confirm consumes its own key: enter goes, every other
-	// key cancels the modal and then runs as usual.
+	// A pending quit confirm consumes its own key: enter or a second ctrl+c
+	// goes, esc/q dismiss, and every other key cancels then runs as usual.
 	if m.confirmQuit {
 		m.confirmQuit = false
-		if msg.String() == "enter" {
+		switch msg.String() {
+		case "enter", "ctrl+c":
 			return m, tea.Quit
+		case "esc", "q":
+			return m, nil
 		}
 	}
 
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		m.confirmQuit = true
 
 	case "q":
 		m.confirmQuit = true

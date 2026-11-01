@@ -3,7 +3,18 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
+
+// ansiView renders m.View with styling on, so button colors survive.
+func ansiView(t *testing.T, m *tuiModel) string {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(0)
+	defer lipgloss.SetColorProfile(prev)
+	return m.View()
+}
 
 // q opens the confirm modal instead of quitting, over the still-running frame.
 func TestQuitKeyAsksFirst(t *testing.T) {
@@ -14,15 +25,27 @@ func TestQuitKeyAsksFirst(t *testing.T) {
 	if !m.confirmQuit {
 		t.Fatal("q did not arm the confirm modal")
 	}
-	view := m.View()
-	if !strings.Contains(view, "quit rerun?") {
-		t.Error("the confirm modal is missing its title")
+
+	view := ansiView(t, m)
+	for _, want := range []string{
+		"Quit rerun?",
+		"Every target is terminated and every watcher stops.",
+		"enter quits · esc cancels · ctrl+c again quits",
+		"web",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("confirm modal missing %q", want)
+		}
 	}
-	if !strings.Contains(view, "enter quits · any other key stays") {
-		t.Error("the confirm modal is missing its hint line")
+
+	if !strings.Contains(view, "\x1b[1;97;41m[ Quit ]\x1b[0m") {
+		t.Errorf("quit button lacks red background / white bold text")
 	}
-	if !strings.Contains(view, "web") {
-		t.Error("the frame is not drawn behind the confirm modal")
+	if !strings.Contains(view, "\x1b[90m[ Cancel ]\x1b[0m") {
+		t.Errorf("cancel button is not the plain gray button")
+	}
+	if strings.Contains(view, "41m[ Cancel ]") {
+		t.Errorf("cancel button carries a red background")
 	}
 }
 
@@ -32,6 +55,53 @@ func TestQuitConfirmEnterQuits(t *testing.T) {
 	press(m, "q")
 	if _, cmd := m.Update(keyMsg("enter")); cmd == nil {
 		t.Fatal("enter on the confirm modal did not return a quit command")
+	}
+}
+
+// ctrl+c opens the modal like q; a second ctrl+c quits.
+func TestCtrlCOpensModalThenSecondPressQuits(t *testing.T) {
+	m := newTestModel(t)
+	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd != nil {
+		t.Fatal("ctrl+c returned a quit command instead of asking")
+	}
+	if !m.confirmQuit {
+		t.Fatal("ctrl+c did not arm the confirm modal")
+	}
+	if !strings.Contains(m.View(), "Quit rerun?") {
+		t.Fatal("ctrl+c did not draw the confirm modal")
+	}
+	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
+		t.Fatal("a second ctrl+c did not quit")
+	}
+}
+
+// q on the modal dismisses it without quitting, and it stays gone.
+func TestQuitConfirmQCancelsWithoutReopen(t *testing.T) {
+	m := newTestModel(t)
+	press(m, "q")
+	if _, cmd := m.Update(keyMsg("q")); cmd != nil {
+		t.Fatal("q on the confirm modal returned a quit command")
+	}
+	if m.confirmQuit {
+		t.Fatal("q did not dismiss the confirm modal")
+	}
+	if strings.Contains(m.View(), "Quit rerun?") {
+		t.Fatal("the confirm modal is still rendering after q")
+	}
+}
+
+// esc on the modal dismisses it without quitting.
+func TestQuitConfirmEscCancels(t *testing.T) {
+	m := newTestModel(t)
+	press(m, "q")
+	if _, cmd := m.Update(keyMsg("esc")); cmd != nil {
+		t.Fatal("esc on the confirm modal returned a quit command")
+	}
+	if m.confirmQuit {
+		t.Fatal("esc did not dismiss the confirm modal")
+	}
+	if strings.Contains(m.View(), "Quit rerun?") {
+		t.Fatal("the confirm modal is still rendering after esc")
 	}
 }
 
@@ -48,17 +118,8 @@ func TestQuitConfirmOtherKeyStays(t *testing.T) {
 	if m.cursor != 1 {
 		t.Errorf("cursor = %d, want 1 (j ran after cancelling)", m.cursor)
 	}
-	if strings.Contains(m.View(), "quit rerun?") {
+	if strings.Contains(m.View(), "Quit rerun?") {
 		t.Error("the confirm modal is still rendering")
-	}
-}
-
-// ctrl+c quits immediately even with the modal up.
-func TestQuitConfirmCtrlCQuits(t *testing.T) {
-	m := newTestModel(t)
-	press(m, "q")
-	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
-		t.Fatal("ctrl+c with the confirm modal up did not quit")
 	}
 }
 

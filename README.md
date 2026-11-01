@@ -31,8 +31,8 @@ Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` scroll it when focused, `home`/`end` jump to its top-left or
 live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
 toggle the fs drawer under the list, `m` mute a stream, `s` or `enter`
-solo (`esc` clears), `o` open the url, `G` live output, `f` freeze or resume
-the pane, `q` asks first, `ctrl+c` quits immediately.
+solo (`esc` clears), `o` open the url, `G` resume the live tail, `f` pause or
+resume the pane, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
 (a leading `.` runs a yq expression per JSON line); `c` toggles the columns
 table for targets that define `columns`. A JSON output line's top-level `url`,
@@ -40,7 +40,7 @@ table for targets that define `columns`. A JSON output line's top-level `url`,
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, a folder in the fs drawer to expand it,
 shift-click to solo, and a click on the ALL row to clear
-solo. Click a pane line to copy it; drag copies a range and freezes the tail
+solo. Click a pane line to copy it; drag copies a range and pauses the tail
 (`f`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
 The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each

@@ -817,8 +817,11 @@ func TestHelpOverlayToggles(t *testing.T) {
 
 func TestQuitKeysReturnQuit(t *testing.T) {
 	m := newTestModel(t)
-	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
-		t.Error("ctrl+c did not return a quit command")
+	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd != nil {
+		t.Error("ctrl+c on the main screen returned a quit command instead of asking")
+	}
+	if !m.confirmQuit {
+		t.Error("ctrl+c on the main screen did not arm the confirm modal")
 	}
 
 	m = newTestModel(t)
@@ -849,8 +852,8 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.View()
 	press(m, "f")
-	if got := bottomPaneLine(m); !strings.Contains(got, "frozen (f/G)") {
-		t.Fatalf("bottom line = %q, want the frozen chip", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "paused (f/G)") {
+		t.Fatalf("bottom line = %q, want the paused chip", got)
 	}
 }
 
@@ -859,8 +862,8 @@ func TestSoloChipAppendsToFrozen(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.toggleSolo(0)
 	press(m, "f")
-	if got := bottomPaneLine(m); !strings.Contains(got, "frozen (f/G) · solo web") {
-		t.Fatalf("bottom line = %q, want frozen then solo", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "paused (f/G) · solo web") {
+		t.Fatalf("bottom line = %q, want paused then solo", got)
 	}
 }
 
@@ -871,7 +874,7 @@ func TestChipHiddenWhileInputOpen(t *testing.T) {
 	m.View()
 	press(m, "f")
 	press(m, "/")
-	if got := bottomPaneLine(m); strings.Contains(got, "frozen") || strings.Contains(got, "solo") {
+	if got := bottomPaneLine(m); strings.Contains(got, "paused") || strings.Contains(got, "solo") {
 		t.Fatalf("bottom line = %q, want no chip while the bar is open", got)
 	}
 }
