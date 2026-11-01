@@ -27,8 +27,8 @@ Piped or non-TTY output stays plain prefixed lines.
 
 Left column: one row per target; right pane: one merged log; `?` lists keys.
 
-Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` expand or
-collapse the cursor row's reboot ledger, `m` mute a stream, `s` or `enter`
+Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` toggle the
+fs drawer under the list, `m` mute a stream, `s` or `enter`
 solo (`esc` clears), `o` open the url, `G` live output, `f` freeze or resume
 the pane.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
@@ -36,19 +36,21 @@ the pane.
 table for targets that define `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
-button cell to mute, the `+/−` cell to collapse the cursor row's reboot
-ledger, shift-click to solo, and a click on the ALL row to clear
+button cell to mute, an entry in the fs drawer to solo its target,
+shift-click to solo, and a click on the ALL row to clear
 solo. Click a pane line to copy it; drag copies a range and freezes the tail
 (`f`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
 The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
-last change batch held, and its command, with its url linked. Every
-row's reboot ledger is expanded by default and shows its newest spawn — the
-header counts the whole batch — plus up to two changed files, one `+`/`~`/`−`
-glyph (created, written, removed) and relative path per file; `t` or the row's
-`+/−` cell collapses that row. A target the user stopped or booted off
+last change batch held, and its command, with its url linked. The fs drawer
+at the bottom of the left column merges every target's reboot ledger, newest
+first: each header names the target, the spawn time, and the whole batch's
+file count — plus up to three changed files, one `+`/`~`/`−` glyph (created,
+written, removed) and relative path each, and a `+N more` row for the rest. `t`
+toggles the drawer, which grows with the log and never takes more than half
+the column. A target the user stopped or booted off
 records its changes without using them, as a dim `not rebooted (stopped)` line.
 
 #### Examples:

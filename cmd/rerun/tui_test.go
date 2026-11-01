@@ -588,8 +588,8 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	}
 }
 
-// The left column is nameW + the fixed glyph, badge, tree cell, separators,
-// status, and button.
+// The left column is nameW + the fixed glyph, badge, separators, status, and
+// button.
 func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
 	leftW, _ := m.layoutWidths()
@@ -598,15 +598,11 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	if got := nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+17 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+17)
+	if leftW != wantName+16 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+16)
 	}
 	if statusW != 11 {
 		t.Fatalf("statusW = %d, want 11", statusW)
-	}
-	// The tree cell sits between the name's badge and the status column.
-	if got := treeX(leftW); got != wantName+3 {
-		t.Fatalf("tree cell x = %d, want %d", got, wantName+3)
 	}
 }
 

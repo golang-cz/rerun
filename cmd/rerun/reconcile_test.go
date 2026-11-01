@@ -200,7 +200,7 @@ func TestRelToWatchTrimsTheRoot(t *testing.T) {
 	}
 }
 
-// sevenFiles is a change batch big enough to exceed the compact tree cap.
+// sevenFiles is a change batch big enough to exceed the drawer's file cap.
 func sevenFiles() rerun.ChangeSet {
 	files := map[string]struct{}{}
 	ops := map[string]fsnotify.Op{}
@@ -212,181 +212,61 @@ func sevenFiles() rerun.ChangeSet {
 	return rerun.ChangeSet{FirstFile: "a.go", Files: files, Ops: ops}
 }
 
-// treeModel is three targets whose first row carries one seven-file spawn.
-func treeModel(t *testing.T) *tuiModel {
+// ledgerModel is three targets whose first row carries one seven-file spawn.
+func ledgerModel(t *testing.T) *tuiModel {
 	t.Helper()
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
 	return m
 }
 
-// The left column interleaves target rows with reboot ledgers, so a screen
-// line is not a target index: every line has to resolve back to a row.
-func TestVisualRowsMapScreenLinesToTargets(t *testing.T) {
-	m := treeModel(t)
-	m.cursor = 1 // web, whose ledger opens on its own
+// The target list is one line per target again, so every list line maps
+// straight to a row; the drawer under it resolves to the target of its entry.
+func TestListLinesMapScreenLinesToTargets(t *testing.T) {
+	m := ledgerModel(t)
 	m.View()
 	if m.layout.offset != 0 {
-		t.Fatalf("offset = %d, want the ledger on screen from the top", m.layout.offset)
+		t.Fatalf("offset = %d, want the list from the top", m.layout.offset)
 	}
 
-	// ALL, web, its entry header, two files, api, worker.
-	rows := m.visualRows()
-	if len(rows) != 7 {
-		t.Fatalf("visual rows = %d, want 7", len(rows))
-	}
-	want := []int{0, 1, 1, 1, 1, 2, 3}
-	for y := range want {
-		if got := m.rowAt(2, y); got != want[y] {
-			t.Fatalf("rowAt line %d = %d, want %d", y, got, want[y])
+	// ALL, web, api, worker; the drawer takes the rows above the version line.
+	for y, want := range []int{0, 1, 2, 3} {
+		if got := m.rowAt(2, y); got != want {
+			t.Fatalf("rowAt line %d = %d, want %d", y, got, want)
 		}
 	}
-
-	// Past the list is nothing, as before.
-	if got := m.rowAt(2, 7); got != -1 {
+	if got := m.rowAt(2, 4); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
-
-	// A click on a file line selects the target row it hangs under.
-	m.handleMouse(mouse(2, 4, false))
-	if m.cursor != 1 {
-		t.Fatalf("cursor after a file-line click = %d, want 1", m.cursor)
-	}
-}
-
-// Newest first, sorted paths, compacted to the header and treeFiles files.
-func TestLedgerRowsAreSortedAndCompacted(t *testing.T) {
-	m := treeModel(t)
-	m.cursor = 1
-
-	rows := m.treeRows(0)
-	if len(rows) != 1+treeFiles {
-		t.Fatalf("ledger rows = %d, want the header and %d files", len(rows), treeFiles)
-	}
-	if rows[0].kind != treeEntry || rows[0].count != 7 || !rows[0].at.Equal(ledgerClock) {
-		t.Fatalf("header = %+v, want the spawn time and the whole file count", rows[0])
-	}
-	if rows[1].file != "a.go" || rows[1].op != "+" || rows[2].file != "b.go" {
-		t.Fatalf("file rows = %+v, want sorted paths with their ops", rows[1:])
+	if got := m.rowAt(2, m.height-1-len(m.layout.drawer)); got != -1 {
+		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 
-	// A row without a ledger grows no tree, expanded or not.
-	if got := m.treeRows(1); got != nil {
-		t.Fatalf("tree rows for an unchanged target = %+v, want none", got)
-	}
-
-	view := m.View()
-	if !strings.Contains(view, "↺ 14:32:07 · 7 files") || strings.Contains(view, "more") {
-		t.Fatalf("the view is missing the compact reboot ledger:\n%s", view)
-	}
-}
-
-// Every row starts expanded; t collapses only the cursor row's ledger, and the
-// collapse survives moving the cursor away and back.
-func TestLedgerTogglesPerTargetByKey(t *testing.T) {
-	m := treeModel(t)
-	m.cursor = 1
-	if got := len(m.visualRows()); got != 7 {
-		t.Fatalf("rows with every ledger expanded = %d, want 7", got)
-	}
-
-	// Moving off web keeps its ledger open.
-	press(m, "down")
-	if got := len(m.visualRows()); got != 7 {
-		t.Fatalf("rows after moving off web = %d, want its ledger still open", got)
-	}
-
-	// t collapses the cursor row's ledger only.
-	m.cursor = 1
-	press(m, "t")
-	if m.treeExpanded(0) {
-		t.Fatal("t did not collapse the web row's ledger")
-	}
-	if got := len(m.visualRows()); got != 4 {
-		t.Fatalf("rows after collapsing web = %d, want the plain list", got)
-	}
-
-	// Moving away and back keeps the collapse.
-	press(m, "down")
-	press(m, "up")
-	if got := len(m.visualRows()); got != 4 {
-		t.Fatalf("rows after moving away and back = %d, want web still collapsed", got)
-	}
-
-	// Another t expands it again.
-	press(m, "t")
-	if got := len(m.visualRows()); got != 7 {
-		t.Fatalf("rows after expanding web = %d, want the ledger back", got)
-	}
-
-	// A row with nothing to show ignores t.
-	m.cursor = 2
-	press(m, "t")
-	if got := len(m.visualRows()); got != 7 {
-		t.Fatalf("t changed a row without a ledger: %d rows", got)
-	}
-}
-
-// The +/− cell toggles the row it belongs to and never solos.
-func TestTreeCellClickTogglesTheClickedRow(t *testing.T) {
-	m := treeModel(t)
-	m.cursor = 0
+	// A click on the ALL row still clears the solo.
+	m.toggleSolo(1)
 	m.View()
-
-	leftW, _ := m.layoutWidths()
-	cell := treeX(leftW)
-	if got := m.rowAt(cell, 1); got != 1 {
-		t.Fatalf("the ledger cell at line 1 maps to row %d, want 1", got)
-	}
-
-	// web starts expanded, so its cell reads `−` and the click collapses it.
-	if got := m.treeCell(0); got != "−" {
-		t.Fatalf("web's cell before the click = %q, want −", got)
-	}
-	m.handleMouse(mouse(cell, 1, false))
-	if m.cursor != 1 {
-		t.Fatalf("cursor after the cell click = %d, want the web row", m.cursor)
-	}
+	m.handleMouse(mouse(2, 0, false))
 	if m.solo != -1 {
-		t.Fatalf("solo = %d, want none after a cell click", m.solo)
-	}
-	if m.treeExpanded(0) || len(m.visualRows()) != 4 {
-		t.Fatalf("the cell click did not collapse web: rows=%d", len(m.visualRows()))
-	}
-	if got := m.treeCell(0); got != "+" {
-		t.Fatalf("web's cell after the click = %q, want +", got)
-	}
-
-	// A second click on the same cell expands it again.
-	m.handleMouse(mouse(cell, 1, false))
-	if !m.treeExpanded(0) || len(m.visualRows()) != 7 {
-		t.Fatalf("the second cell click did not expand web: rows=%d", len(m.visualRows()))
+		t.Fatalf("solo after a click on ALL = %d, want none", m.solo)
 	}
 }
 
-// The cursor row stays visible even when its ledger cannot fit with it, and a
-// screenful of expanded ledgers still keeps the cursor row on screen.
+// The cursor row stays visible in the list area above the drawer, however tall
+// the drawer grew.
 func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
-	m := treeModel(t)
+	m := ledgerModel(t)
 	m.cursor = 3 // worker, the last row
-	m.height = 4
+	m.height = 4 // no room for a drawer at all
 	m.View()
-
 	if got := m.rowAt(2, m.height-2); got != 3 {
 		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
 	}
-
-	m.cursor = 1 // web with its three ledger lines and room for three
-	m.View()
-	if m.layout.offset != 1 {
-		t.Fatalf("offset = %d, want 1 so the ledger stays right below its row", m.layout.offset)
-	}
-	if got := m.rowAt(2, 0); got != 1 {
-		t.Fatalf("the cursor row is off screen at offset %d: line 0 maps to %d", m.layout.offset, got)
+	if got := len(m.layout.drawer); got != 0 {
+		t.Fatalf("a %d-row column drew %d drawer rows, want none", m.height, got)
 	}
 
-	// Every target carries a ledger and the cursor sits at the bottom: the
-	// cursor row and its tree stay visible while earlier trees scroll off.
+	// A screenful of targets with a drawer under it: the cursor row scrolls
+	// into the list area, the drawer stays where it is.
 	names := []string{"t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9"}
 	defs := make([]Target, 0, len(names))
 	for _, name := range names {
@@ -394,19 +274,25 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	}
 	many := newTestModel(t, defs...)
 	for _, name := range names {
-		spawnWithChange(many, name, changeBatch(map[string]fsnotify.Op{"a.go": fsnotify.Write, "b.go": fsnotify.Write, "c.go": fsnotify.Write}), ledgerClock)
+		spawnWithChange(many, name, oneFile("a.go"), ledgerClock)
 	}
 	many.cursor = len(many.targets)
 	many.height = 8
 	many.View()
-	start := visualIndex(many.visualRows(), many.cursor)
-	end := start
-	for end+1 < len(many.visualRows()) && many.visualRows()[end+1].target == many.cursor-1 {
-		end++
+
+	visible := many.listHeight()
+	if visible >= many.height-1 {
+		t.Fatalf("list height = %d, want the drawer to take rows from it", visible)
 	}
-	offset := many.layout.offset
-	if start < offset || end >= offset+many.height-1 {
-		t.Fatalf("cursor tree [%d,%d] is not fully visible at offset %d with %d list rows", start, end, offset, many.height-1)
+	line := many.cursor - many.layout.offset
+	if line < 0 || line >= visible {
+		t.Fatalf("the cursor row is at list line %d, outside the %d-row list area", line, visible)
+	}
+	if got := many.rowAt(2, line); got != many.cursor {
+		t.Fatalf("the cursor row is off screen: line %d maps to %d, want %d", line, got, many.cursor)
+	}
+	if got := many.rowAt(2, many.height-1-len(many.layout.drawer)); got != -1 {
+		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 }
 

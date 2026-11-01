@@ -133,8 +133,6 @@ type tuiTarget struct {
 	// ledger is the target's past spawns, newest first, each with the file
 	// changes that triggered it.
 	ledger []ledgerEntry
-	// collapsed hides this row's reboot ledger. Every row starts expanded.
-	collapsed bool
 
 	// colSpec is the spec the cached column expressions were parsed from, so
 	// a spec swap reparses exactly once. colBad marks a spec whose expression
@@ -157,6 +155,11 @@ type tuiModel struct {
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
 	help   bool
+
+	// drawerOpen shows the fs drawer under the list. One global toggle, open
+	// by default, so every target's spawns are on screen without a per-row
+	// expansion.
+	drawerOpen bool
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -264,18 +267,19 @@ func newTUI(targets []Target) *tuiModel {
 	group := newTargetGroup(targets, tuiSink(events), "")
 
 	m := &tuiModel{
-		group:     group,
-		events:    events,
-		stop:      make(chan struct{}),
-		version:   version,
-		buildTime: buildTime,
-		solo:      -1,
-		follow:    true,
-		now:       time.Now(),
-		lastClick: -1,
-		hover:     -1,
-		searchRow: -1,
-		styles:    newTUIStyles(),
+		group:      group,
+		events:     events,
+		stop:       make(chan struct{}),
+		version:    version,
+		buildTime:  buildTime,
+		solo:       -1,
+		follow:     true,
+		drawerOpen: true,
+		now:        time.Now(),
+		lastClick:  -1,
+		hover:      -1,
+		searchRow:  -1,
+		styles:     newTUIStyles(),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
@@ -388,31 +392,8 @@ func (m *tuiModel) refreshUnseen() {
 	}
 }
 
-// treeExpanded reports whether a row's reboot ledger is shown. Every row
-// starts expanded; t or the row's +/− cell collapses it.
-func (m *tuiModel) treeExpanded(i int) bool {
-	return i >= 0 && i < len(m.targets) && !m.targets[i].collapsed
-}
-
-// toggleTree collapses or expands one row's reboot ledger.
-func (m *tuiModel) toggleTree(i int) { m.targets[i].collapsed = !m.targets[i].collapsed }
-
-// hasContent reports whether a row has anything for its ledger to show: a past
-// spawn, or a change batch no spawn has used yet. The pending count includes a
-// running target's backoff window, so its cell is never blank while changes wait.
-func (t *tuiTarget) hasContent() bool { return len(t.ledger) > 0 || len(t.pending) > 0 }
-
-// treeCell is the row's ledger button: `−` while the row is expanded, `+`
-// while collapsed, and blank when the row has nothing to show.
-func (m *tuiModel) treeCell(i int) string {
-	if !m.targets[i].hasContent() {
-		return " "
-	}
-	if m.treeExpanded(i) {
-		return "−"
-	}
-	return "+"
-}
+// toggleDrawer shows or hides the fs drawer under the target list.
+func (m *tuiModel) toggleDrawer() { m.drawerOpen = !m.drawerOpen }
 
 // showTargetHint flags that m/s need a row, not the ALL rollup.
 func (m *tuiModel) showTargetHint() { m.showHint(allRowHint) }
@@ -708,8 +689,17 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.recomputeSearch(false)
 }
 
-// ledgerCap bounds a row's reboot ledger: the three newest spawns.
+// ledgerCap bounds a target's reboot ledger: the three newest spawns. The fs
+// drawer merges what every target keeps here.
 const ledgerCap = 3
+
+// drawerCap bounds the drawer's merged ledger: the twenty newest spawns across
+// all targets. Older entries are simply not in the drawer.
+const drawerCap = 20
+
+// drawerFiles caps one drawer entry's file lines. The `+k more` row carries the
+// rest of the batch, and the header counts the whole batch.
+const drawerFiles = 3
 
 // ledgerEntry is one spawn of a target and the file changes that triggered it.
 // Paths stay as the watcher reported them, so a moved watch root is relative

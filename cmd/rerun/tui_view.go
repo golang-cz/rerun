@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,9 +20,9 @@ const (
 	colorSolo   = "6"
 )
 
-// Left column geometry: glyph, space, name, badge, tree, status, space,
-// button — nameW + statusW + 6 cells. The status column fits `exit segv`,
-// `4d03h`, and `backoff 10s` (11 cells).
+// Left column geometry: glyph, space, name, badge, status, space, button —
+// nameW + statusW + 5 cells. The status column fits `exit segv`, `4d03h`, and
+// `backoff 10s` (11 cells).
 const statusW = 11
 
 type tuiStyles struct {
@@ -74,6 +75,7 @@ func (r rect) contains(x, y int) bool {
 type tuiLayout struct {
 	leftW  int
 	offset int
+	drawer []drawerRow
 	marker rect
 }
 
@@ -94,13 +96,13 @@ func (m *tuiModel) View() string {
 
 	leftW, rightW := m.layoutWidths()
 	m.layout.leftW = leftW
-	rows := m.visualRows()
-	m.layout.offset = m.listOffset(rows)
+	m.layout.drawer = m.drawerRows()
+	m.layout.offset = m.listOffset()
 	right := m.rightLines(rightW)
 
 	var b strings.Builder
 	for y := 0; y < m.height; y++ {
-		b.WriteString(m.leftLine(y, leftW, rows))
+		b.WriteString(m.leftLine(y, leftW))
 		b.WriteString(m.styles.divider.Render("│"))
 		b.WriteString(right[y])
 		if y < m.height-1 {
@@ -116,7 +118,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	for _, t := range m.targets {
 		nameW = max(nameW, displayWidth(t.spec.Name))
 	}
-	leftW = nameW + statusW + 6
+	leftW = nameW + statusW + 5
 	if limit := max(8, m.width/2); leftW > limit {
 		leftW = limit
 	}
@@ -127,10 +129,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 }
 
 // nameWidth is the name cell's width for a given left column width.
-func nameWidth(leftW int) int { return max(0, leftW-statusW-6) }
-
-// treeX is the ledger's +/− cell: one column of the name's trailing cells.
-func treeX(leftW int) int { return nameWidth(leftW) + 3 }
+func nameWidth(leftW int) int { return max(0, leftW-statusW-5) }
 
 // badge is the name column's trailing cell: a marker for hidden output, else
 // a plain separator, so the status column never shifts.
@@ -141,105 +140,137 @@ func badge(unseen bool) string {
 	return " "
 }
 
-// listOffset scrolls the list so the cursor's row stays visible, and its
-// reboot ledger with it when both fit. The row itself wins when they do not.
-func (m *tuiModel) listOffset(rows []visualRow) int {
-	// The version line's row is never part of the list.
-	visible := max(1, m.height-1)
-	start := visualIndex(rows, m.cursor)
-	end := start
-	for end+1 < len(rows) && start > 0 && rows[end+1].target == m.cursor-1 {
-		end++
-	}
+// listLen is how many screen lines the target list holds: the ALL rollup and
+// one line per target. The fs drawer hangs below it.
+func (m *tuiModel) listLen() int { return len(m.targets) + 1 }
+
+// listHeight is how many screen rows the target list has: everything above the
+// drawer, which itself sits above the version line.
+func (m *tuiModel) listHeight() int {
+	return max(1, m.height-1-len(m.layout.drawer))
+}
+
+// listOffset scrolls the list so the cursor's row stays inside the list area.
+// The drawer never scrolls with it.
+func (m *tuiModel) listOffset() int {
+	visible := m.listHeight()
 	offset := 0
-	if end >= visible {
-		offset = end - visible + 1
+	if m.cursor >= visible {
+		offset = m.cursor - visible + 1
 	}
-	if start < offset {
-		offset = start
-	}
-	return min(offset, max(0, len(rows)-visible))
+	return min(offset, max(0, m.listLen()-visible))
 }
 
-// visualIndex is the first screen line of a row (0 = ALL, 1..n = target), or 0
-// when that row is gone.
-func visualIndex(rows []visualRow, row int) int {
-	want := row - 1
-	for i, r := range rows {
-		if r.target == want && r.kind == treeNone {
-			return i
-		}
-	}
-	return 0
-}
-
-// visualRow is one line of the left column. A target row can be followed by
-// the cursor row's reboot ledger, so a screen line is not a target index:
-// rowAt maps back through this list.
-type visualRow struct {
-	target int      // the row's target index; -1 is the ALL rollup
-	kind   treeKind // which ledger line this is, treeNone on a target row
-	at     time.Time
-	count  int    // an entry header's or a pending line's file count
-	op     string // a ledger file row's fsnotify glyph
-	file   string // a ledger file row's path, relative to the watch root
-}
-
-// treeKind is which line of a row's reboot ledger a visual row draws.
-type treeKind int
+// drawerKind is which line of the fs drawer a row draws.
+type drawerKind int
 
 const (
-	treeNone    treeKind = iota
-	treeEntry            // `↺ 14:32:07 · 3 files`
-	treeFile             // `+ pkg/api/types.gen.go`
-	treePending          // `· 3 files recorded, not rebooted (stopped)`
+	drawerSep     drawerKind = iota // `fs ·────────`
+	drawerSpawn                     // `↺ 14:32:07 · api · 3 files`
+	drawerFile                      // `+ pkg/api/types.gen.go`
+	drawerMore                      // `+4 more`
+	drawerPending                   // `· web · 2 files recorded, not rebooted (stopped)`
 )
 
-// treeFiles caps one compact ledger entry's file lines. The header count
-// carries the total, so a large batch never grows a `+k more` row.
-const treeFiles = 2
+// drawerRow is one drawn line of the fs drawer. target is the row a click on
+// this line resolves to, or -1 for a line that belongs to no target.
+type drawerRow struct {
+	kind   drawerKind
+	target int
+	at     time.Time
+	count  int    // an entry header's file count, or a `+k more` remainder
+	op     string // a file line's fsnotify glyph
+	file   string // a file line's path, relative to the target's watch root
+}
 
-// visualRows lays out the left column: the ALL rollup, then every target row
-// with its reboot ledger beneath it when that row is expanded.
-func (m *tuiModel) visualRows() []visualRow {
-	rows := make([]visualRow, 0, len(m.targets)+1)
-	rows = append(rows, visualRow{target: -1})
+// drawerEntry is one block of the drawer: a spawn of a target, or the changes a
+// stopped target recorded but no spawn will use.
+type drawerEntry struct {
+	target  int
+	at      time.Time
+	files   []changeFile
+	stopped int // > 0 names a stopped target's recorded file count
+}
+
+// drawerEntries is the drawer's content, in draw order: every target's spawns,
+// newest first, then what a stopped target recorded and never rebooted.
+func (m *tuiModel) drawerEntries() []drawerEntry {
+	entries := make([]drawerEntry, 0, len(m.targets))
 	for i := range m.targets {
-		rows = append(rows, visualRow{target: i})
-		if m.treeExpanded(i) {
-			rows = append(rows, m.treeRows(i)...)
+		for _, e := range m.targets[i].ledger {
+			entries = append(entries, drawerEntry{target: i, at: e.at, files: e.files})
 		}
+	}
+	sort.SliceStable(entries, func(a, b int) bool { return entries[a].at.After(entries[b].at) })
+	if len(entries) > drawerCap {
+		entries = entries[:drawerCap]
+	}
+	for i := range m.targets {
+		if t := m.targets[i]; t.pendingStopped() {
+			entries = append(entries, drawerEntry{target: i, stopped: len(t.pending)})
+		}
+	}
+	return entries
+}
+
+// drawerRows lays out the fs drawer: the separator, then whole entries, newest
+// first, until it would take more than half the left pane. It stays hidden
+// while nothing has ever changed, and an entry that does not fit whole is not
+// drawn at all — the data behind it stays in the target's ledger.
+func (m *tuiModel) drawerRows() []drawerRow {
+	if !m.drawerOpen {
+		return nil
+	}
+	limit := max(0, m.height-1) / 2
+	if limit < 2 {
+		return nil // the separator alone would claim the whole drawer
+	}
+	rows := make([]drawerRow, 0, limit)
+	rows = append(rows, drawerRow{kind: drawerSep, target: -1})
+	for _, e := range m.drawerEntries() {
+		lines := m.drawerEntryRows(e)
+		if len(rows)+len(lines) > limit {
+			continue
+		}
+		rows = append(rows, lines...)
+	}
+	if len(rows) == 1 {
+		return nil
 	}
 	return rows
 }
 
-// treeRows is the compact reboot ledger under one target row: the batch a
-// stopped target never used, then the newest spawn as a header and at most
-// treeFiles file lines. A row with nothing to show grows no rows at all.
-func (m *tuiModel) treeRows(i int) []visualRow {
-	t := m.targets[i]
-	if !t.hasContent() {
-		return nil
+// drawerEntryRows expands one entry block: its header, its newest files, the
+// `+k more` row for the rest, or the dim pending warning of a stopped target.
+func (m *tuiModel) drawerEntryRows(e drawerEntry) []drawerRow {
+	if e.stopped > 0 {
+		return []drawerRow{{kind: drawerPending, target: e.target, count: e.stopped}}
 	}
-	var rows []visualRow
-	if t.pendingStopped() {
-		rows = append(rows, visualRow{target: i, kind: treePending, count: len(t.pending)})
-	}
-	if len(t.ledger) == 0 {
-		return rows
-	}
-	e := t.ledger[0]
-	rows = append(rows, visualRow{target: i, kind: treeEntry, at: e.at, count: len(e.files)})
-	shown := min(len(e.files), treeFiles)
+	rows := []drawerRow{{kind: drawerSpawn, target: e.target, at: e.at, count: len(e.files)}}
+	t := m.targets[e.target]
+	shown := min(len(e.files), drawerFiles)
 	for _, f := range e.files[:shown] {
-		rows = append(rows, visualRow{
-			target: i,
-			kind:   treeFile,
+		rows = append(rows, drawerRow{
+			kind:   drawerFile,
+			target: e.target,
 			op:     opText(f.op),
 			file:   relToWatch(t.spec.On, f.path),
 		})
 	}
+	if extra := len(e.files) - shown; extra > 0 {
+		rows = append(rows, drawerRow{kind: drawerMore, target: e.target, count: extra})
+	}
 	return rows
+}
+
+// inDrawer reports whether a screen row is inside the drawer, and which of its
+// lines it is. The drawer sits between the list and the version line.
+func (m *tuiModel) inDrawer(y int) (drawerRow, bool) {
+	n := len(m.layout.drawer)
+	if n == 0 || y < m.height-1-n || y >= m.height-1 {
+		return drawerRow{}, false
+	}
+	return m.layout.drawer[y-(m.height-1-n)], true
 }
 
 // versionCell draws the left column's bottom line: the version text and the
@@ -336,30 +367,74 @@ func relToWatch(roots []string, path string) string {
 	return filepath.Clean(path)
 }
 
-func (m *tuiModel) leftLine(y, leftW int, rows []visualRow) string {
+// leftLine draws one screen line of the left column: the version line owns the
+// last row, the fs drawer the rows above it, and the target list the rest.
+func (m *tuiModel) leftLine(y, leftW int) string {
 	// The list reserves the screen's very last row; the version line owns it.
 	if y == m.height-1 {
 		return m.versionCell(leftW)
 	}
+	if row, ok := m.inDrawer(y); ok {
+		return m.drawerLine(row, leftW)
+	}
 	idx := m.layout.offset + y
-	if idx < 0 || idx >= len(rows) {
+	if idx < 0 || idx >= m.listLen() {
 		return strings.Repeat(" ", leftW)
 	}
-	row := rows[idx]
-	switch row.kind {
-	case treeEntry:
-		return m.entryLine(row, leftW)
-	case treeFile:
-		return m.treeLine(row, leftW)
-	case treePending:
-		return m.pendingLine(row, leftW)
-	case treeNone:
-		if row.target < 0 {
-			return m.allLine(leftW)
-		}
-		return m.targetLine(row.target, leftW)
+	if idx == 0 {
+		return m.allLine(leftW)
 	}
-	return m.targetLine(row.target, leftW)
+	return m.targetLine(idx-1, leftW)
+}
+
+// drawerLine draws one line of the fs drawer: the `fs ·────` separator, an
+// entry header, one of its files, its `+k more` row, or the dim warning of a
+// stopped target that recorded changes no spawn will use.
+func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
+	switch row.kind {
+	case drawerSep:
+		label := truncate("fs ·", leftW)
+		if gap := leftW - displayWidth(label); gap > 0 {
+			return m.styles.divider.Render(label + strings.Repeat("─", gap))
+		}
+		return m.styles.divider.Render(label)
+
+	case drawerSpawn:
+		t := m.targets[row.target]
+		segs := []seg{
+			{text: "↺ " + row.at.Format("15:04:05") + " · ", color: colorGray},
+			// The name keeps its state color, so a red row reads red here too.
+			{text: t.spec.Name, color: stateColor(t)},
+			{text: " · " + fileCount(row.count), color: colorGray},
+		}
+		return renderSegs(segs, m.styles.base, leftW)
+
+	case drawerFile:
+		segs := []seg{
+			{text: "  "},
+			{text: row.op, color: opColor(row.op)},
+			{text: " " + row.file},
+		}
+		return renderSegs(segs, m.styles.base, leftW)
+
+	case drawerMore:
+		segs := []seg{{text: fmt.Sprintf("  +%d more", row.count), color: colorGray}}
+		return renderSegs(segs, m.styles.base, leftW)
+
+	case drawerPending:
+		t := m.targets[row.target]
+		word := "stopped"
+		if t.state == stateOff {
+			word = "off"
+		}
+		segs := []seg{
+			{text: "· "},
+			{text: t.spec.Name, color: stateColor(t)},
+			{text: " · " + fileCount(row.count) + " recorded, not rebooted (" + word + ")"},
+		}
+		return renderSegs(segs, m.styles.base.Faint(true), leftW)
+	}
+	return strings.Repeat(" ", leftW)
 }
 
 // allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
@@ -391,48 +466,11 @@ func (m *tuiModel) targetLine(i, leftW int) string {
 		{text: " "},
 		{text: padRight(t.spec.Name, nameWidth(leftW)), link: t.spec.URL},
 		{text: badge(t.unseen)},
-		{text: m.treeCell(i), color: colorGray},
 		{text: padRight(m.status(t), statusW), color: statusColor(t)},
 		{text: " "},
 		{text: btn, color: btnColor},
 	}
 	return renderSegs(segs, m.rowStyle(i+1), leftW)
-}
-
-// entryLine is one ledger entry's header: when the spawn ran and how many
-// files triggered it.
-func (m *tuiModel) entryLine(row visualRow, leftW int) string {
-	segs := []seg{
-		{text: "  "},
-		{text: "↺ " + row.at.Format("15:04:05") + " · " + fileCount(row.count), color: colorGray},
-	}
-	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
-}
-
-// treeLine is one changed file of a ledger entry: its op glyph and path,
-// indented under the entry header it belongs to.
-func (m *tuiModel) treeLine(row visualRow, leftW int) string {
-	segs := []seg{
-		{text: "    "},
-		{text: row.op, color: opColor(row.op)},
-		{text: " "},
-		{text: row.file},
-	}
-	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
-}
-
-// pendingLine warns that a stopped or group-held target recorded changes no
-// spawn used, so the files stay pending until a manual start.
-func (m *tuiModel) pendingLine(row visualRow, leftW int) string {
-	word := "stopped"
-	if m.targets[row.target].state == stateOff {
-		word = "off"
-	}
-	segs := []seg{
-		{text: "  "},
-		{text: "· " + fileCount(row.count) + " recorded, not rebooted (" + word + ")"},
-	}
-	return renderSegs(segs, m.rowStyle(row.target+1).Faint(true), leftW)
 }
 
 // opColor ties a ledger file glyph to the row palette: a created file is
@@ -754,7 +792,7 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "collapse / expand the cursor row's reboot ledger"},
+	{"t", "toggle the fs drawer under the target list"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -777,14 +815,16 @@ func (m *tuiModel) helpView() string {
 	}
 	b.WriteString("\n")
 	for _, line := range []string{
-		"mouse: click a row to solo it (again or on ALL to clear),",
-		"double-click to stop/start like space, click its button cell to mute.",
+		"mouse: click a row to solo it (again or on ALL to clear), a drawer",
+		"entry solos the target it belongs to, double-click to stop/start like",
+		"space, click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and freezes the tail",
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"each row's reboot ledger shows its newest spawn and its files; all",
-		"rows start expanded, t or the row's +/− cell collapses that row.",
+		"the fs drawer at the bottom of the left column merges every target's",
+		"spawns, newest first, each with the files that triggered it; t toggles",
+		"it, and it never takes more than half the column.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
 		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",

@@ -174,9 +174,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "t":
-		if m.cursor > 0 && m.targets[m.cursor-1].hasContent() {
-			m.toggleTree(m.cursor - 1)
-		}
+		m.toggleDrawer()
 
 	case "o":
 		if m.cursor > 0 {
@@ -428,18 +426,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	_, inDrawer := m.inDrawer(msg.Y)
 	switch {
 	case msg.Shift:
 		if row > 0 {
 			m.toggleSolo(row - 1)
 		}
-	case row > 0 && msg.X == m.layout.leftW-1:
+	case !inDrawer && row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
-	case row > 0 && msg.X == treeX(m.layout.leftW) && m.targets[row-1].hasContent():
-		// The cell belongs to the row it sits on: move the cursor there, then
-		// collapse or expand that row's ledger.
-		m.cursor = row
-		m.toggleTree(row - 1)
 	default:
 		m.cursor = row
 		// The pair's first click already soloed the row; the second click
@@ -565,17 +559,23 @@ func (m *tuiModel) copySelection() {
 }
 
 // rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none. A
-// ledger line resolves to the target row it hangs under, so clicks and hovers
-// never land on a file.
+// drawer entry resolves to the target it belongs to, so clicking one solos its
+// target the way clicking its row does; the drawer separator and the blank
+// rows past the list belong to no row.
 func (m *tuiModel) rowAt(x, y int) int {
 	// The last screen row is the version line, never a list row.
 	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
-	rows := m.visualRows()
+	if row, ok := m.inDrawer(y); ok {
+		if row.target < 0 {
+			return -1
+		}
+		return row.target + 1
+	}
 	idx := m.layout.offset + y
-	if idx < 0 || idx >= len(rows) {
+	if idx < 0 || idx >= m.listLen() {
 		return -1
 	}
-	return rows[idx].target + 1
+	return idx
 }
