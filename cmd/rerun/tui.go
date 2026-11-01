@@ -80,6 +80,13 @@ func runTUI(targets []Target, configPath string, signals <-chan os.Signal) int {
 	return code
 }
 
+// Bottom-line input modes. inputNone means no bar is open.
+const (
+	inputNone = iota
+	inputSearch
+	inputFilter
+)
+
 // procState is the process state a row's glyph shows.
 type procState int
 
@@ -166,6 +173,29 @@ type tuiModel struct {
 	// target's own text. len(visibleRaw) always equals len(visible).
 	visibleRaw []string
 
+	// inputMode names the bottom-line bar that is open, input its in-progress
+	// text. While one is open it owns every key and the bottom line.
+	inputMode int
+	input     string
+
+	// search is the query; while inputSearch is open it tracks input live.
+	// searchMatches holds the pane rows it hits, searchRow the current hit.
+	search        string
+	searchMatches []int
+	searchRow     int
+
+	// filter hides pane rows whose raw line does not match. A query starting
+	// with "." is a yq expression. paneSel indexes visible, paneView caches
+	// the flattened subset. filterErr is a yq parse error that suspends the
+	// filter; filterStash restores the committed filter when an edit is
+	// cancelled. filterOn reports which one is active.
+	filter       string
+	filterErr    string
+	filterStash  string
+	paneSel      []int
+	paneView     []string
+	paneSelDirty bool
+
 	// prefixW is the pane prefix column: the longest target name, so every
 	// stream line starts its message in the same column.
 	prefixW int
@@ -208,6 +238,7 @@ func newTUI(targets []Target) *tuiModel {
 		now:       time.Now(),
 		lastClick: -1,
 		hover:     -1,
+		searchRow: -1,
 		styles:    newTUIStyles(),
 		// Kept non-nil: copy code walks this list in parallel with visible.
 		visibleRaw: []string{},
@@ -279,6 +310,7 @@ func (m *tuiModel) toggleMute(i int) {
 	m.refreshUnseen()
 	m.mergedDirty = true
 	m.vpDirty = true
+	m.recomputeSearch(false)
 }
 
 func (m *tuiModel) toggleSolo(i int) {
@@ -292,6 +324,7 @@ func (m *tuiModel) toggleSolo(i int) {
 	m.group.setSoloGuard(true)
 	m.mergedDirty = true
 	m.vpDirty = true
+	m.recomputeSearch(false)
 }
 
 // clearSolo drops the solo filter and restores the other rows' lines.
@@ -304,6 +337,7 @@ func (m *tuiModel) clearSolo() {
 	m.group.setSoloGuard(false)
 	m.mergedDirty = true
 	m.vpDirty = true
+	m.recomputeSearch(false)
 }
 
 // refreshUnseen drops the badge from every row whose stream is in the pane
@@ -419,6 +453,9 @@ func (m *tuiModel) addLine(i int, line string) {
 	if m.streamsTo(i) {
 		m.visible = appendCapped(m.visible, m.prefixed(mergedLine{target: i, name: t.spec.Name, text: line}))
 		m.visibleRaw = appendCapped(m.visibleRaw, line)
+		if m.filterOn() {
+			m.paneSelDirty = true
+		}
 		if !m.follow {
 			m.pending++ // only lines the pane actually holds
 		}
@@ -444,6 +481,9 @@ func (m *tuiModel) addNotice(line string) {
 	m.merged = appendCapped(m.merged, mergedLine{target: -1, text: line})
 	m.visible = appendCapped(m.visible, line)
 	m.visibleRaw = appendCapped(m.visibleRaw, line)
+	if m.filterOn() {
+		m.paneSelDirty = true
+	}
 	if !m.follow {
 		m.pending++
 	}
@@ -471,6 +511,9 @@ func appendCapped[T any](lines []T, line T) []T {
 func (m *tuiModel) applyEvents(events []event) {
 	for _, ev := range events {
 		m.applyEvent(ev)
+	}
+	if m.search != "" {
+		m.recomputeSearch(false)
 	}
 }
 
@@ -629,6 +672,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.lastClick = -1
 	m.mergedDirty = true
 	m.vpDirty = true
+	m.recomputeSearch(false)
 }
 
 // changeRowsFor turns a row's retained change set into tree rows: paths
@@ -648,13 +692,195 @@ func (m *tuiModel) changeRowsFor(t *tuiTarget) []changeRow {
 	return rows
 }
 
-// paneLines is the merged stream, rebuilt when muting or soloing changed
-// what belongs in it.
+// paneLines is the merged stream, rebuilt when muting, soloing, or the filter
+// changed what belongs in it.
 func (m *tuiModel) paneLines() []string {
+	m.ensurePane()
+	if !m.filterOn() {
+		return m.visible
+	}
+	return m.paneView
+}
+
+// ensurePane materializes visible and paneSel before a frame or a pointer
+// gesture reads them.
+func (m *tuiModel) ensurePane() {
 	if m.mergedDirty {
 		m.rebuildMerged()
 	}
-	return m.visible
+	if m.paneSelDirty {
+		m.rebuildPaneSel()
+	}
+}
+
+// paneLen is how many rows the pane shows.
+func (m *tuiModel) paneLen() int {
+	m.ensurePane()
+	if !m.filterOn() {
+		return len(m.visibleRaw)
+	}
+	return len(m.paneSel)
+}
+
+// paneRowRaw maps a display row to its raw line's index in visibleRaw.
+func (m *tuiModel) paneRowRaw(row int) int {
+	m.ensurePane()
+	if !m.filterOn() {
+		return row
+	}
+	return m.paneSel[row]
+}
+
+// filterOn reports whether a filter is narrowing the pane. A query with a yq
+// parse error suspends the filter, so the pane stays live behind the error.
+func (m *tuiModel) filterOn() bool { return m.filter != "" && m.filterErr == "" }
+
+// rebuildPaneSel re-derives the visible subset for the current filter. The
+// filter expression is parsed once here, never per line.
+func (m *tuiModel) rebuildPaneSel() {
+	m.paneSelDirty = false
+	if !m.filterOn() {
+		m.paneSel = nil
+		m.paneView = nil
+		return
+	}
+	keep := m.filterFunc()
+	m.paneSel = m.paneSel[:0]
+	m.paneView = m.paneView[:0]
+	for i := range m.visible {
+		if keep(m.visibleRaw[i]) {
+			m.paneSel = append(m.paneSel, i)
+			m.paneView = append(m.paneView, m.visible[i])
+		}
+	}
+}
+
+// filterFunc builds the per-line predicate: a yq expression when the query
+// starts with ".", else a case-insensitive substring. A bad expression keeps
+// nothing; a line the expression cannot parse or evaluate is dropped.
+func (m *tuiModel) filterFunc() func(string) bool {
+	if strings.HasPrefix(m.filter, ".") {
+		expr, err := yqParse(m.filter)
+		if err != nil {
+			return func(string) bool { return false }
+		}
+		return func(line string) bool { return yqMatches(expr, line) }
+	}
+	needle := strings.ToLower(m.filter)
+	return func(line string) bool {
+		return strings.Contains(strings.ToLower(line), needle)
+	}
+}
+
+// recomputeSearch re-sweeps the pane's raw lines for the query. One Contains
+// pass over at most lineCap lines, run on edits and arrivals, never per frame.
+// reset parks the hit at the first match in view; otherwise the current hit is
+// kept when it still matches.
+func (m *tuiModel) recomputeSearch(reset bool) {
+	m.ensurePane()
+	m.searchMatches = m.searchMatches[:0]
+	if m.search == "" {
+		m.searchRow = -1
+		return
+	}
+	q := strings.ToLower(m.search)
+	n := m.paneLen()
+	for row := 0; row < n; row++ {
+		if strings.Contains(strings.ToLower(m.visibleRaw[m.paneRowRaw(row)]), q) {
+			m.searchMatches = append(m.searchMatches, row)
+		}
+	}
+	if !reset {
+		for _, r := range m.searchMatches {
+			if r == m.searchRow {
+				return
+			}
+		}
+	}
+	m.searchRow = -1
+	for _, r := range m.searchMatches {
+		if r >= m.vp.YOffset {
+			m.searchRow = r
+			break
+		}
+	}
+}
+
+// clearSearch drops the query and its matches.
+func (m *tuiModel) clearSearch() {
+	m.search = ""
+	m.searchMatches = m.searchMatches[:0]
+	m.searchRow = -1
+}
+
+// clearFilter drops the filter and restores every pane row.
+func (m *tuiModel) clearFilter() {
+	m.filter = ""
+	m.filterErr = ""
+	m.paneSelDirty = true
+	m.vpDirty = true
+	m.recomputeSearch(true)
+}
+
+// searchJump moves to the next (dir > 0) or previous match and centers it,
+// wrapping at the ends. A search with no matches is a no-op.
+func (m *tuiModel) searchJump(dir int) {
+	if m.search == "" || len(m.searchMatches) == 0 {
+		return
+	}
+	if dir < 0 {
+		prev := m.searchMatches[len(m.searchMatches)-1]
+		for i := len(m.searchMatches) - 1; i >= 0; i-- {
+			if m.searchMatches[i] < m.searchRow {
+				prev = m.searchMatches[i]
+				break
+			}
+		}
+		m.searchRow = prev
+	} else {
+		next := m.searchMatches[0]
+		for _, r := range m.searchMatches {
+			if r > m.searchRow {
+				next = r
+				break
+			}
+		}
+		m.searchRow = next
+	}
+	m.centerOn(m.searchRow)
+}
+
+// centerOn scrolls a row to the middle of the pane and freezes the tail, the
+// way a manual scroll does.
+func (m *tuiModel) centerOn(row int) {
+	m.clearSelection()
+	m.follow = false
+	m.pending = 0
+	lines := m.paneLines()
+	maxOff := max(0, len(lines)-m.vp.Height)
+	m.vp.SetYOffset(min(max(row-m.vp.Height/2, 0), maxOff))
+}
+
+// searchStatus is the `12/47` counter, with the query appended while the bar
+// is open.
+func (m *tuiModel) searchStatus(showQuery bool) string {
+	pos := 0
+	for i, r := range m.searchMatches {
+		if r == m.searchRow {
+			pos = i + 1
+			break
+		}
+	}
+	s := fmt.Sprintf("%d/%d", pos, len(m.searchMatches))
+	if showQuery {
+		s += " " + m.search
+	}
+	return s
+}
+
+// filterStatus is the bottom line's filtered row count.
+func (m *tuiModel) filterStatus() string {
+	return fmt.Sprintf("%d lines", m.paneLen())
 }
 
 // mergedLine is one line of the arrival-ordered log the ALL pane filters. The
@@ -684,6 +910,7 @@ func (m *tuiModel) rebuildMerged() {
 		m.visibleRaw = appendCapped(m.visibleRaw, line.text)
 	}
 	m.mergedDirty = false
+	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
 }
 
 // uptime renders a running target's age: 3s, 0m48s, 1m15s, 2h30m, 4d03h.

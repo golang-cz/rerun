@@ -444,13 +444,28 @@ func (m *tuiModel) rightLines(w int) []string {
 			m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + m.vp.Height - 1, w: w, h: 1}
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.marker.Render(marker))
 		}
+		// One line, six claimants, in precedence order: an open bar, the copy
+		// hint, the new-lines marker (already drawn), the committed search
+		// counter, the filter count, then the m/s hint.
 		switch {
+		case m.inputMode == inputSearch:
+			out[last] = m.bottomLine(w, m.searchStatus(true))
+		case m.inputMode == inputFilter && m.filterErr != "":
+			out[last] = m.bottomLine(w, "yq: "+m.filterErr)
+		case m.inputMode == inputFilter:
+			out[last] = m.bottomLine(w, m.filterStatus()+"  "+m.input)
 		case m.copyHintActive():
 			// The OSC 52 sequence rides the hint line, so the renderer writes it
 			// once and the terminal executes the copy.
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(m.copyHint, w))) + m.copySeq
-		case !markerShown && m.now.Before(m.hintUntil):
-			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(allRowHint, w)))
+		case markerShown:
+			// The marker owns the line and was drawn above.
+		case m.search != "":
+			out[last] = m.bottomLine(w, m.searchStatus(false))
+		case m.filter != "":
+			out[last] = m.bottomLine(w, m.filterStatus())
+		case m.now.Before(m.hintUntil):
+			out[last] = m.bottomLine(w, allRowHint)
 		}
 	}
 
@@ -465,10 +480,12 @@ func (m *tuiModel) rightLines(w int) []string {
 	return lines[:m.height]
 }
 
-// selectionRange is the selected content range, or ok == false when nothing is
-// selected.
+// selectionRange is the selected display-row range, or ok == false when
+// nothing is selected.
 func (m *tuiModel) selectionRange() (lo, hi int, ok bool) {
-	if m.selAnchor == nil || len(m.visibleRaw) == 0 {
+	m.ensurePane()
+	n := m.paneLen()
+	if m.selAnchor == nil || n == 0 {
 		return 0, 0, false
 	}
 	lo, hi = *m.selAnchor, m.selEnd
@@ -476,11 +493,16 @@ func (m *tuiModel) selectionRange() (lo, hi int, ok bool) {
 		lo, hi = hi, lo
 	}
 	lo = max(lo, 0)
-	hi = min(hi, len(m.visibleRaw)-1)
+	hi = min(hi, n-1)
 	if lo > hi {
 		return 0, 0, false
 	}
 	return lo, hi, true
+}
+
+// bottomLine draws plain text faint across the pane's width.
+func (m *tuiModel) bottomLine(w int, text string) string {
+	return lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(text, w)))
 }
 
 // copyHintActive reports whether the copy feedback still owns the bottom line.
@@ -525,6 +547,10 @@ func (m *tuiModel) syncContent() {
 		content = m.styles.hint.Render(m.emptyHint())
 	}
 	m.vp.SetContent(content)
+	// SetContent only pulls YOffset back from past-the-end; a shrink that still
+	// leaves it below the last row needs an explicit clamp, or the frozen pane
+	// renders blank rows under the content.
+	m.vp.SetYOffset(m.vp.YOffset)
 	m.vpDirty = false
 	if m.follow {
 		m.vp.GotoBottom()
@@ -562,6 +588,8 @@ var helpKeys = [][2]string{
 	{"o", "open the target's url"},
 	{"G", "jump to live output"},
 	{"f", "freeze / resume the pane"},
+	{"/", "search the pane (n/N next/prev, esc clears)"},
+	{"v", "filter the pane (yq: .a.b > 1)"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"?", "close this help"},
 	{"q ^C", "quit (a second ^C forces the kill)"},
@@ -584,6 +612,7 @@ func (m *tuiModel) helpView() string {
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
 		"the selected row's change tree lists its last changed files;",
 		"t or a click on its +/− cell expands and collapses it.",
+		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
 		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen",
 	} {

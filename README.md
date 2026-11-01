@@ -28,6 +28,8 @@ Piped or non-TTY output stays plain prefixed lines.
 Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` expand or
 collapse the row's change tree, `m` mute a stream, `s` or `enter` solo (`esc`
 clears), `o` open the url, `G` live output, `f` freeze or resume the pane.
+`/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
+(a leading `.` runs a yq expression per JSON line).
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, the `+/−` cell to expand or collapse that row's change
 tree, shift-click to solo, and a click on the ALL row to clear

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -82,6 +83,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any key ends a frozen selection; copy feedback survives its 3s window.
 	m.clearSelection()
 
+	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
+	// into the query instead of running their commands.
+	if m.inputMode != inputNone {
+		return m.handleInputKey(msg)
+	}
+
 	if m.help {
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -99,8 +106,27 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.help = true
 
+	case "/":
+		m.openInput(inputSearch)
+
+	case "v":
+		m.openInput(inputFilter)
+
+	case "n":
+		m.searchJump(1)
+
+	case "N":
+		m.searchJump(-1)
+
 	case "esc":
-		m.clearSolo()
+		switch {
+		case m.search != "":
+			m.clearSearch()
+		case m.filter != "":
+			m.clearFilter()
+		default:
+			m.clearSolo()
+		}
 
 	case "up", "k":
 		m.moveCursor(-1)
@@ -169,6 +195,113 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.scrollDown(max(1, m.vp.Height/2))
 	}
 	return m, nil
+}
+
+// handleInputKey routes keys into the open bottom-line bar. Only Ctrl-C
+// escapes it; esc cancels the whole query, enter commits it.
+func (m *tuiModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.cancelInput()
+	case "enter":
+		m.commitInput()
+	case "backspace":
+		if m.input != "" {
+			r := []rune(m.input)
+			m.input = string(r[:len(r)-1])
+			m.inputChanged()
+		}
+	default:
+		switch msg.Type {
+		case tea.KeyRunes:
+			m.input += string(msg.Runes)
+			m.inputChanged()
+		case tea.KeySpace:
+			m.input += " "
+			m.inputChanged()
+		}
+	}
+	return m, nil
+}
+
+// openInput shows a bar, seeded with the query already in force so `/` and `v`
+// reopen for editing rather than starting over. The committed filter is
+// stashed so an edit can be cancelled without destroying it.
+func (m *tuiModel) openInput(mode int) {
+	m.inputMode = mode
+	if mode == inputFilter {
+		m.input = m.filter
+		m.filterStash = m.filter
+		return
+	}
+	m.input = m.search
+}
+
+// inputChanged applies the in-progress text live to the pane. A yq expression
+// that does not parse is reported and suspends the filter instead of matching
+// nothing, so a typo does not blank the pane.
+func (m *tuiModel) inputChanged() {
+	if m.inputMode == inputFilter {
+		m.filter = m.input
+		m.filterErr = filterParseError(m.filter)
+		m.paneSelDirty = true
+		m.vpDirty = true
+		m.recomputeSearch(true)
+		return
+	}
+	m.search = m.input
+	m.recomputeSearch(true)
+}
+
+// filterParseError reports why a yq query does not compile, or "" when the
+// query is a plain substring or a valid expression.
+func filterParseError(query string) string {
+	if !strings.HasPrefix(query, ".") {
+		return ""
+	}
+	if _, err := yqParse(query); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// commitInput closes the bar, keeping a non-empty query live. A filter with a
+// parse error keeps the bar open so the error stays visible.
+func (m *tuiModel) commitInput() {
+	mode := m.inputMode
+	if mode == inputFilter && m.filterErr != "" {
+		return
+	}
+	m.inputMode = inputNone
+	m.input = ""
+	if mode == inputFilter {
+		if m.filter == "" {
+			m.clearFilter()
+		}
+		return
+	}
+	if m.search == "" {
+		m.clearSearch()
+	}
+}
+
+// cancelInput closes the bar. A filter edit reverts to the committed filter;
+// a search is dropped entirely.
+func (m *tuiModel) cancelInput() {
+	mode := m.inputMode
+	m.inputMode = inputNone
+	m.input = ""
+	if mode == inputFilter {
+		m.filter = m.filterStash
+		m.filterErr = ""
+		m.paneSelDirty = true
+		m.vpDirty = true
+		m.recomputeSearch(true)
+		return
+	}
+	m.clearSearch()
 }
 
 func (m *tuiModel) moveCursor(delta int) {
@@ -348,7 +481,7 @@ func (m *tuiModel) paneRow(x, y int) int {
 		return -1
 	}
 	idx := m.vp.YOffset + y - m.titleHeight()
-	if idx < 0 || idx >= len(m.visibleRaw) {
+	if idx < 0 || idx >= m.paneLen() {
 		return -1
 	}
 	return idx
@@ -358,7 +491,8 @@ func (m *tuiModel) paneRow(x, y int) int {
 // leaves the viewport still selects the nearest line. The marker row is not
 // content: it overwrites the line behind it, so it is not selectable either.
 func (m *tuiModel) paneRowAt(y int) int {
-	if len(m.visibleRaw) == 0 {
+	n := m.paneLen()
+	if n == 0 {
 		return -1
 	}
 	last := m.vp.Height - 1
@@ -368,7 +502,7 @@ func (m *tuiModel) paneRowAt(y int) int {
 	last = max(last, 0)
 	row := min(max(y-m.titleHeight(), 0), last)
 	idx := m.vp.YOffset + row
-	return min(max(idx, 0), len(m.visibleRaw)-1)
+	return min(max(idx, 0), n-1)
 }
 
 // dragSelection moves the frozen selection's end to the row under the pointer.
@@ -401,12 +535,16 @@ func (m *tuiModel) copySelection() {
 		lo, hi = hi, lo
 	}
 	lo = max(lo, 0)
-	hi = min(hi, len(m.visibleRaw)-1)
+	hi = min(hi, m.paneLen()-1)
 	if lo > hi {
 		return
 	}
 
-	payload, n, truncated := copyPayload(m.visibleRaw[lo : hi+1])
+	raw := make([]string, 0, hi-lo+1)
+	for row := lo; row <= hi; row++ {
+		raw = append(raw, m.visibleRaw[m.paneRowRaw(row)])
+	}
+	payload, n, truncated := copyPayload(raw)
 	if payload == "" {
 		// Non-empty selection with nothing copied means one line is over the
 		// cap. Say so, and drop the previous sequence so it cannot re-fire.
