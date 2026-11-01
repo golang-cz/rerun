@@ -37,7 +37,21 @@ Flags:
 Deprecated: -watch, -ignore and -run (use --on, --except and --).
 `
 
+// nestGuard refuses to run when RERUN is set, so a target that runs rerun
+// cannot fork-bomb the machine. It returns the process exit code.
+func nestGuard() int {
+	if os.Getenv("RERUN") == "" {
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, "rerun: refusing to nest rerun (RERUN is set; unset it to force)")
+	return 1
+}
+
 func main() {
+	if code := nestGuard(); code != 0 {
+		os.Exit(code)
+	}
+
 	args, err := Parse(os.Args[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)

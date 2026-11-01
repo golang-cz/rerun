@@ -19,6 +19,7 @@ func newExecCmd(cmdline []string) *exec.Cmd {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
+	cmd.Env = childEnv(os.Environ())
 	// Own process group, so one signal reaches the shell and everything it spawned.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return cmd

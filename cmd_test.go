@@ -238,3 +238,22 @@ func TestEveryGenerationIsReaped(t *testing.T) {
 		}
 	}
 }
+
+// A spawned child sees RERUN=1 even when the parent does not, so a rerun
+// target that spawns rerun is stopped by the guard.
+func TestSpawnedChildSeesRerunMarker(t *testing.T) {
+	t.Setenv("RERUN", "")
+	var out bytes.Buffer
+	cmd, err := StartCommand([]string{"echo $RERUN"}, time.Second, WithStdout(&out))
+	if err != nil {
+		t.Fatalf("StartCommand: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := cmd.WaitExit(ctx); err != nil {
+		t.Fatalf("WaitExit: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "1" {
+		t.Fatalf("child RERUN = %q, want 1", got)
+	}
+}

@@ -257,6 +257,19 @@ func ShellScript(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// childEnv is the parent environment plus RERUN=1, the marker that stops a
+// spawned rerun from spawning another.
+func childEnv(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "RERUN=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "RERUN=1")
+}
+
 // StartCommand spawns cmdline through the platform shell and reaps it.
 // grace defaults to DefaultGrace when non-positive. Options override the
 // default stdio wiring on every generation.
