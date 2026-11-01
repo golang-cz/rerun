@@ -43,6 +43,14 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case "end":
+		return tea.KeyMsg{Type: tea.KeyEnd}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -808,14 +816,12 @@ func TestHelpOverlayToggles(t *testing.T) {
 }
 
 func TestQuitKeysReturnQuit(t *testing.T) {
-	for _, key := range []string{"q", "ctrl+c"} {
-		m := newTestModel(t)
-		if _, cmd := m.Update(keyMsg(key)); cmd == nil {
-			t.Errorf("%s did not return a quit command", key)
-		}
+	m := newTestModel(t)
+	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
+		t.Error("ctrl+c did not return a quit command")
 	}
 
-	m := newTestModel(t)
+	m = newTestModel(t)
 	m.help = true
 	if _, cmd := m.Update(keyMsg("ctrl+c")); cmd == nil {
 		t.Error("ctrl+c in the help overlay did not return a quit command")

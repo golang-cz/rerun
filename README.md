@@ -27,10 +27,12 @@ Piped or non-TTY output stays plain prefixed lines.
 
 Left column: one row per target; right pane: one merged log; `?` lists keys.
 
-Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `t` toggle the
-fs drawer under the list, `m` mute a stream, `s` or `enter`
+Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
+columns (`↑/↓` scroll it when focused, `home`/`end` jump to its top-left or
+live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
+toggle the fs drawer under the list, `m` mute a stream, `s` or `enter`
 solo (`esc` clears), `o` open the url, `G` live output, `f` freeze or resume
-the pane.
+the pane, `q` asks first, `ctrl+c` quits immediately.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
 (a leading `.` runs a yq expression per JSON line); `c` toggles the columns
 table for targets that define `columns`. A JSON output line's top-level `url`,

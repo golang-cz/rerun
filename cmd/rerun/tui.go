@@ -155,6 +155,14 @@ type tuiModel struct {
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
 	help   bool
+	// confirmQuit is the `q` modal: the frame keeps running behind it, and
+	// only enter quits.
+	confirmQuit bool
+
+	// paneFocus puts the arrow keys on the log pane: up/down scroll it,
+	// left/right pan its columns. False means the left list owns them.
+	paneFocus bool
+	paneCol   int // horizontal column offset of the pane
 
 	// drawerOpen shows the fs drawer under the list. One global toggle, open
 	// by default, so every target's spawns are on screen without a per-row
@@ -1192,6 +1200,32 @@ func padRight(s string, w int) string {
 		s += " "
 	}
 	return s
+}
+
+// sliceCells cuts s to display cells [from, to): the pane's horizontal window.
+// Zero-width runes (escape sequences) ride along, the way truncate keeps them.
+func sliceCells(s string, from, to int) string {
+	if from < 0 {
+		from = 0
+	}
+	if to <= from {
+		return ""
+	}
+	var b strings.Builder
+	cells := 0
+	for _, r := range s {
+		rw := displayWidth(string(r))
+		if rw > 0 && cells+rw <= from {
+			cells += rw
+			continue
+		}
+		if rw > 0 && cells+rw > to {
+			break
+		}
+		b.WriteRune(r)
+		cells += rw
+	}
+	return b.String()
 }
 
 func truncate(s string, w int) string {

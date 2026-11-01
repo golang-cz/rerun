@@ -57,6 +57,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.clearSelection()
+		// Re-slice the pane for the new width and re-clamp paneCol.
+		m.vpDirty = true
 		return m, nil
 
 	case tickMsg:
@@ -99,9 +101,21 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A pending quit confirm consumes its own key: enter goes, every other
+	// key cancels the modal and then runs as usual.
+	if m.confirmQuit {
+		m.confirmQuit = false
+		if msg.String() == "enter" {
+			return m, tea.Quit
+		}
+	}
+
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return m, tea.Quit
+
+	case "q":
+		m.confirmQuit = true
 
 	case "?":
 		m.help = true
@@ -123,6 +137,8 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		switch {
+		case m.paneFocus:
+			m.paneFocus = false
 		case m.search != "":
 			m.clearSearch()
 		case m.filter != "":
@@ -131,11 +147,63 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearSolo()
 		}
 
-	case "up", "k":
+	case "up":
+		if m.paneFocus {
+			m.scrollUp(1)
+		} else {
+			m.moveCursor(-1)
+		}
+
+	case "down":
+		if m.paneFocus {
+			m.scrollDown(1)
+		} else {
+			m.moveCursor(1)
+		}
+
+	case "k":
 		m.moveCursor(-1)
 
-	case "down", "j":
+	case "j":
 		m.moveCursor(1)
+
+	case "left":
+		if m.paneFocus {
+			if m.paneCol > 0 {
+				m.paneCol--
+				m.vpDirty = true
+			} else {
+				m.paneFocus = false
+			}
+		}
+
+	case "right":
+		if !m.paneFocus {
+			m.paneFocus = true
+		} else {
+			m.paneCol++
+			m.vpDirty = true
+		}
+
+	case "home":
+		if m.paneFocus {
+			m.vp.SetYOffset(0)
+			m.paneCol = 0
+			m.follow = false
+			m.pending = 0
+			m.vpDirty = true
+		} else {
+			m.cursor = 0
+		}
+
+	case "end":
+		if m.paneFocus {
+			m.follow = true
+			m.pending = 0
+			m.vp.GotoBottom()
+		} else {
+			m.cursor = len(m.targets)
+		}
 
 	case "enter":
 		if m.cursor == 0 {
@@ -355,7 +423,7 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.help {
+	if m.help || m.confirmQuit {
 		return m, nil
 	}
 

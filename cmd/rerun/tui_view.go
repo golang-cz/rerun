@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -25,34 +26,36 @@ const (
 const statusW = 11
 
 type tuiStyles struct {
-	base    lipgloss.Style
-	divider lipgloss.Style
-	cursor  lipgloss.Style
-	hover   lipgloss.Style
-	muted   lipgloss.Style
-	solo    lipgloss.Style
-	all     lipgloss.Style
-	title   lipgloss.Style
-	marker  lipgloss.Style
-	hint    lipgloss.Style
-	box     lipgloss.Style
-	key     lipgloss.Style
+	base         lipgloss.Style
+	divider      lipgloss.Style
+	dividerFocus lipgloss.Style
+	cursor       lipgloss.Style
+	hover        lipgloss.Style
+	muted        lipgloss.Style
+	solo         lipgloss.Style
+	all          lipgloss.Style
+	title        lipgloss.Style
+	marker       lipgloss.Style
+	hint         lipgloss.Style
+	box          lipgloss.Style
+	key          lipgloss.Style
 }
 
 func newTUIStyles() tuiStyles {
 	return tuiStyles{
-		base:    lipgloss.NewStyle(),
-		divider: lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-		cursor:  lipgloss.NewStyle().Background(lipgloss.Color("237")),
-		hover:   lipgloss.NewStyle().Background(lipgloss.Color("235")),
-		muted:   lipgloss.NewStyle().Faint(true),
-		solo:    lipgloss.NewStyle().Background(lipgloss.Color("234")),
-		all:     lipgloss.NewStyle().Bold(true),
-		title:   lipgloss.NewStyle().Bold(true),
-		marker:  lipgloss.NewStyle().Reverse(true),
-		hint:    lipgloss.NewStyle().Faint(true),
-		box:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
-		key:     lipgloss.NewStyle().Bold(true),
+		base:         lipgloss.NewStyle(),
+		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Bold(true),
+		cursor:       lipgloss.NewStyle().Background(lipgloss.Color("237")),
+		hover:        lipgloss.NewStyle().Background(lipgloss.Color("235")),
+		muted:        lipgloss.NewStyle().Faint(true),
+		solo:         lipgloss.NewStyle().Background(lipgloss.Color("234")),
+		all:          lipgloss.NewStyle().Bold(true),
+		title:        lipgloss.NewStyle().Bold(true),
+		marker:       lipgloss.NewStyle().Reverse(true),
+		hint:         lipgloss.NewStyle().Faint(true),
+		box:          lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
+		key:          lipgloss.NewStyle().Bold(true),
 	}
 }
 
@@ -99,16 +102,51 @@ func (m *tuiModel) View() string {
 	m.layout.offset = m.listOffset()
 	right := m.rightLines(rightW)
 
+	divider := m.styles.divider
+	if m.paneFocus {
+		divider = m.styles.dividerFocus
+	}
+
 	var b strings.Builder
 	for y := 0; y < m.height; y++ {
 		b.WriteString(m.leftLine(y, leftW))
-		b.WriteString(m.styles.divider.Render("│"))
+		b.WriteString(divider.Render("│"))
 		b.WriteString(right[y])
 		if y < m.height-1 {
 			b.WriteByte('\n')
 		}
 	}
-	return b.String()
+	frame := b.String()
+	if m.confirmQuit {
+		return overlayCenter(frame, m.confirmQuitView(), m.width, m.height)
+	}
+	return frame
+}
+
+// confirmQuitView is the small centered `q` modal, drawn over the live frame.
+func (m *tuiModel) confirmQuitView() string {
+	body := m.styles.title.Render("quit rerun?") + "\n" +
+		"enter quits · any other key stays"
+	return m.styles.box.Render(body)
+}
+
+// overlayCenter splices box into frame at the canvas center, so the stream and
+// drawer underneath keep updating while the modal is up.
+func overlayCenter(frame, box string, width, height int) string {
+	lines := strings.Split(frame, "\n")
+	boxLines := strings.Split(box, "\n")
+	bw := lipgloss.Width(box)
+	x := max(0, (width-bw)/2)
+	y := max(0, (height-len(boxLines))/2)
+	for i, bl := range boxLines {
+		row := y + i
+		if row >= len(lines) {
+			break
+		}
+		line := lines[row]
+		lines[row] = ansi.Cut(line, 0, x) + bl + ansi.Cut(line, x+bw, width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // layoutWidths splits the screen between the two columns.
@@ -699,7 +737,8 @@ func (m *tuiModel) syncContent() {
 	}
 
 	lines := m.tableLines(m.paneLines())
-	content := strings.Join(lines, "\n")
+	m.paneCol = m.clampPaneCol(lines)
+	content := strings.Join(m.panLines(lines), "\n")
 	if len(lines) == 0 {
 		content = m.styles.hint.Render(m.emptyHint())
 	}
@@ -712,6 +751,31 @@ func (m *tuiModel) syncContent() {
 	if m.follow {
 		m.vp.GotoBottom()
 	}
+}
+
+// clampPaneCol keeps the horizontal window inside the widest line, so panning
+// right on narrow content parks at column 0.
+func (m *tuiModel) clampPaneCol(lines []string) int {
+	if m.paneCol <= 0 {
+		return 0
+	}
+	widest := 0
+	for _, line := range lines {
+		widest = max(widest, displayWidth(line))
+	}
+	return min(m.paneCol, max(0, widest-m.vp.Width))
+}
+
+// panLines slices each pane line to the horizontal window paneCol opens.
+func (m *tuiModel) panLines(lines []string) []string {
+	if m.paneCol <= 0 {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = sliceCells(line, m.paneCol, m.paneCol+m.vp.Width)
+	}
+	return out
 }
 
 func (m *tuiModel) emptyHint() string {
@@ -738,7 +802,9 @@ func (m *tuiModel) allMuted() bool {
 
 // helpKeys is the help overlay's content, in display order.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows"},
+	{"↑/↓ j/k", "move between rows; ↑/↓ scroll the pane when focused"},
+	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
+	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
 	{"t", "toggle the fs drawer (a change tree; click a folder to expand)"},
@@ -753,7 +819,7 @@ var helpKeys = [][2]string{
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"?", "close this help"},
-	{"^C", "quit (q closes help)"},
+	{"q ^C", "q confirm quit · ^C quit now"},
 }
 
 func (m *tuiModel) helpView() string {
