@@ -1089,7 +1089,7 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	case stateStopped:
 		return "stopped"
 	case stateOnChange:
-		return "onchange"
+		return "waiting"
 	case stateManual:
 		return "manual"
 	}

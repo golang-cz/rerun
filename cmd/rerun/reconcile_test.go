@@ -448,8 +448,8 @@ func TestReconcileUpdatesAnUnstartedRowsStartMode(t *testing.T) {
 		stopped: []bool{false},
 	}})
 
-	if got := m.status(m.targets[0]); got != "onchange" {
-		t.Fatalf("status = %q, want onchange after the reload", got)
+	if got := m.status(m.targets[0]); got != "waiting" {
+		t.Fatalf("status = %q, want waiting after the reload", got)
 	}
 }
 

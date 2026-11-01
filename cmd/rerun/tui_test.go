@@ -1237,8 +1237,8 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 	if got := m.targets[0].state; got != stateOnChange {
 		t.Fatalf("state = %v, want onchange", got)
 	}
-	if got := m.status(m.targets[0]); got != "onchange" {
-		t.Errorf("status = %q, want onchange", got)
+	if got := m.status(m.targets[0]); got != "waiting" {
+		t.Errorf("status = %q, want waiting", got)
 	}
 	if got := m.status(m.targets[1]); got != "manual" {
 		t.Errorf("status = %q, want manual", got)
@@ -1247,8 +1247,8 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 		t.Errorf("glyph = %q, want ·", got)
 	}
 	frame := strings.Split(m.View(), "\n")
-	if got := frame[1]; !strings.Contains(got, "onchange") {
-		t.Errorf("row 1 = %q, want the onchange status", got)
+	if got := frame[1]; !strings.Contains(got, "waiting") {
+		t.Errorf("row 1 = %q, want the waiting status", got)
 	}
 	if got := frame[2]; !strings.Contains(got, "manual") {
 		t.Errorf("row 2 = %q, want the manual status", got)
