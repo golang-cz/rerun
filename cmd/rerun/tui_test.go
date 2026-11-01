@@ -263,8 +263,8 @@ func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 	}
 
 	m.toggleSolo(2)
-	if got, want := m.paneLines(), []string{"k1"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("solo pane = %q, want %q without prefixes", got, want)
+	if got, want := m.paneLines(), []string{"[worker] k1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
 	// Clearing solo brings the muted row back as muted, not streaming.
@@ -317,13 +317,13 @@ func TestScrollDownResumesFollowingAtTheBottom(t *testing.T) {
 	}
 }
 
-func TestSoloPaneIsUnprefixed(t *testing.T) {
+func TestSoloPaneKeepsPrefix(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "world"})
 
 	m.toggleSolo(0)
-	if got, want := m.paneLines(), []string{"hello"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"[web] hello"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 

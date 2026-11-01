@@ -237,7 +237,7 @@ func (m *tuiModel) toggleSolo(i int) {
 	m.vpDirty = true
 }
 
-// clearSolo drops the solo filter and re-prefixes the restored stream.
+// clearSolo drops the solo filter and restores the other rows' lines.
 func (m *tuiModel) clearSolo() {
 	if m.solo < 0 {
 		return
@@ -420,9 +420,6 @@ type mergedLine struct {
 }
 
 func (m *tuiModel) prefixed(i int, text string) string {
-	if m.solo >= 0 {
-		return text // a soloed pane is one target, so the name prefix is noise
-	}
 	if name := m.targets[i].spec.Name; name != "" {
 		return "[" + name + "] " + text
 	}
