@@ -174,8 +174,8 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "t":
-		if m.cursor > 0 && m.targets[m.cursor-1].hasLedger() {
-			m.toggleTree()
+		if m.cursor > 0 && m.targets[m.cursor-1].hasContent() {
+			m.toggleTree(m.cursor - 1)
 		}
 
 	case "o":
@@ -435,15 +435,11 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	case row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
-	case row > 0 && msg.X == treeX(m.layout.leftW) && m.targets[row-1].hasLedger():
-		// The ledger follows the cursor, so the cell click moves the cursor to
-		// the row it clicked, then collapses or expands what it found.
-		if m.cursor == row {
-			m.toggleTree()
-		} else {
-			m.cursor = row
-			m.treeCollapsed = false
-		}
+	case row > 0 && msg.X == treeX(m.layout.leftW) && m.targets[row-1].hasContent():
+		// The cell belongs to the row it sits on: move the cursor there, then
+		// collapse or expand that row's ledger.
+		m.cursor = row
+		m.toggleTree(row - 1)
 	default:
 		m.cursor = row
 		// The pair's first click already soloed the row; the second click

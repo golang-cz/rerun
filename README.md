@@ -44,11 +44,12 @@ The right pane is always the merged
 stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
-last change batch held, and its command, with its url linked. The cursor
-row's reboot ledger lists its last spawns, newest first, and the files that
-triggered each, one `+`/`~`/`−` glyph (created, written, removed) and relative
-path per file, five files then `+k more`. A target the user stopped records
-its changes without using them, as a dim `not rebooted (stopped)` line.
+last change batch held, and its command, with its url linked. Every
+row's reboot ledger is expanded by default and shows its newest spawn — the
+header counts the whole batch — plus up to two changed files, one `+`/`~`/`−`
+glyph (created, written, removed) and relative path per file; `t` or the row's
+`+/−` cell collapses that row. A target the user stopped or booted off
+records its changes without using them, as a dim `not rebooted (stopped)` line.
 
 #### Examples:
 ```bash

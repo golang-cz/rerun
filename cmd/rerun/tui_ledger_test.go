@@ -48,6 +48,22 @@ func spawnWithChange(m *tuiModel, name string, cs rerun.ChangeSet, at time.Time)
 	m.applyEvent(event{kind: evStarted, target: name, at: at})
 }
 
+// A change batch writes no pane line of its own: the ledger owns the record.
+func TestChangeBatchAddsNoPaneLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	before := m.paneLen()
+	m.applyEvent(event{kind: evChanged, target: "web", count: 2, first: "a.go", change: changeBatch(map[string]fsnotify.Op{
+		"a.go": fsnotify.Write,
+		"b.go": fsnotify.Write,
+	})})
+	if got := m.paneLen(); got != before {
+		t.Fatalf("pane lines after a change = %d, want %d", got, before)
+	}
+	if got := strings.Join(m.paneLines(), "\n"); strings.Contains(got, "changed") {
+		t.Fatalf("the change batch wrote a pane line:\n%s", got)
+	}
+}
+
 // A change batch followed by a spawn files exactly one ledger entry. A manual
 // start with nothing recorded files nothing.
 func TestSpawnCommitsTheChangeBatchToTheLedger(t *testing.T) {
@@ -123,7 +139,7 @@ func TestLedgerKeepsTheThreeNewestSpawns(t *testing.T) {
 		t.Fatalf("newest entry time = %v, want the last spawn", got)
 	}
 
-	// The rendered headers follow the ledger's order.
+	// Only the newest entry renders; the header carries the total.
 	m.cursor = 1
 	var headers []string
 	for _, row := range m.treeRows(0) {
@@ -131,45 +147,43 @@ func TestLedgerKeepsTheThreeNewestSpawns(t *testing.T) {
 			headers = append(headers, row.at.Format("15:04:05"))
 		}
 	}
-	if want := []string{"14:35:07", "14:34:07", "14:33:07"}; !reflect.DeepEqual(headers, want) {
-		t.Fatalf("entry headers = %v, want %v", headers, want)
+	if want := []string{"14:35:07"}; !reflect.DeepEqual(headers, want) {
+		t.Fatalf("entry headers = %v, want only the newest %v", headers, want)
 	}
 }
 
-// Five files of an entry render and the rest become one `+k more` row; a
-// one-file entry reads `1 file`, and a removal shows the minus glyph.
+// A compact entry renders its header and at most two file lines; the header
+// count still totals the whole batch. A one-file entry reads `1 file`, and a
+// removal shows the minus glyph.
 func TestLedgerCapsFilesAndCountsSingular(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.cursor = 1
 	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
 
 	rows := m.treeRows(0)
+	if len(rows) != 1+treeFiles {
+		t.Fatalf("tree rows = %d, want the header and %d files", len(rows), treeFiles)
+	}
 	if got := rows[0].count; got != 7 {
-		t.Fatalf("header count = %d, want 7", got)
+		t.Fatalf("header count = %d, want the whole batch of 7", got)
 	}
-	files, more := 0, 0
-	for _, row := range rows[1:] {
-		switch row.kind {
-		case treeFile:
-			files++
-		case treeMore:
-			more = row.more
-		}
-	}
-	if files != treeMax || more != 2 {
-		t.Fatalf("files = %d, more = %d, want %d files and +2 more", files, more, treeMax)
+	if rows[1].kind != treeFile || rows[1].file != "a.go" || rows[2].file != "b.go" {
+		t.Fatalf("file rows = %+v, want the two newest sorted paths", rows[1:])
 	}
 
-	// ALL, web, the entry header, five files, "+2 more".
+	// ALL, web, the entry header, two files — no `+k more` row.
 	lines := ledgerFrame(m, 60)
-	if len(lines) != 9 || lines[2] != "  ↺ 14:32:07 · 7 files" || lines[8] != "    +2 more" {
-		t.Fatalf("ledger lines = %q, want a header, five files and +2 more", lines)
+	if len(lines) != 5 || lines[2] != "  ↺ 14:32:07 · 7 files" || lines[3] != "    + a.go" {
+		t.Fatalf("ledger lines = %q, want a header and two files", lines)
+	}
+	if got := strings.Join(lines, "\n"); strings.Contains(got, "more") {
+		t.Fatalf("the compact ledger grew a `+k more` row:\n%s", got)
 	}
 
 	// A spawned removal becomes the newest entry: singular, with `−`.
 	spawnWithChange(m, "web", changeBatch(map[string]fsnotify.Op{"b.go": fsnotify.Remove}), ledgerClock.Add(time.Minute))
 	lines = ledgerFrame(m, 60)
-	if len(lines) < 4 || lines[2] != "  ↺ 14:33:07 · 1 file" || lines[3] != "    − b.go" {
+	if len(lines) != 4 || lines[2] != "  ↺ 14:33:07 · 1 file" || lines[3] != "    − b.go" {
 		t.Fatalf("newest entry lines = %q, want `1 file` singular and the removal glyph", lines)
 	}
 }
@@ -209,31 +223,43 @@ func TestStoppedTargetRecordsChangesWithoutSpawning(t *testing.T) {
 	}
 }
 
-// Only the cursor row grows ledger lines, and every left line stays exactly
-// leftW cells wide.
-func TestLedgerRendersUnderTheCursorRowOnly(t *testing.T) {
+// A row the group holds down (off) words its pending line `(off)`, not
+// `(stopped)`: pending carried across a reload must read as group-held.
+func TestPendingLineWordsOffForGroupHeldRows(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.targets[0].state = stateOff
+	m.applyEvent(event{kind: evChanged, target: "web", count: 1, first: "a.go", change: changeBatch(map[string]fsnotify.Op{"a.go": fsnotify.Write})})
+
+	if got := strings.Join(ledgerFrame(m, 60), "\n"); !strings.Contains(got, "· 1 file recorded, not rebooted (off)") {
+		t.Fatalf("an off row's pending line = %q, want the (off) word", got)
+	}
+}
+
+// Every target row grows its own ledger by default, the ALL row never does,
+// and every left line stays exactly leftW cells wide.
+func TestLedgerRendersForEveryExpandedRow(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	spawnWithChange(m, "web", changeBatch(map[string]fsnotify.Op{"a.go": fsnotify.Write}), ledgerClock)
 	spawnWithChange(m, "api", changeBatch(map[string]fsnotify.Op{"b.go": fsnotify.Write}), ledgerClock.Add(time.Minute))
 
-	for _, tt := range []struct {
-		cursor int
-		rows   int
-	}{
-		{cursor: 0, rows: 3}, // the ALL row shows no ledger
-		{cursor: 1, rows: 5}, // web's header and file
-		{cursor: 2, rows: 5}, // api's header and file
-	} {
-		m.cursor = tt.cursor
+	for _, cursor := range []int{0, 1, 2} {
+		m.cursor = cursor
 		m.View()
 		rows := m.visualRows()
-		if len(rows) != tt.rows {
-			t.Fatalf("visual rows with cursor %d = %d, want %d", tt.cursor, len(rows), tt.rows)
+		if len(rows) != 7 { // ALL, web + its 2 lines, api + its 2 lines
+			t.Fatalf("visual rows with cursor %d = %d, want 7", cursor, len(rows))
 		}
+		if rows[0].kind != treeNone || rows[0].target != -1 {
+			t.Fatalf("the ALL row grew a ledger line: %+v", rows[0])
+		}
+		seen := map[int]bool{}
 		for _, row := range rows {
-			if row.kind != treeNone && row.target != tt.cursor-1 {
-				t.Fatalf("cursor %d draws a ledger line for target %d", tt.cursor, row.target)
+			if row.kind != treeNone {
+				seen[row.target] = true
 			}
+		}
+		if !seen[0] || !seen[1] {
+			t.Fatalf("cursor %d does not show both target ledgers: %v", cursor, seen)
 		}
 
 		leftW, _ := m.layoutWidths()
@@ -242,6 +268,18 @@ func TestLedgerRendersUnderTheCursorRowOnly(t *testing.T) {
 				t.Fatalf("left line %d = %d cells, want %d: %q", y, got, leftW, m.leftLine(y, leftW, rows))
 			}
 		}
+	}
+
+	// Collapsing one row leaves every other row's ledger in place.
+	m.cursor = 1
+	press(m, "t")
+	for _, row := range m.visualRows() {
+		if row.kind != treeNone && row.target == 0 {
+			t.Fatal("t did not collapse the cursor row's ledger")
+		}
+	}
+	if got := len(m.visualRows()); got != 5 {
+		t.Fatalf("visual rows after collapsing web = %d, want 5", got)
 	}
 
 	// A narrow column truncates the entry lines instead of wrapping them.
@@ -270,9 +308,13 @@ func TestBackoffDelayedSpawnCommitsToTheLedger(t *testing.T) {
 	if got := m.targets[0].ledger; len(got) != 0 {
 		t.Fatalf("a backoff filed %+v, want the batch still pending", got)
 	}
-	// Waiting out a backoff is not a stop: no `not rebooted` warning.
+	// Waiting out a backoff is not a stop: no `not rebooted` warning, but the
+	// pending changes still make the row's +/− cell non-blank.
 	if got := strings.Join(ledgerFrame(m, 60), "\n"); strings.Contains(got, "not rebooted") {
 		t.Fatalf("a backoff target reads as stopped:\n%s", got)
+	}
+	if got := m.treeCell(0); got != "−" {
+		t.Fatalf("tree cell during a backoff = %q, want −", got)
 	}
 
 	spawn := ledgerClock.Add(5 * time.Second)

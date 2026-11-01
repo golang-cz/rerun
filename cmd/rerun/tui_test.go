@@ -1430,26 +1430,31 @@ func TestRowStatusBackoffCountsDown(t *testing.T) {
 	}
 }
 
-// The backoff event lands one pane line naming the delay and the restart.
-func TestBackoffEventAddsPaneLine(t *testing.T) {
+// The backoff event sets the row's status and writes no pane line: rerun's own
+// chatter stays out of the stream.
+func TestBackoffEventAddsNoPaneLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvent(event{kind: evBackoff, target: "web", delay: 4 * time.Second, ordinal: 5})
 
 	if m.targets[0].state != stateBackoff {
 		t.Fatalf("state = %v, want backoff", m.targets[0].state)
 	}
-	pane := strings.Join(m.paneLines(), "\n")
-	if !strings.Contains(pane, "# backoff 4s (5th restart in 30s)") {
-		t.Fatalf("pane is missing the backoff line:\n%s", pane)
+	if pane := strings.Join(m.paneLines(), "\n"); strings.Contains(pane, "backoff") {
+		t.Fatalf("the backoff event wrote a pane line:\n%s", pane)
 	}
 }
 
-// The backoff line words its ordinal correctly.
-func TestOrdinalWord(t *testing.T) {
-	for n, want := range map[int]string{1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 13: "13th", 21: "21st", 22: "22nd"} {
-		if got := ordinalWord(n); got != want {
-			t.Errorf("ordinalWord(%d) = %q, want %q", n, got, want)
-		}
+// An exit sets the row's glyph and label and writes no pane line.
+func TestExitEventAddsNoPaneLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	before := m.paneLen()
+	m.applyEvent(event{kind: evExited, target: "web", status: "exit 1", code: 1})
+
+	if m.targets[0].state != stateExited || m.targets[0].exitLabel == "" {
+		t.Fatalf("exit state = %v, label %q, want the exited state and a label", m.targets[0].state, m.targets[0].exitLabel)
+	}
+	if got := m.paneLen(); got != before {
+		t.Fatalf("pane lines after an exit = %d, want %d", got, before)
 	}
 }
 

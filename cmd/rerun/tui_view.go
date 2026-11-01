@@ -183,7 +183,6 @@ type visualRow struct {
 	count  int    // an entry header's or a pending line's file count
 	op     string // a ledger file row's fsnotify glyph
 	file   string // a ledger file row's path, relative to the watch root
-	more   int    // > 0 on the "+k more" row
 }
 
 // treeKind is which line of a row's reboot ledger a visual row draws.
@@ -193,16 +192,15 @@ const (
 	treeNone    treeKind = iota
 	treeEntry            // `↺ 14:32:07 · 3 files`
 	treeFile             // `+ pkg/api/types.gen.go`
-	treeMore             // `+2 more`
 	treePending          // `· 3 files recorded, not rebooted (stopped)`
 )
 
-// treeMax caps one ledger entry's files, so a batch of four hundred files
-// cannot swallow the list. The rest is reported as one "+k more" row.
-const treeMax = 5
+// treeFiles caps one compact ledger entry's file lines. The header count
+// carries the total, so a large batch never grows a `+k more` row.
+const treeFiles = 2
 
 // visualRows lays out the left column: the ALL rollup, then every target row
-// with the cursor row's reboot ledger beneath it.
+// with its reboot ledger beneath it when that row is expanded.
 func (m *tuiModel) visualRows() []visualRow {
 	rows := make([]visualRow, 0, len(m.targets)+1)
 	rows = append(rows, visualRow{target: -1})
@@ -215,32 +213,31 @@ func (m *tuiModel) visualRows() []visualRow {
 	return rows
 }
 
-// treeRows is the reboot ledger under one target row: the batch a stopped
-// target never used, then its past spawns newest first, each capped at treeMax
-// files and counted. An empty ledger grows no rows at all.
+// treeRows is the compact reboot ledger under one target row: the batch a
+// stopped target never used, then the newest spawn as a header and at most
+// treeFiles file lines. A row with nothing to show grows no rows at all.
 func (m *tuiModel) treeRows(i int) []visualRow {
 	t := m.targets[i]
-	if !t.hasLedger() {
+	if !t.hasContent() {
 		return nil
 	}
 	var rows []visualRow
 	if t.pendingStopped() {
 		rows = append(rows, visualRow{target: i, kind: treePending, count: len(t.pending)})
 	}
-	for _, e := range t.ledger {
-		rows = append(rows, visualRow{target: i, kind: treeEntry, at: e.at, count: len(e.files)})
-		shown := min(len(e.files), treeMax)
-		for _, f := range e.files[:shown] {
-			rows = append(rows, visualRow{
-				target: i,
-				kind:   treeFile,
-				op:     opText(f.op),
-				file:   relToWatch(t.spec.On, f.path),
-			})
-		}
-		if rest := len(e.files) - shown; rest > 0 {
-			rows = append(rows, visualRow{target: i, kind: treeMore, more: rest})
-		}
+	if len(t.ledger) == 0 {
+		return rows
+	}
+	e := t.ledger[0]
+	rows = append(rows, visualRow{target: i, kind: treeEntry, at: e.at, count: len(e.files)})
+	shown := min(len(e.files), treeFiles)
+	for _, f := range e.files[:shown] {
+		rows = append(rows, visualRow{
+			target: i,
+			kind:   treeFile,
+			op:     opText(f.op),
+			file:   relToWatch(t.spec.On, f.path),
+		})
 	}
 	return rows
 }
@@ -354,8 +351,6 @@ func (m *tuiModel) leftLine(y, leftW int, rows []visualRow) string {
 		return m.entryLine(row, leftW)
 	case treeFile:
 		return m.treeLine(row, leftW)
-	case treeMore:
-		return m.moreLine(row, leftW)
 	case treePending:
 		return m.pendingLine(row, leftW)
 	case treeNone:
@@ -426,21 +421,16 @@ func (m *tuiModel) treeLine(row visualRow, leftW int) string {
 	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
 }
 
-// moreLine stands in for the rest of a capped ledger entry's files.
-func (m *tuiModel) moreLine(row visualRow, leftW int) string {
-	segs := []seg{
-		{text: "    "},
-		{text: fmt.Sprintf("+%d more", row.more), color: colorGray},
-	}
-	return renderSegs(segs, m.rowStyle(row.target+1), leftW)
-}
-
-// pendingLine warns that a stopped target recorded changes no spawn used, so
-// the files stay in pending until a manual start.
+// pendingLine warns that a stopped or group-held target recorded changes no
+// spawn used, so the files stay pending until a manual start.
 func (m *tuiModel) pendingLine(row visualRow, leftW int) string {
+	word := "stopped"
+	if m.targets[row.target].state == stateOff {
+		word = "off"
+	}
 	segs := []seg{
 		{text: "  "},
-		{text: "· " + fileCount(row.count) + " recorded, not rebooted (stopped)"},
+		{text: "· " + fileCount(row.count) + " recorded, not rebooted (" + word + ")"},
 	}
 	return renderSegs(segs, m.rowStyle(row.target+1).Faint(true), leftW)
 }
@@ -763,7 +753,7 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "collapse the cursor row's reboot ledger"},
+	{"t", "collapse / expand the cursor row's reboot ledger"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -792,8 +782,8 @@ func (m *tuiModel) helpView() string {
 		"(f, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"the cursor row's reboot ledger lists its last spawns and the files",
-		"that triggered each; t or a click on its +/− cell collapses it.",
+		"each row's reboot ledger shows its newest spawn and its files; all",
+		"rows start expanded, t or the row's +/− cell collapses that row.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
 		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",

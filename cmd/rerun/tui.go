@@ -133,6 +133,8 @@ type tuiTarget struct {
 	// ledger is the target's past spawns, newest first, each with the file
 	// changes that triggered it.
 	ledger []ledgerEntry
+	// collapsed hides this row's reboot ledger. Every row starts expanded.
+	collapsed bool
 
 	// colSpec is the spec the cached column expressions were parsed from, so
 	// a spec swap reparses exactly once. colBad marks a spec whose expression
@@ -155,9 +157,6 @@ type tuiModel struct {
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
 	help   bool
-	// treeCollapsed hides the cursor row's reboot ledger. The ledger follows
-	// the cursor, so one flag covers every row.
-	treeCollapsed bool
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -389,23 +388,24 @@ func (m *tuiModel) refreshUnseen() {
 	}
 }
 
-// treeExpanded reports whether a row's reboot ledger is shown. Only the cursor
-// row opens, and t or its +/− cell collapses it.
+// treeExpanded reports whether a row's reboot ledger is shown. Every row
+// starts expanded; t or the row's +/− cell collapses it.
 func (m *tuiModel) treeExpanded(i int) bool {
-	return i == m.cursor-1 && !m.treeCollapsed
+	return i >= 0 && i < len(m.targets) && !m.targets[i].collapsed
 }
 
-// toggleTree collapses or expands the cursor row's reboot ledger.
-func (m *tuiModel) toggleTree() { m.treeCollapsed = !m.treeCollapsed }
+// toggleTree collapses or expands one row's reboot ledger.
+func (m *tuiModel) toggleTree(i int) { m.targets[i].collapsed = !m.targets[i].collapsed }
 
-// hasLedger reports whether a row has anything for its ledger to show: a past
-// spawn, or a batch a stopped target never used.
-func (t *tuiTarget) hasLedger() bool { return len(t.ledger) > 0 || t.pendingStopped() }
+// hasContent reports whether a row has anything for its ledger to show: a past
+// spawn, or a change batch no spawn has used yet. The pending count includes a
+// running target's backoff window, so its cell is never blank while changes wait.
+func (t *tuiTarget) hasContent() bool { return len(t.ledger) > 0 || len(t.pending) > 0 }
 
-// treeCell is the ledger indicator: `−` while the cursor row's ledger is open,
-// `+` while it stays collapsed, and blank without one.
+// treeCell is the row's ledger button: `−` while the row is expanded, `+`
+// while collapsed, and blank when the row has nothing to show.
 func (m *tuiModel) treeCell(i int) string {
-	if !m.targets[i].hasLedger() {
+	if !m.targets[i].hasContent() {
 		return " "
 	}
 	if m.treeExpanded(i) {
@@ -588,14 +588,9 @@ func (m *tuiModel) applyEvent(ev event) {
 
 	case evChanged:
 		// Retain the whole batch: the row's reboot ledger records it and the
-		// pane header counts it.
+		// pane header counts it. The batch writes no pane line of its own.
 		t.lastChange = ev.change
 		t.recordChange(ev.change)
-		plural := ""
-		if ev.count > 1 {
-			plural = "s"
-		}
-		m.addLine(i, fmt.Sprintf("# %d file%s changed (e.g. %s)", ev.count, plural, ev.first))
 
 	case evStarting:
 		// Queued behind the start stagger: the glyph stays running but the
@@ -604,9 +599,9 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitLabel = ""
 
 	case evBackoff:
+		// The row's `backoff Ns` status owns this; no pane line.
 		t.state = stateBackoff
 		t.backoffUntil = m.now.Add(ev.delay)
-		m.addLine(i, fmt.Sprintf("# backoff %s (%s restart in %s)", ev.delay, ordinalWord(ev.ordinal), backoffWindow))
 
 	case evStarted:
 		t.state = stateRunning
@@ -627,7 +622,6 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = ev.code
 		t.exitLabel = exitLabel(ev.code, ev.err)
 		t.unseen = true
-		m.addLine(i, fmt.Sprintf("exited (%s) — waiting for changes", ev.status))
 
 	case evWatcherErr:
 		m.addLine(i, fmt.Sprintf("watcher error: %v", ev.err))
@@ -1034,22 +1028,6 @@ func (m *tuiModel) status(t *tuiTarget) string {
 		return "stopped"
 	}
 	return "off"
-}
-
-// ordinalWord renders a count as 1st, 2nd, 3rd, ... for the backoff line.
-func ordinalWord(n int) string {
-	suffix := "th"
-	if n%100 < 11 || n%100 > 13 {
-		switch n % 10 {
-		case 1:
-			suffix = "st"
-		case 2:
-			suffix = "nd"
-		case 3:
-			suffix = "rd"
-		}
-	}
-	return fmt.Sprintf("%d%s", n, suffix)
 }
 
 // glyph is the row's process state, backed by shape as well as color.
