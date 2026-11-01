@@ -56,8 +56,8 @@ func captureStdio(t *testing.T, run func() int) (stdout, stderr string, code int
 	return string(out), string(errOut), code
 }
 
-// A broken rerun.yml prints the parse error and one hint on stderr. Stdout
-// stays empty and the usage wall never appears.
+// A broken rerun.yml prints the parse error with its source excerpt, then one
+// hint. Stdout stays empty and the usage wall never appears.
 func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  cmd: echo hi\n  start: true\n")
@@ -71,15 +71,13 @@ func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("stderr has %d lines, want 2: %q", len(lines), stderr)
-	}
-	if !strings.HasPrefix(lines[0], "rerun: ") || !strings.Contains(lines[0], `unknown field "start"`) {
-		t.Errorf("first line = %q, want the parse error", lines[0])
-	}
-	if lines[1] != "rerun: "+configHint {
-		t.Errorf("second line = %q, want %q", lines[1], "rerun: "+configHint)
+	want := "rerun: " + filepath.Join(dir, ConfigFileName) + ":3:3: target \"api\": unknown field \"start\"\n\n" +
+		"  3 |   start: true\n" +
+		"    |   ^^^^^\n" +
+		"fields: " + strings.Join(targetFields, ", ") + "\n\n" +
+		"rerun: hint: " + configHint + "\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 	if strings.Contains(stderr, "Usage:") {
 		t.Errorf("stderr leaks the usage wall: %q", stderr)

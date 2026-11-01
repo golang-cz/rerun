@@ -249,6 +249,115 @@ func TestParseConfigErrors(t *testing.T) {
 	}
 }
 
+// A bad field names the file, the line and the column, then echoes the source
+// line with a caret under the offending token.
+func TestParseConfigErrorPositions(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		head    string
+		excerpt []string
+	}{
+		{
+			name:    "unknown field",
+			content: "codegen:\n  cmd: make generate\n  start: true\n",
+			head:    `:3:3: target "codegen": unknown field "start"`,
+			excerpt: []string{"  3 |   start: true", "    |   ^^^^^", "fields: " + strings.Join(targetFields, ", ")},
+		},
+		{
+			name:    "duplicate field",
+			content: "api:\n  cmd: echo hi\n  cmd: again\n",
+			head:    `:3:3: target "api": duplicate field "cmd"`,
+			excerpt: []string{"  3 |   cmd: again", "    |   ^^^"},
+		},
+		{
+			name:    "duplicate target",
+			content: "api:\n  cmd: a\napi:\n  cmd: b\n",
+			head:    `:3:1: duplicate target "api"`,
+			excerpt: []string{"  3 | api:", "    | ^^^"},
+		},
+		{
+			name:    "type error points at the value",
+			content: "api:\n  cmd: echo hi\n  on: 5\n",
+			head:    `:3:7: target "api": field "on": expected a string or a list of strings, got int`,
+			excerpt: []string{"  3 |   on: 5", "    |       ^"},
+		},
+		{
+			name:    "cmd is required points at the target",
+			content: "api:\n  desc: x\n",
+			head:    `:1:1: target "api": cmd is required`,
+			excerpt: []string{"  1 | api:", "    | ^^^"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ConfigFileName)
+			writeFile(t, path, tt.content)
+
+			_, err := ParseConfig(path)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			want := path + tt.head + "\n\n" + strings.Join(tt.excerpt, "\n")
+			if err.Error() != want {
+				t.Errorf("error =\n%s\nwant\n%s", err.Error(), want)
+			}
+		})
+	}
+}
+
+// An error with no node to point at stays a single line.
+func TestParseConfigNodeLessErrorsStayOneLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "\n")
+
+	_, err := ParseConfig(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if err.Error() != path+": no targets defined" {
+		t.Errorf("error = %q, want %q", err.Error(), path+": no targets defined")
+	}
+}
+
+// A line longer than the excerpt cap is windowed around the column, and the
+// caret still lands under the offending token.
+func TestParseConfigLongLineWindow(t *testing.T) {
+	pad := strings.Repeat("a", 150)
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\n  on: ["+pad+", 5]\n")
+
+	_, err := ParseConfig(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("error has %d lines, want 4:\n%s", len(lines), err.Error())
+	}
+	if !strings.HasPrefix(lines[0], path+":3:") {
+		t.Errorf("first line = %q, want a line 3 position", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "  3 | ") || !strings.HasPrefix(lines[3], "    | ") {
+		t.Fatalf("excerpt = %q / %q, want the gutter and caret rows", lines[2], lines[3])
+	}
+
+	text := []rune(strings.TrimPrefix(lines[2], "  3 | "))
+	if len(text) > excerptWidth {
+		t.Errorf("excerpt is %d cells, want at most %d", len(text), excerptWidth)
+	}
+
+	caret := strings.Index(lines[3], "^") - len("    | ")
+	if caret < 0 || caret >= len(text) {
+		t.Fatalf("caret at %d, excerpt is %d cells", caret, len(text))
+	}
+	if text[caret] != '5' {
+		t.Errorf("caret at %d sits on %q, want the offending 5", caret, text[caret])
+	}
+}
+
 func TestParseConfigColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
 	writeFile(t, path, "api:\n  cmd: echo hi\n  columns:\n    - method {.request.method}\n    - \"status {.response.status}\"\n")

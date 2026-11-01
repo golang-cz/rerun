@@ -96,7 +96,7 @@ func runConfigMode(args Args) int {
 	cfg, err := LoadConfig(".")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)
-		fmt.Fprintf(os.Stderr, "rerun: %s\n", configHint)
+		fmt.Fprintf(os.Stderr, "\nrerun: hint: %s\n", configHint)
 		return 1
 	}
 
