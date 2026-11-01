@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -408,6 +409,9 @@ type targetRunner struct {
 	cmd       rerun.Command
 	lastStart time.Time
 	stopping  int32
+	// kill is the current generation's kill window: the span after rerun signals
+	// it in which the target's SIGTERM obituary is rerun-induced noise.
+	kill atomic.Pointer[killWindow]
 	// stopped is the user's stop: the target stays down until space or r.
 	stopped int32
 
@@ -750,11 +754,15 @@ func (r *targetRunner) start(ctx context.Context) error {
 		pw  *os.File
 		err error
 	)
+	// The window is per generation, so a late reader from an older one can
+	// neither drop the new generation's lines nor clear its kill.
+	kill := &killWindow{}
+	r.kill.Store(kill)
 	if r.raw() {
 		// The ad-hoc command is passed through raw: no pipe, no prefixing.
 		cmd, err = rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace, rerun.WithStdout(r.out))
 	} else {
-		cmd, pw, err = r.startPiped(slot)
+		cmd, pw, err = r.startPiped(slot, kill)
 	}
 	if err != nil {
 		if slot != nil {
@@ -778,7 +786,7 @@ func (r *targetRunner) start(ctx context.Context) error {
 }
 
 // startPiped spawns a generation whose output is reported line by line.
-func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, error) {
+func (r *targetRunner) startPiped(slot *startSlot, kill *killWindow) (rerun.Command, *os.File, error) {
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		return nil, nil, err
@@ -792,7 +800,7 @@ func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, err
 		return nil, nil, err
 	}
 
-	go r.readLines(pr, r.target.Name, slot)
+	go r.readLines(pr, r.target.Name, slot, kill)
 	return cmd, pw, nil
 }
 
@@ -813,7 +821,7 @@ func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File, slot *sta
 	return exited
 }
 
-func (r *targetRunner) readLines(pr *os.File, name string, slot *startSlot) {
+func (r *targetRunner) readLines(pr *os.File, name string, slot *startSlot, kill *killWindow) {
 	defer pr.Close()
 
 	scanner := bufio.NewScanner(pr)
@@ -824,12 +832,78 @@ func (r *targetRunner) readLines(pr *os.File, name string, slot *startSlot) {
 			slot.free() // the target is talking; it no longer needs the start slot
 			first = false
 		}
-		r.sink.emit(event{kind: evOutput, target: name, line: scanner.Text()})
+		line := scanner.Text()
+		// A make obituary during a kill is rerun's own doing, not the
+		// target's output.
+		if kill != nil && kill.active() && makeObituary(line) {
+			continue
+		}
+		r.sink.emit(event{kind: evOutput, target: name, line: line})
+	}
+	// The generation's output is drained, so no kill obituary can follow.
+	if kill != nil {
+		kill.clear()
 	}
 	// A line past the cap ends the read, so say so instead of going quiet.
 	if err := scanner.Err(); err != nil {
 		r.sink.emit(event{kind: evOutput, target: name, line: fmt.Sprintf("rerun: reading output: %v", err)})
 	}
+}
+
+// killWindow bounds the span after rerun signals a generation in which the
+// target's SIGTERM obituary is rerun-induced noise rather than output.
+// until is unix nanos; zero means no kill is in flight.
+type killWindow struct{ until atomic.Int64 }
+
+func (w *killWindow) mark(grace time.Duration) {
+	if grace <= 0 {
+		grace = rerun.DefaultGrace
+	}
+	w.until.Store(time.Now().Add(grace).UnixNano())
+}
+
+func (w *killWindow) clear() { w.until.Store(0) }
+
+// active reports whether a kill that may still print an obituary is in flight.
+// The deadline bounds a generation whose reader never reaches EOF.
+func (w *killWindow) active() bool {
+	until := w.until.Load()
+	return until != 0 && time.Now().UnixNano() < until
+}
+
+// markKill opens the current generation's kill window.
+func (r *targetRunner) markKill() {
+	if w := r.kill.Load(); w != nil {
+		w.mark(r.target.Grace)
+	}
+}
+
+// makeObituary reports whether a line is GNU make's `make: *** [run]
+// Terminated: 15` for a job rerun signaled. A real make failure, like
+// `make: *** [run] Error 1`, never matches.
+func makeObituary(line string) bool {
+	const (
+		prefix = "make: *** ["
+		mid    = "] Terminated: "
+	)
+	if !strings.HasPrefix(line, prefix) {
+		return false
+	}
+	rest := line[len(prefix):]
+	i := strings.Index(rest, mid)
+	if i < 0 {
+		return false
+	}
+	digits := rest[i+len(mid):]
+	if digits == "" {
+		return false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *targetRunner) reportExit() {
@@ -941,6 +1015,7 @@ func (r *targetRunner) killCurrent(ctx context.Context) {
 	if cmd == nil || cmd.Exited() {
 		return
 	}
+	r.markKill()
 	_ = cmd.Kill()
 	_ = cmd.WaitExit(ctx)
 }
@@ -988,6 +1063,7 @@ func (r *targetRunner) stop() {
 	if cmd == nil {
 		return
 	}
+	r.markKill()
 	_ = cmd.Kill()
 }
 

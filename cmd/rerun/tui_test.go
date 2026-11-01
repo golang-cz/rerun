@@ -471,6 +471,50 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	}
 }
 
+// The pane header replaces the cursor row's uptime with the row's state
+// whenever it is not running; an exited row leads with its exit glyph.
+func TestRightPaneTitleShowsRowState(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "make run"
+	tests := []struct {
+		name  string
+		state procState
+		setup func(m *tuiModel)
+		want  string
+	}{
+		{name: "running", state: stateRunning, setup: func(m *tuiModel) {
+			m.now = m.targets[0].lastStart.Add(12 * time.Second)
+		}, want: "0m12s · 0 files · make run"},
+		{name: "exited ok", state: stateExited, setup: func(m *tuiModel) {
+			m.targets[0].exitCode = 0
+			m.targets[0].exitLabel = "exit 0"
+		}, want: "✓ exit 0 · 0 files · make run"},
+		{name: "exited failure", state: stateExited, setup: func(m *tuiModel) {
+			m.targets[0].exitCode = -1
+			m.targets[0].exitLabel = "exit segv"
+		}, want: "✗ exit segv · 0 files · make run"},
+		{name: "backoff", state: stateBackoff, setup: func(m *tuiModel) {
+			m.targets[0].backoffUntil = m.now.Add(4 * time.Second)
+		}, want: "backoff 4s · 0 files · make run"},
+		{name: "stopped", state: stateStopped, want: "stopped · 0 files · make run"},
+		{name: "off", state: stateOff, want: "off · 0 files · make run"},
+		{name: "starting", state: stateStarting, want: "starting · 0 files · make run"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t, web, target("api"))
+			m.cursor = 1
+			m.targets[0].state = tt.state
+			if tt.setup != nil {
+				tt.setup(m)
+			}
+			if got := paneOf(m)[0]; !strings.HasPrefix(got, tt.want) {
+				t.Fatalf("title = %q, want prefix %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRightPaneTitleLinksTheURL(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "vite dev"
@@ -1365,7 +1409,7 @@ func TestReadLinesReportsScannerError(t *testing.T) {
 		_, _ = pw.Write(bytes.Repeat([]byte("x"), 2*1024*1024))
 	}()
 
-	r.readLines(pr, "t", nil)
+	r.readLines(pr, "t", nil, nil)
 
 	got := sink.all()
 	if len(got) != 1 {

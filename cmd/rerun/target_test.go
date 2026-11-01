@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -946,5 +948,82 @@ func TestStartGateDoesNotLetANewcomerJumpTheQueue(t *testing.T) {
 	if release, _, ok := g.acquire(ctx, nil, nil, 1, nil); ok {
 		release()
 		t.Fatal("a newcomer took a free slot ahead of a queued waiter")
+	}
+}
+
+// The kill window drops a target's SIGTERM obituary while its kill is in
+// flight. The same text from a target rerun never killed is its own output and
+// still reaches the sink.
+func TestKillWindowDropsMakeObituary(t *testing.T) {
+	report := func(t *testing.T, kill *killWindow) []string {
+		t.Helper()
+		sink := &recordingSink{}
+		r := newTargetRunner(recTarget("web", "true"), sink)
+
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			defer pw.Close()
+			fmt.Fprintln(pw, "make: *** [run] Terminated: 15")
+			fmt.Fprintln(pw, "make: *** [run] Error 1")
+			fmt.Fprintln(pw, "still here")
+		}()
+		r.readLines(pr, "web", nil, kill)
+
+		var lines []string
+		for _, ev := range sink.all() {
+			if ev.kind == evOutput && ev.target == "web" {
+				lines = append(lines, ev.line)
+			}
+		}
+		return lines
+	}
+
+	killed := &killWindow{}
+	killed.mark(time.Second)
+	got := report(t, killed)
+	if slices.Contains(got, "make: *** [run] Terminated: 15") {
+		t.Fatalf("the obituary reached the sink during a kill: %v", got)
+	}
+	if !slices.Contains(got, "make: *** [run] Error 1") || !slices.Contains(got, "still here") {
+		t.Fatalf("the kill dropped real output: %v", got)
+	}
+
+	if got := report(t, &killWindow{}); !slices.Contains(got, "make: *** [run] Terminated: 15") {
+		t.Fatalf("the obituary was dropped without a kill: %v", got)
+	}
+}
+
+// killCurrent opens the current generation's kill window for the grace period.
+func TestKillCurrentOpensTheKillWindow(t *testing.T) {
+	r := newTargetRunner(recTarget("web", "true"), &recordingSink{})
+	r.target.Grace = 0 // the default grace is the window's floor
+	r.kill.Store(&killWindow{})
+	r.markKill()
+	if w := r.kill.Load(); !w.active() {
+		t.Fatal("markKill left no kill in flight")
+	}
+}
+
+func TestMakeObituaryMatching(t *testing.T) {
+	tests := []struct {
+		line string
+		want bool
+	}{
+		{"make: *** [run] Terminated: 15", true},
+		{"make: *** [Makefile:2: build] Terminated: 9", true},
+		{"make: *** [run] Error 1", false},
+		{"make: *** [run] Terminated:", false},
+		{"make: *** [run] Terminated: 15 ", false},
+		{"make: *** [run] Terminated: sig", false},
+		{"echo make: *** [run] Terminated: 15", false},
+		{"make: *** [run] Killing", false},
+	}
+	for _, tt := range tests {
+		if got := makeObituary(tt.line); got != tt.want {
+			t.Errorf("makeObituary(%q) = %v, want %v", tt.line, got, tt.want)
+		}
 	}
 }

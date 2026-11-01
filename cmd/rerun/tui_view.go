@@ -683,21 +683,22 @@ func fileCount(n int) string {
 	return fmt.Sprintf("%d files", n)
 }
 
-// titleLine is the right pane's first line: how long the cursor row has been
-// up, how many files its last change batch held, and its command. The url
-// follows, linked, when the target has one.
+// titleLine is the right pane's first line: the cursor row's state, how many
+// files its last change batch held, and its command. The state replaces the
+// uptime whenever the row is not running; an exited row leads with its exit
+// glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
 	t := m.targets[m.cursor-1]
-	head := fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)
-	cmd := truncate(head, w)
-	line := m.styles.title.Render(cmd)
-	if t.spec.URL != "" {
-		room := max(0, w-displayWidth(cmd)-2)
-		if url := truncate(t.spec.URL, room); url != "" {
-			line += m.styles.title.Render("  " + osc8(t.spec.URL, url))
-		}
+
+	segs := make([]seg, 0, 5)
+	if t.state == stateExited {
+		segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
 	}
-	return lipgloss.NewStyle().Width(w).Render(line)
+	segs = append(segs, seg{text: fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)})
+	if t.spec.URL != "" {
+		segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
+	}
+	return renderSegs(segs, m.styles.title, w)
 }
 
 // syncContent rebuilds the viewport only when its content changed, and keeps
