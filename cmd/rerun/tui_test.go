@@ -205,16 +205,16 @@ func TestUnseenBadgeOnMutedOutput(t *testing.T) {
 
 	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden"})
 	if !m.targets[1].unseen {
-		t.Fatal("muted unfocused output did not raise the badge")
+		t.Fatal("muted output did not raise the badge")
 	}
 	if !strings.Contains(m.View(), "✱") {
 		t.Error("the ✱ badge is not on screen")
 	}
 
-	// Focusing the row clears it.
-	m.setFocus(2)
+	// Unmuting the row clears it.
+	m.toggleMute(1)
 	if m.targets[1].unseen {
-		t.Error("focus did not clear the badge")
+		t.Error("unmuting did not clear the badge")
 	}
 }
 
@@ -222,14 +222,7 @@ func TestNoBadgeForVisibleOutput(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "api", line: "visible"})
 	if m.targets[1].unseen {
-		t.Fatal("output already in the ALL stream must not raise the badge")
-	}
-
-	// The focused target's own output is visible too.
-	m.setFocus(2)
-	m.applyEvent(event{kind: evOutput, target: "api", line: "focused"})
-	if m.targets[1].unseen {
-		t.Fatal("output of the focused pane must not raise the badge")
+		t.Fatal("output already in the pane must not raise the badge")
 	}
 }
 
@@ -237,7 +230,7 @@ func TestUnseenExitBadgeClearsOnUnmute(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evExited, target: "web", status: "status 1", code: 1, err: nil})
 	if !m.targets[0].unseen {
-		t.Fatal("an unfocused exit did not raise the badge")
+		t.Fatal("an exit did not raise the badge")
 	}
 
 	m.toggleMute(0)
@@ -270,8 +263,8 @@ func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 	}
 
 	m.toggleSolo(2)
-	if got, want := m.paneLines(), []string{"[worker] k1"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("merged while solo = %q, want %q", got, want)
+	if got, want := m.paneLines(), []string{"k1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("solo pane = %q, want %q without prefixes", got, want)
 	}
 
 	// Clearing solo brings the muted row back as muted, not streaming.
@@ -324,65 +317,108 @@ func TestScrollDownResumesFollowingAtTheBottom(t *testing.T) {
 	}
 }
 
-func TestFocusedPaneIsUnprefixed(t *testing.T) {
+func TestSoloPaneIsUnprefixed(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
+	m.applyEvent(event{kind: evOutput, target: "api", line: "world"})
 
-	m.setFocus(1)
+	m.toggleSolo(0)
 	if got, want := m.paneLines(), []string{"hello"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("focused pane = %q, want %q", got, want)
+		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
-	m.setFocus(0)
-	if got, want := m.paneLines(), []string{"[web] hello"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("ALL pane = %q, want %q", got, want)
+	m.clearSolo()
+	if got, want := m.paneLines(), []string{"[web] hello", "[api] world"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("merged pane after un-solo = %q, want %q", got, want)
 	}
 }
 
-func TestFocusedPaneTitleShowsTheInvokedCommand(t *testing.T) {
+func TestCommandLineShowsCursorRowCommandOnLeftColumnBottom(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "vite dev"
 	m := newTestModel(t, web, target("api"))
-	m.setFocus(1)
+	m.View()
 
-	_, rightW := m.layoutWidths()
-	title := m.rightLines(rightW)[0]
-	if !strings.Contains(title, "$ vite dev") {
-		t.Fatalf("title = %q, want it to show the invoked command", title)
+	leftW := m.layout.leftW
+	m.cursor = 1
+	line := m.leftLine(m.height-1, leftW)
+	if !strings.Contains(line, "$ vite dev") {
+		t.Fatalf("command line = %q, want the cursor row's command", line)
 	}
-	if strings.Contains(title, "frontend") {
-		t.Fatalf("title = %q, want the redundant target name dropped", title)
+	if got := displayWidth(line); got != leftW {
+		t.Fatalf("command line width = %d, want %d", got, leftW)
 	}
-}
 
-func TestFocusedPaneTitleLinksTheURL(t *testing.T) {
-	web := target("frontend")
-	web.Cmd = "vite dev"
-	web.URL = "http://localhost:5173"
-	m := newTestModel(t, web, target("api"))
-	m.setFocus(1)
-
-	_, rightW := m.layoutWidths()
-	title := m.rightLines(rightW)[0]
-	if !strings.Contains(title, "$ vite dev") {
-		t.Fatalf("title = %q, want it to show the invoked command", title)
-	}
-	if !strings.Contains(title, osc8(web.URL, web.URL)) {
-		t.Fatalf("title = %q, want the url link kept", title)
+	m.cursor = 0
+	if line := m.leftLine(m.height-1, leftW); strings.TrimSpace(line) != "" {
+		t.Fatalf("command line on ALL = %q, want blank", line)
 	}
 }
 
-func TestAllPaneHasNoTitleLine(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
+func TestSoloKeysAndClear(t *testing.T) {
+	m := newTestModel(t)
+	m.cursor = 2
 
-	_, rightW := m.layoutWidths()
-	first := m.rightLines(rightW)[0]
-	if !strings.HasPrefix(first, "[web] hello") {
-		t.Fatalf("ALL pane first line = %q, want the merged stream untouched", first)
+	press(m, "s")
+	if m.solo != 1 {
+		t.Fatalf("solo = %d, want 1 after s", m.solo)
 	}
-	if strings.HasPrefix(first, "$ ") {
-		t.Fatalf("ALL pane first line = %q, want no command title", first)
+	press(m, "s")
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared after a second s", m.solo)
+	}
+
+	press(m, "enter")
+	if m.solo != 1 {
+		t.Fatalf("solo = %d, want 1 after enter", m.solo)
+	}
+	press(m, "enter")
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared after a second enter", m.solo)
+	}
+}
+
+func TestEnterOnAllRowClearsSolo(t *testing.T) {
+	m := newTestModel(t)
+	m.toggleSolo(2)
+	m.cursor = 0
+	press(m, "enter")
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared", m.solo)
+	}
+}
+
+func TestAllRowMuteSoloShowsHint(t *testing.T) {
+	for _, key := range []string{"m", "s"} {
+		t.Run(key, func(t *testing.T) {
+			m := newTestModel(t)
+			m.cursor = 0
+			press(m, key)
+			if view := m.View(); !strings.Contains(view, allRowHint) {
+				t.Fatalf("the ALL-row hint is not in the view:\n%s", view)
+			}
+
+			m.now = m.now.Add(hintDuration + time.Second)
+			if view := m.View(); strings.Contains(view, allRowHint) {
+				t.Fatalf("the hint outlived its window:\n%s", view)
+			}
+		})
+	}
+}
+
+func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
+	m := newTestModel(t)
+	m.cursor = 0
+	press(m, "m") // arms the ALL-row hint
+	m.follow = false
+	m.pending = 2
+
+	view := m.View()
+	if !strings.Contains(view, "↓ 2 new") {
+		t.Fatalf("the new-lines marker is not in the view:\n%s", view)
+	}
+	if strings.Contains(view, allRowHint) {
+		t.Fatalf("the ALL-row hint took the marker's line:\n%s", view)
 	}
 }
 
@@ -584,7 +620,7 @@ func TestScrollFreezesTailAndMarkerResumesIt(t *testing.T) {
 	}
 }
 
-func TestMouseClicksMuteSoloAndFocus(t *testing.T) {
+func TestMouseClicksMuteSoloAndSelect(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.View()
 
@@ -595,17 +631,17 @@ func TestMouseClicksMuteSoloAndFocus(t *testing.T) {
 		t.Fatalf("button after click = %q, want M", got)
 	}
 
-	// A click on the name cell selects the row, and a second one focuses it.
+	// A click on the name cell selects the row, and a second one solos it.
 	m.handleMouse(mouse(2, 2, false))
 	if m.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2", m.cursor)
 	}
 	m.handleMouse(mouse(2, 2, false))
-	if m.focus != 2 {
-		t.Fatalf("focus = %d, want 2 after a double click", m.focus)
+	if m.solo != 1 {
+		t.Fatalf("solo = %d, want 1 after a double click", m.solo)
 	}
-	if got := m.button(0); got != "M" {
-		t.Fatalf("button = %q, want M still", got)
+	if !m.targets[0].muted {
+		t.Error("solo dropped the hidden mute state")
 	}
 
 	// Shift-click solos the row under the pointer.
@@ -654,12 +690,12 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	}
 }
 
-func TestEscReturnsToAllPane(t *testing.T) {
+func TestEscClearsSolo(t *testing.T) {
 	m := newTestModel(t)
-	m.setFocus(2)
+	m.toggleSolo(1)
 	press(m, "esc")
-	if m.focus != 0 {
-		t.Fatalf("focus = %d, want the ALL pane", m.focus)
+	if m.solo != -1 {
+		t.Fatalf("solo = %d, want cleared", m.solo)
 	}
 }
 
@@ -870,22 +906,21 @@ func TestUnboundKeysChangeNothing(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			m := newTestModel(t)
 			m.cursor = 2
-			m.setFocus(1)
 			m.toggleMute(0)
 			m.toggleSolo(1)
 
 			type snapshot struct {
-				cursor, focus, solo int
-				help, follow        bool
-				buttons             []string
+				cursor, solo int
+				help, follow bool
+				buttons      []string
 			}
-			before := snapshot{m.cursor, m.focus, m.solo, m.help, m.follow, buttons(m)}
+			before := snapshot{m.cursor, m.solo, m.help, m.follow, buttons(m)}
 
 			if _, cmd := m.Update(keyMsg(key)); cmd != nil {
 				t.Errorf("%s returned a command", key)
 			}
 
-			after := snapshot{m.cursor, m.focus, m.solo, m.help, m.follow, buttons(m)}
+			after := snapshot{m.cursor, m.solo, m.help, m.follow, buttons(m)}
 			if !reflect.DeepEqual(before, after) {
 				t.Errorf("%s changed the model: before %+v, after %+v", key, before, after)
 			}

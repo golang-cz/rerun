@@ -113,7 +113,6 @@ type tuiModel struct {
 	targets []*tuiTarget
 
 	cursor int // highlighted row: 0 = ALL, 1..n = target
-	focus  int // focused pane: 0 = ALL, 1..n = target
 	help   bool
 	// solo is the soloed target index, or -1.
 	solo int
@@ -121,18 +120,19 @@ type tuiModel struct {
 	follow  bool
 	pending int
 
-	// merged is every line in arrival order; visible is the ALL pane's
+	// merged is every line in arrival order; visible is the pane's
 	// materialized view of it, which muting and soloing filter.
 	merged      []mergedLine
 	visible     []string
 	mergedDirty bool
 
 	vp      viewport.Model
-	vpPane  int
 	vpDirty bool
 
 	width, height int
 	now           time.Time
+	// hintUntil bounds the ALL-row m/s hint; the 1s tick expires it.
+	hintUntil time.Time
 
 	hover       int
 	lastClick   int
@@ -158,7 +158,6 @@ func newTUI(targets []Target) *tuiModel {
 		stop:      make(chan struct{}),
 		solo:      -1,
 		follow:    true,
-		vpPane:    -1,
 		now:       time.Now(),
 		hover:     -1,
 		lastClick: -1,
@@ -226,18 +225,35 @@ func (m *tuiModel) toggleMute(i int) {
 		t.unseen = false
 	}
 	m.mergedDirty = true
+	m.vpDirty = true
 }
 
 func (m *tuiModel) toggleSolo(i int) {
 	if m.solo == i {
-		m.solo = -1
-		m.mergedDirty = true
+		m.clearSolo()
 		return
 	}
 	m.solo = i
 	m.targets[i].muted = false
 	m.targets[i].unseen = false
 	m.mergedDirty = true
+	m.vpDirty = true
+}
+
+// clearSolo drops the solo filter and re-prefixes the restored stream.
+func (m *tuiModel) clearSolo() {
+	if m.solo < 0 {
+		return
+	}
+	m.targets[m.solo].unseen = false // the row's own output is back in the pane
+	m.solo = -1
+	m.mergedDirty = true
+	m.vpDirty = true
+}
+
+// showTargetHint flags that m/s need a row, not the ALL rollup.
+func (m *tuiModel) showTargetHint() {
+	m.hintUntil = m.now.Add(hintDuration)
 }
 
 func (m *tuiModel) stopTarget(i int) {
@@ -300,20 +316,6 @@ func (m *tuiModel) openTarget(i int) {
 	}
 }
 
-// setFocus moves the stream to a row and marks it seen.
-func (m *tuiModel) setFocus(row int) {
-	if row < 0 || row > len(m.targets) {
-		return
-	}
-	m.focus = row
-	m.follow = true
-	m.pending = 0
-	m.vpPane = -1
-	if row > 0 {
-		m.targets[row-1].unseen = false
-	}
-}
-
 // addLine appends one line to a target's stream and to the merged view when
 // that target streams into it.
 func (m *tuiModel) addLine(i int, line string) {
@@ -322,14 +324,13 @@ func (m *tuiModel) addLine(i int, line string) {
 	m.merged = appendCapped(m.merged, mergedLine{target: i, text: line})
 	if m.streamsTo(i) {
 		m.visible = appendCapped(m.visible, m.prefixed(i, line))
+		if !m.follow {
+			m.pending++ // only lines the pane actually holds
+		}
 	} else {
 		m.mergedDirty = true
 	}
 	m.vpDirty = true
-
-	if !m.follow && (m.focus == 0 || m.focus == i+1) {
-		m.pending++
-	}
 }
 
 // appendCapped keeps the newest cap lines. The slice is re-sliced rather than
@@ -358,9 +359,8 @@ func (m *tuiModel) applyEvent(ev event) {
 	switch ev.kind {
 	case evOutput:
 		m.addLine(i, ev.line)
-		// Output nobody can see gets the badge: muted while its pane is not
-		// the focused one.
-		if m.focus != row && t.muted {
+		// Output nobody can see gets the badge.
+		if t.muted {
 			t.unseen = true
 		}
 
@@ -387,9 +387,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.state = stateExited
 		t.exitCode = ev.code
 		t.exitLabel = exitLabel(ev.code, ev.err)
-		if m.focus != row {
-			t.unseen = true
-		}
+		t.unseen = true
 		m.addLine(i, fmt.Sprintf("exited (%s) — waiting for changes", ev.status))
 
 	case evWatcherErr:
@@ -401,9 +399,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.state = stateExited
 		t.exitCode = -1
 		t.exitLabel = "exit error"
-		if m.focus != row {
-			t.unseen = true
-		}
+		t.unseen = true
 		m.addLine(i, fmt.Sprintf("rerun: %v", ev.err))
 
 	case evCleared:
@@ -411,12 +407,9 @@ func (m *tuiModel) applyEvent(ev event) {
 	}
 }
 
-// paneLines is what the focused pane shows. The ALL pane reads the merged
-// cache, rebuilt when muting or soloing changed what belongs in it.
+// paneLines is the merged stream, rebuilt when muting or soloing changed
+// what belongs in it.
 func (m *tuiModel) paneLines() []string {
-	if m.focus > 0 {
-		return m.targets[m.focus-1].lines
-	}
 	if m.mergedDirty {
 		m.rebuildMerged()
 	}
@@ -430,6 +423,9 @@ type mergedLine struct {
 }
 
 func (m *tuiModel) prefixed(i int, text string) string {
+	if m.solo >= 0 {
+		return text // a soloed pane is one target, so the name prefix is noise
+	}
 	if name := m.targets[i].spec.Name; name != "" {
 		return "[" + name + "] " + text
 	}

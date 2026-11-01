@@ -6,8 +6,14 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// doubleClickWindow is how close two row clicks must be to focus the pane.
+// doubleClickWindow is how close two row clicks must be to solo the row.
 const doubleClickWindow = 400 * time.Millisecond
+
+// hintDuration is how long the ALL-row m/s hint stays in the bottom line.
+const hintDuration = 3 * time.Second
+
+// allRowHint is the one transient message, shown when m/s hit the ALL rollup.
+const allRowHint = "m/s need a target row - j/k to select"
 
 type (
 	tickMsg      time.Time
@@ -90,7 +96,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 
 	case "esc":
-		m.setFocus(0)
+		m.clearSolo()
 
 	case "up", "k":
 		m.moveCursor(-1)
@@ -99,7 +105,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.moveCursor(1)
 
 	case "enter":
-		m.setFocus(m.cursor)
+		if m.cursor == 0 {
+			m.clearSolo()
+		} else {
+			m.toggleSolo(m.cursor - 1)
+		}
 
 	case " ":
 		if m.cursor == 0 {
@@ -111,11 +121,16 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		if m.cursor > 0 {
 			m.toggleMute(m.cursor - 1)
+		} else {
+			m.showTargetHint()
 		}
 
 	case "s":
 		if m.cursor > 0 {
 			m.toggleSolo(m.cursor - 1)
+		} else {
+			m.clearSolo()
+			m.showTargetHint()
 		}
 
 	case "r":
@@ -223,11 +238,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case row > 0 && msg.X == m.layout.leftW-1:
 		m.toggleMute(row - 1)
 	default:
-		if m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow {
-			m.setFocus(row)
+		switch {
+		case m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow && row > 0:
+			m.toggleSolo(row - 1)
+			m.lastClick = -1 // a fast third click must not read as another double
+		default:
+			m.lastClick = row
 		}
 		m.cursor = row
-		m.lastClick = row
 		m.lastClickAt = time.Now()
 	}
 	return m, nil
@@ -235,7 +253,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 // rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none.
 func (m *tuiModel) rowAt(x, y int) int {
-	if y < 0 || y >= m.height || x < 0 || x >= m.layout.leftW {
+	// The bottom left line is the command footer, not a row.
+	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
 	row := m.layout.offset + y

@@ -20,6 +20,12 @@ Everything after `--` is the command, passed through verbatim.
 Target mode on a terminal opens a TUI: one row per target, `?` lists the keys.
 Piped or non-TTY output stays plain prefixed lines.
 
+Keys: `j/k` move the cursor, `space` start/stop, `r` reboot, `m` mute a
+stream, `s` or `enter` solo (`esc` clears), `o` open the url, `G` live output.
+Mouse: click a row to select it, its button cell to mute, shift-click or
+double-click to solo. The right pane is always the merged stream; soloing
+narrows it to one target and drops the `[name]` prefixes.
+
 #### Examples:
 ```bash
 # Ad-hoc: watch ./ and re-run the command on any change

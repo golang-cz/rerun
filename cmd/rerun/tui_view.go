@@ -125,7 +125,7 @@ func nameWidth(leftW int) int { return max(0, leftW-statusW-5) }
 
 // listOffset scrolls the list so the highlighted row stays visible.
 func (m *tuiModel) listOffset() int {
-	visible := max(1, m.height)
+	visible := max(1, m.height-1) // the footer is the command line, not a row
 	rows := len(m.targets) + 1
 	offset := 0
 	if m.cursor >= visible {
@@ -135,6 +135,9 @@ func (m *tuiModel) listOffset() int {
 }
 
 func (m *tuiModel) leftLine(y, leftW int) string {
+	if y == m.height-1 {
+		return m.cmdLine(leftW)
+	}
 	row := m.layout.offset + y
 	switch {
 	case row == 0:
@@ -143,6 +146,15 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 		return strings.Repeat(" ", leftW)
 	}
 	return m.targetLine(row, leftW)
+}
+
+// cmdLine is the left column's footer: the cursor row's command, dim, or blank
+// on the ALL rollup.
+func (m *tuiModel) cmdLine(leftW int) string {
+	if m.cursor == 0 {
+		return strings.Repeat(" ", leftW)
+	}
+	return m.styles.hint.Render(padRight("$ "+m.targets[m.cursor-1].spec.Cmd, leftW))
 }
 
 // allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
@@ -262,53 +274,35 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 	return b.String()
 }
 
-// rightLines is the stream pane, exactly m.height lines tall.
+// rightLines is the stream pane, exactly m.height lines tall. Its bottom line
+// carries the new-lines marker, else the ALL-row hint.
 func (m *tuiModel) rightLines(w int) []string {
-	lines := make([]string, 0, m.height)
-
-	titleH := 0
-	if m.focus > 0 {
-		lines = append(lines, m.titleLine(w))
-		titleH = 1
-	}
-
-	vpH := max(1, m.height-titleH)
 	m.vp.Width = w
-	m.vp.Height = vpH
+	m.vp.Height = max(1, m.height)
 	m.syncContent()
 
 	out := strings.Split(m.vp.View(), "\n")
-	if !m.follow && m.pending > 0 && len(out) > 0 {
-		marker := fmt.Sprintf("↓ %d new", m.pending)
-		out[len(out)-1] = lipgloss.NewStyle().Width(w).Render(m.styles.marker.Render(marker))
-		m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + vpH - 1, w: w, h: 1}
-	}
-	lines = append(lines, out...)
-
-	for len(lines) < m.height {
-		lines = append(lines, strings.Repeat(" ", w))
-	}
-	return lines[:m.height]
-}
-
-// titleLine shows the command, not the name the left column already prints, and links its url.
-func (m *tuiModel) titleLine(w int) string {
-	t := m.targets[m.focus-1]
-	cmd := truncate("$ "+t.spec.Cmd, w)
-	line := m.styles.title.Render(cmd)
-	if t.spec.URL != "" {
-		room := max(0, w-displayWidth(cmd)-2)
-		if url := truncate(t.spec.URL, room); url != "" {
-			line += m.styles.title.Render("  " + osc8(t.spec.URL, url))
+	if len(out) > 0 {
+		switch {
+		case !m.follow && m.pending > 0:
+			marker := fmt.Sprintf("↓ %d new", m.pending)
+			out[len(out)-1] = lipgloss.NewStyle().Width(w).Render(m.styles.marker.Render(marker))
+			m.layout.marker = rect{x: m.layout.leftW + 1, y: m.vp.Height - 1, w: w, h: 1}
+		case m.now.Before(m.hintUntil):
+			out[len(out)-1] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(truncate(allRowHint, w)))
 		}
 	}
-	return lipgloss.NewStyle().Width(w).Render(line)
+
+	for len(out) < m.height {
+		out = append(out, strings.Repeat(" ", w))
+	}
+	return out[:m.height]
 }
 
-// syncContent rebuilds the viewport only when the focused pane's content
-// changed, and keeps it pinned to the tail while following.
+// syncContent rebuilds the viewport only when its content changed, and keeps
+// it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
-	if m.focus == m.vpPane && !m.vpDirty {
+	if !m.vpDirty {
 		if m.follow {
 			m.vp.GotoBottom()
 		}
@@ -321,7 +315,6 @@ func (m *tuiModel) syncContent() {
 		content = m.styles.hint.Render(m.emptyHint())
 	}
 	m.vp.SetContent(content)
-	m.vpPane = m.focus
 	m.vpDirty = false
 	if m.follow {
 		m.vp.GotoBottom()
@@ -329,9 +322,6 @@ func (m *tuiModel) syncContent() {
 }
 
 func (m *tuiModel) emptyHint() string {
-	if m.focus > 0 {
-		return "no output from " + m.targets[m.focus-1].spec.Name + " yet"
-	}
 	if m.solo >= 0 {
 		return "solo: " + m.targets[m.solo].spec.Name
 	}
@@ -356,9 +346,8 @@ var helpKeys = [][2]string{
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
 	{"m", "mute the target's stream (M)"},
-	{"s", "solo the target's stream (S; press again to clear)"},
-	{"enter", "focus the stream"},
-	{"esc", "back to ALL"},
+	{"s enter", "solo the target's stream (S; again or esc to clear)"},
+	{"esc", "clear solo"},
 	{"o", "open the target's url"},
 	{"G", "jump to live output"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
@@ -375,7 +364,7 @@ func (m *tuiModel) helpView() string {
 	b.WriteString("\n")
 	for _, line := range []string{
 		"mouse: click a row to highlight it, its button cell to mute,",
-		"shift-click to solo, double-click to focus.",
+		"shift-click or double-click to solo.",
 		"shift-drag selects text with the terminal's own copy.",
 	} {
 		b.WriteString(m.styles.hint.Render(line) + "\n")

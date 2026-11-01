@@ -53,6 +53,12 @@ On a terminal, target mode opens the TUI: a row per target on the left, the
 merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the full key list.
 
+Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
+`s` or `enter` solo a target's stream (`esc` or a second press clears), `o` open
+the url, `G` live output. The right pane is always the merged stream; soloing
+narrows it to one target and drops the `[name]` prefixes. Mouse: click to
+select, the button cell to mute, shift-click or double-click to solo.
+
 ## Building rerun.yml
 
 Flat top-level map, one entry per target (Makefile-like). `cmd` is required;
