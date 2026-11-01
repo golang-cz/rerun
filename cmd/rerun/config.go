@@ -117,6 +117,7 @@ func ParseConfig(path string) (*Config, error) {
 		}
 		root = root.Content[0]
 	}
+	root = deref(root)
 	if root.Kind == 0 || (root.Kind == yaml.ScalarNode && root.Tag == "!!null") {
 		return nil, fmt.Errorf("%s: no targets defined", path)
 	}
@@ -130,7 +131,7 @@ func ParseConfig(path string) (*Config, error) {
 	cfg := &Config{Path: path}
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		key, value := root.Content[i], root.Content[i+1]
+		key, value := deref(root.Content[i]), deref(root.Content[i+1])
 		if key.Kind != yaml.ScalarNode {
 			return nil, fmt.Errorf("%s: target names must be strings", path)
 		}
@@ -151,6 +152,7 @@ func ParseConfig(path string) (*Config, error) {
 }
 
 func parseTarget(path, name string, node *yaml.Node) (Target, error) {
+	node = deref(node)
 	if node.Kind != yaml.MappingNode {
 		return Target{}, fmt.Errorf("%s: target %q: expected a mapping of fields", path, name)
 	}
@@ -158,8 +160,8 @@ func parseTarget(path, name string, node *yaml.Node) (Target, error) {
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		field := node.Content[i].Value
-		value := node.Content[i+1]
+		field := deref(node.Content[i]).Value
+		value := deref(node.Content[i+1])
 		if seen[field] {
 			return Target{}, fmt.Errorf("%s: target %q: duplicate field %q", path, name, field)
 		}
@@ -231,7 +233,16 @@ func parseTarget(path, name string, node *yaml.Node) (Target, error) {
 	return target, nil
 }
 
+// deref follows `*name` to the anchored node, which may itself be an alias.
+func deref(node *yaml.Node) *yaml.Node {
+	for node != nil && node.Kind == yaml.AliasNode && node.Alias != nil {
+		node = node.Alias
+	}
+	return node
+}
+
 func scalarField(path, name, field string, node *yaml.Node) (string, error) {
+	node = deref(node)
 	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
 		return "", fmt.Errorf("%s: target %q: field %q: expected a string, got %s", path, name, field, yamlType(node))
 	}
@@ -239,6 +250,7 @@ func scalarField(path, name, field string, node *yaml.Node) (string, error) {
 }
 
 func boolField(path, name, field string, node *yaml.Node) (bool, error) {
+	node = deref(node)
 	if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" {
 		return false, fmt.Errorf("%s: target %q: field %q: expected a boolean, got %s", path, name, field, yamlType(node))
 	}
@@ -258,6 +270,7 @@ func yamlType(node *yaml.Node) string {
 }
 
 func stringOrList(path, name, field string, node *yaml.Node) ([]string, error) {
+	node = deref(node)
 	switch node.Kind {
 	case yaml.ScalarNode:
 		// `on:` with no value decodes to a null scalar; that means "no paths".
@@ -272,6 +285,7 @@ func stringOrList(path, name, field string, node *yaml.Node) ([]string, error) {
 	case yaml.SequenceNode:
 		list := make([]string, 0, len(node.Content))
 		for _, item := range node.Content {
+			item = deref(item)
 			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
 				return nil, fmt.Errorf("%s: target %q: field %q: expected a list of strings, got %s", path, name, field, yamlType(item))
 			}
@@ -285,6 +299,7 @@ func stringOrList(path, name, field string, node *yaml.Node) ([]string, error) {
 }
 
 func durationField(path, name, field string, node *yaml.Node) (time.Duration, error) {
+	node = deref(node)
 	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
 		return 0, fmt.Errorf("%s: target %q: field %q: expected a duration string, got %s", path, name, field, yamlType(node))
 	}

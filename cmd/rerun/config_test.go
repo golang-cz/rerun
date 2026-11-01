@@ -245,6 +245,166 @@ func TestParseConfigNullOnIsEmptyList(t *testing.T) {
 	}
 }
 
+func TestParseConfigAliasOnAndExcept(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, `api:
+  on: &api_watch [apps/api, pkg, proto]
+  except: &api_skip [vendor, node_modules]
+  cmd: go run ./cmd/api
+
+web:
+  on: *api_watch
+  except: *api_skip
+  cmd: pnpm run dev
+
+docs:
+  on: *api_watch
+  cmd: echo docs
+`)
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	wantWatch := []string{"apps/api", "pkg", "proto"}
+	for _, target := range cfg.Targets {
+		if !reflect.DeepEqual(target.On, wantWatch) {
+			t.Errorf("%s: on = %q, want %q", target.Name, target.On, wantWatch)
+		}
+	}
+
+	wantSkip := []string{"vendor", "node_modules"}
+	for _, name := range []string{"api", "web"} {
+		target, ok := cfg.Find(name)
+		if !ok {
+			t.Fatalf("target %q not found", name)
+		}
+		if !reflect.DeepEqual(target.Except, wantSkip) {
+			t.Errorf("%s: except = %q, want %q", name, target.Except, wantSkip)
+		}
+	}
+}
+
+func TestParseConfigAliasScalars(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, `base: &base
+  on: [&shared proto]
+  except: &skip vendor
+  cmd: &api_cmd go run ./cmd/api
+  desc: &api_desc API server
+
+copy: *base
+
+web:
+  on: [*shared, apps]
+  except: *skip
+  cmd: *api_cmd
+  desc: *api_desc
+`)
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	copyTarget, ok := cfg.Find("copy")
+	if !ok {
+		t.Fatal("target \"copy\" not found")
+	}
+	if !reflect.DeepEqual(copyTarget.On, []string{"proto"}) {
+		t.Errorf("copy on = %q", copyTarget.On)
+	}
+	if copyTarget.Cmd != "go run ./cmd/api" {
+		t.Errorf("copy cmd = %q", copyTarget.Cmd)
+	}
+	if copyTarget.Desc != "API server" {
+		t.Errorf("copy desc = %q", copyTarget.Desc)
+	}
+
+	web, ok := cfg.Find("web")
+	if !ok {
+		t.Fatal("target \"web\" not found")
+	}
+	if !reflect.DeepEqual(web.On, []string{"proto", "apps"}) {
+		t.Errorf("web on = %q", web.On)
+	}
+	if !reflect.DeepEqual(web.Except, []string{"vendor"}) {
+		t.Errorf("web except = %q", web.Except)
+	}
+	if web.Cmd != "go run ./cmd/api" {
+		t.Errorf("web cmd = %q", web.Cmd)
+	}
+	if web.Desc != "API server" {
+		t.Errorf("web desc = %q", web.Desc)
+	}
+}
+
+func TestParseConfigAliasErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantSub []string
+	}{
+		{
+			name:    "alias to bool on",
+			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  on: *b\n",
+			wantSub: []string{`target "web"`, `field "on"`, "expected a string or a list of strings, got bool"},
+		},
+		{
+			name:    "alias to bool as list item",
+			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  on: [*b]\n",
+			wantSub: []string{`target "web"`, `field "on"`, "expected a list of strings, got bool"},
+		},
+		{
+			name:    "alias to bool desc",
+			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  desc: *b\n",
+			wantSub: []string{`target "web"`, `field "desc"`, "expected a string, got bool"},
+		},
+		{
+			name:    "alias to non-duration string",
+			content: "api:\n  cmd: echo hi\n  desc: &d abc\n\nweb:\n  cmd: echo hi\n  delay: *d\n",
+			wantSub: []string{`target "web"`, `field "delay"`, `invalid duration "abc"`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ConfigFileName)
+			writeFile(t, path, tt.content)
+
+			_, err := ParseConfig(path)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			for _, sub := range append([]string{path}, tt.wantSub...) {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("error = %q, want substring %q", err.Error(), sub)
+				}
+			}
+		})
+	}
+}
+
+func TestParseConfigUndefinedAliasErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\n  on: *nope\n")
+
+	_, err := ParseConfig(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), path) {
+		t.Errorf("error %q does not start with the file path", err.Error())
+	}
+	if strings.Contains(err.Error(), "yaml:") {
+		t.Errorf("error leaks the yaml prefix: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nope") {
+		t.Errorf("error %q does not name the missing anchor", err.Error())
+	}
+}
+
 func TestParseConfigURLSelectedOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
 	writeFile(t, path, `frontend:
