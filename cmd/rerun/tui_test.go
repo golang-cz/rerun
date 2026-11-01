@@ -339,6 +339,53 @@ func TestFocusedPaneIsUnprefixed(t *testing.T) {
 	}
 }
 
+func TestFocusedPaneTitleShowsTheInvokedCommand(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "vite dev"
+	m := newTestModel(t, web, target("api"))
+	m.setFocus(1)
+
+	_, rightW := m.layoutWidths()
+	title := m.rightLines(rightW)[0]
+	if !strings.Contains(title, "$ vite dev") {
+		t.Fatalf("title = %q, want it to show the invoked command", title)
+	}
+	if strings.Contains(title, "frontend") {
+		t.Fatalf("title = %q, want the redundant target name dropped", title)
+	}
+}
+
+func TestFocusedPaneTitleLinksTheURL(t *testing.T) {
+	web := target("frontend")
+	web.Cmd = "vite dev"
+	web.URL = "http://localhost:5173"
+	m := newTestModel(t, web, target("api"))
+	m.setFocus(1)
+
+	_, rightW := m.layoutWidths()
+	title := m.rightLines(rightW)[0]
+	if !strings.Contains(title, "$ vite dev") {
+		t.Fatalf("title = %q, want it to show the invoked command", title)
+	}
+	if !strings.Contains(title, osc8(web.URL, web.URL)) {
+		t.Fatalf("title = %q, want the url link kept", title)
+	}
+}
+
+func TestAllPaneHasNoTitleLine(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
+
+	_, rightW := m.layoutWidths()
+	first := m.rightLines(rightW)[0]
+	if !strings.HasPrefix(first, "[web] hello") {
+		t.Fatalf("ALL pane first line = %q, want the merged stream untouched", first)
+	}
+	if strings.HasPrefix(first, "$ ") {
+		t.Fatalf("ALL pane first line = %q, want no command title", first)
+	}
+}
+
 // queuedCtrl pops the control message a runner's loop would have taken.
 func queuedCtrl(t *testing.T, r *targetRunner) ctrlKind {
 	t.Helper()

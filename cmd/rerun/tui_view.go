@@ -291,13 +291,13 @@ func (m *tuiModel) rightLines(w int) []string {
 	return lines[:m.height]
 }
 
-// titleLine names the focused target, and links its url.
+// titleLine shows the command, not the name the left column already prints, and links its url.
 func (m *tuiModel) titleLine(w int) string {
 	t := m.targets[m.focus-1]
-	name := truncate(t.spec.Name, w)
-	line := m.styles.title.Render(name)
+	cmd := truncate("$ "+t.spec.Cmd, w)
+	line := m.styles.title.Render(cmd)
 	if t.spec.URL != "" {
-		room := max(0, w-displayWidth(name)-2)
+		room := max(0, w-displayWidth(cmd)-2)
 		if url := truncate(t.spec.URL, room); url != "" {
 			line += m.styles.title.Render("  " + osc8(t.spec.URL, url))
 		}
