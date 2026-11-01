@@ -616,6 +616,9 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.unseen = true
 		m.addLine(i, fmt.Sprintf("rerun: %v", ev.err))
 
+	case evLoop:
+		m.addLine(i, fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except", t.spec.Name, loopCycles, ev.line))
+
 	case evCleared:
 		// The TUI owns the screen; the clear bytes belong to the plain path.
 	}

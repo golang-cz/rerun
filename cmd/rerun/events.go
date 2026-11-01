@@ -24,6 +24,7 @@ const (
 	evCleared                     // the screen clear the ad-hoc mode prints
 	evReconcile                   // a rerun.yml reload changed the target list
 	evNotice                      // rerun's own line: a config error, no target
+	evLoop                        // a target looks like it is rewriting its own trigger file
 )
 
 // event is everything a target runner reports. The front-ends render it: the
@@ -120,6 +121,9 @@ func (s *plainSink) render(ev event) string {
 
 	case evRunnerErr:
 		return fmt.Sprintf("rerun: %s%v\n", s.label(ev.target), ev.err)
+
+	case evLoop:
+		return fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except\n", ev.target, loopCycles, ev.line)
 
 	case evCleared:
 		if raw {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +30,12 @@ var (
 	backoffWindow = 30 * time.Second
 	// backoffDelays is the wait before the 3rd, 4th, ... restart in a window.
 	backoffDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
+
+	// loopCycles is how many consecutive short runs must share a trigger file
+	// before rerun calls it a self-write loop.
+	loopCycles = 4
+	// loopRunWindow is the run length under which a restart counts as short.
+	loopRunWindow = 30 * time.Second
 )
 
 // errStartAborted reports a start cancelled before it spawned, which is not a
@@ -405,6 +412,12 @@ type targetRunner struct {
 	lastRun    time.Duration
 	restarts   []time.Time
 
+	// fastCycles holds the sorted trigger files of the recent short runs,
+	// oldest first, and loopWarned the (target, path) pairs already reported.
+	// Run goroutine only.
+	fastCycles [][]string
+	loopWarned map[string]struct{}
+
 	mu        sync.Mutex
 	cmd       rerun.Command
 	lastStart time.Time
@@ -702,7 +715,66 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 	}
 
 	r.reportChange(changeSet)
+	r.detectLoop(changeSet)
 	r.spawn(ctx)
+}
+
+// detectLoop reports the trigger files that every one of the last loopCycles
+// short runs touched, which is the signature of a target rewriting its own
+// watched tree. It emits an evLoop once per (target, path) per session.
+func (r *targetRunner) detectLoop(changeSet rerun.ChangeSet) {
+	for _, path := range r.trackFastCycle(changeSet) {
+		if _, warned := r.loopWarned[path]; warned {
+			continue
+		}
+		if r.loopWarned == nil {
+			r.loopWarned = make(map[string]struct{})
+		}
+		r.loopWarned[path] = struct{}{}
+		r.sink.emit(event{kind: evLoop, target: r.target.Name, line: path})
+	}
+}
+
+// trackFastCycle records one restart's trigger files and returns the files
+// shared by the last loopCycles runs. A run that outlived loopRunWindow, or a
+// cycle before any start, resets the window.
+func (r *targetRunner) trackFastCycle(changeSet rerun.ChangeSet) []string {
+	r.mu.Lock()
+	last := r.lastStart
+	r.mu.Unlock()
+
+	if last.IsZero() || time.Since(last) >= loopRunWindow {
+		r.fastCycles = r.fastCycles[:0]
+		return nil
+	}
+
+	paths := make([]string, 0, len(changeSet.Files))
+	for path := range changeSet.Files {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+	r.fastCycles = append(r.fastCycles, paths)
+	if len(r.fastCycles) > loopCycles {
+		r.fastCycles = r.fastCycles[len(r.fastCycles)-loopCycles:]
+	}
+	if len(r.fastCycles) < loopCycles {
+		return nil
+	}
+
+	var shared []string
+	for _, path := range r.fastCycles[0] {
+		inAll := true
+		for _, set := range r.fastCycles[1:] {
+			if !slices.Contains(set, path) {
+				inAll = false
+				break
+			}
+		}
+		if inAll {
+			shared = append(shared, path)
+		}
+	}
+	return shared
 }
 
 // reportChange tells the front-end which files changed, whether or not a spawn
