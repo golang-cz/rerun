@@ -9,14 +9,6 @@ import (
 	"github.com/golang-cz/rerun"
 )
 
-const noGitignoreWarning = "rerun: warning: -no-gitignore is not implemented yet"
-
-func warnNoGitignore(args Args, stderr io.Writer) {
-	if args.NoGitignore {
-		fmt.Fprintln(stderr, noGitignoreWarning)
-	}
-}
-
 var version = "dev"
 
 const usage = `rerun - re-run a command on file system changes
@@ -38,7 +30,7 @@ Flags:
   -delay <dur>      batch window before restarting a command (default 200ms)
   -cooldown <dur>   minimum time between restarts (default 0s)
   -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
-  -no-gitignore     (not yet implemented)
+  -no-gitignore     do not filter watched files through .gitignore
   -h, -help         show this help
   -version          show version
 
@@ -60,8 +52,6 @@ func main() {
 		fmt.Fprintf(os.Stdout, "rerun %s\n", version)
 		os.Exit(0)
 	}
-
-	warnNoGitignore(args, os.Stderr)
 
 	if len(args.Cmd) == 0 {
 		os.Exit(runConfigMode(args))
@@ -157,6 +147,7 @@ func applyOverrides(targets []Target, args Args) {
 		if args.Grace > 0 {
 			targets[i].Grace = args.Grace
 		}
+		targets[i].NoGitignore = args.NoGitignore
 	}
 }
 

@@ -52,7 +52,7 @@ $ find . -name '*.go' | rerun -- go test ./...
 -delay <dur>      batch window before restarting a command (default 200ms)
 -cooldown <dur>   minimum time between restarts (default 0s)
 -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
--no-gitignore     (not yet implemented)
+-no-gitignore     do not filter watched files through .gitignore
 -h, -help         show this help
 -version          show version
 ```

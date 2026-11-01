@@ -1,7 +1,10 @@
 package rerun
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denormal/go-gitignore"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -21,9 +25,14 @@ type Watcher struct {
 	ignore      map[string]struct{}
 	ignoreDirs  map[string]struct{}
 	ignoreFiles map[string]struct{}
+	gitignores  map[string]*gitignoreFile // dir -> its .gitignore, when one exists
+	pinned      map[string]struct{}       // explicit on: roots, never ignored themselves
 	done        chan struct{}
 	watchOnce   sync.Once
 	closeOnce   sync.Once
+
+	respectGitignore bool
+	stderr           io.Writer
 }
 
 type ChangeSet struct {
@@ -39,15 +48,25 @@ func NewWatcher() (*Watcher, error) {
 	}
 
 	w := &Watcher{
-		watcher:     watcher,
-		watch:       make(map[string]struct{}),
-		ignore:      make(map[string]struct{}),
-		ignoreDirs:  make(map[string]struct{}),
-		ignoreFiles: make(map[string]struct{}),
-		done:        make(chan struct{}),
+		watcher:          watcher,
+		watch:            make(map[string]struct{}),
+		ignore:           make(map[string]struct{}),
+		ignoreDirs:       make(map[string]struct{}),
+		ignoreFiles:      make(map[string]struct{}),
+		gitignores:       make(map[string]*gitignoreFile),
+		pinned:           make(map[string]struct{}),
+		respectGitignore: true,
+		stderr:           os.Stderr,
+		done:             make(chan struct{}),
 	}
 
 	return w, nil
+}
+
+// RespectGitignore turns .gitignore filtering on or off. It is on by default
+// and must be configured before Watch.
+func (w *Watcher) RespectGitignore(enabled bool) {
+	w.respectGitignore = enabled
 }
 
 // Add registers a path to watch. Configure watches before calling Watch.
@@ -71,65 +90,33 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 
 	w.watchOnce.Do(func() {
 		// resolve add + ignore paths
+		var roots []string
 		for path := range w.watch {
-			for _, root := range expandGlobPaths(path) {
-				filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return nil
-					}
-					if w.closed() {
-						return errClosed
-					}
+			roots = append(roots, expandGlobPaths(path)...)
+		}
 
-					if info.IsDir() {
-						// Dirs
-						if strings.HasSuffix(path, ".git") {
-							return filepath.SkipDir
-						}
-
-						if _, ok := w.ignore[path]; ok {
-							w.ignoreDirs[path] = struct{}{}
-							return filepath.SkipDir
-						}
-
-						// Glob-ignored dirs must be skipped, or writes under them retrigger the target.
-						for ignorePath := range w.ignore {
-							if strings.Contains(ignorePath, "*") && matchGlobPattern(ignorePath, path) {
-								w.ignoreDirs[path] = struct{}{}
-								return filepath.SkipDir
-							}
-						}
-
-						w.watcher.Add(path)
-						return nil
-
-					} else {
-
-						// Files
-						// Check if file path matches any ignore pattern
-						for ignorePath := range w.ignore {
-							if path == ignorePath || strings.HasPrefix(path, ignorePath+string(os.PathSeparator)) {
-								// Check for exact match or if the file is in an ignored directory
-								w.ignoreFiles[path] = struct{}{}
-								return nil
-							} else if strings.Contains(ignorePath, "*") {
-								// Check for glob pattern match of filename
-								if matchGlobPattern(ignorePath, path) {
-									w.ignoreFiles[path] = struct{}{}
-									return nil
-								}
-							}
-						}
-
-						// Watch single-file targets directly; fsnotify only watches dirs otherwise.
-						if path == root {
-							w.watcher.Add(path)
-						}
-
-						return nil
-					}
-				})
+		// Pins are global: an explicit on: root survives any ignore, and warns once
+		// when .gitignore above it disagrees.
+		for _, root := range roots {
+			clean := filepath.Clean(root)
+			if _, ok := w.pinned[clean]; ok {
+				continue
 			}
+			w.pinned[clean] = struct{}{}
+
+			if !w.respectGitignore {
+				continue
+			}
+			if info, err := os.Stat(root); err == nil && ancestorIgnored(clean, info.IsDir()) {
+				fmt.Fprintf(w.stderr, "rerun: warning: %s is .gitignored\n", clean)
+			}
+		}
+
+		for _, root := range roots {
+			if w.closed() {
+				break
+			}
+			w.walkRoot(root)
 		}
 
 		changes = make(chan ChangeSet, 1)
@@ -186,6 +173,10 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							continue
 						}
 
+						if len(w.gitignores) > 0 && w.gitignored(event.Name, eventIsDir(event.Name)) {
+							continue
+						}
+
 						if timeoutC == nil {
 							timer = time.NewTimer(delay)
 							timeoutC = timer.C
@@ -229,6 +220,199 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 	})
 
 	return changes
+}
+
+// walkRoot watches root and everything below it that no ignore rule excludes.
+func (w *Watcher) walkRoot(root string) {
+	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if w.closed() {
+			return errClosed
+		}
+
+		if !info.IsDir() {
+
+			// Files
+			// Check if file path matches any ignore pattern
+			for ignorePath := range w.ignore {
+				if path == ignorePath || strings.HasPrefix(path, ignorePath+string(os.PathSeparator)) {
+					// Check for exact match or if the file is in an ignored directory
+					w.ignoreFiles[path] = struct{}{}
+					return nil
+				} else if strings.Contains(ignorePath, "*") {
+					// Check for glob pattern match of filename
+					if matchGlobPattern(ignorePath, path) {
+						w.ignoreFiles[path] = struct{}{}
+						return nil
+					}
+				}
+			}
+
+			if w.gitignored(path, false) {
+				w.ignoreFiles[path] = struct{}{}
+				return nil
+			}
+
+			// Watch single-file targets directly; fsnotify only watches dirs otherwise.
+			if path == root {
+				w.watcher.Add(path)
+			}
+
+			return nil
+		}
+
+		// Dirs
+		if strings.HasSuffix(path, ".git") {
+			return filepath.SkipDir
+		}
+
+		if _, ok := w.ignore[path]; ok {
+			w.ignoreDirs[path] = struct{}{}
+			return filepath.SkipDir
+		}
+
+		// Glob-ignored dirs must be skipped, or writes under them retrigger the target.
+		for ignorePath := range w.ignore {
+			if strings.Contains(ignorePath, "*") && matchGlobPattern(ignorePath, path) {
+				w.ignoreDirs[path] = struct{}{}
+				return filepath.SkipDir
+			}
+		}
+
+		if w.gitignored(path, true) {
+			w.ignoreDirs[path] = struct{}{}
+			return filepath.SkipDir
+		}
+
+		// A .gitignore covers a directory's contents, never the directory itself.
+		w.loadGitignore(filepath.Clean(path))
+		w.watcher.Add(path)
+		return nil
+	})
+}
+
+// gitignoreFile is a parsed .gitignore anchored at base.
+type gitignoreFile struct {
+	base string
+	gi   gitignore.GitIgnore
+}
+
+// match reports whether rel is ignored, and separately whether a pattern
+// matched at all: a deeper .gitignore that does not match falls through to a
+// shallower one.
+func (g *gitignoreFile) match(rel string, isDir bool) (ignored, matched bool) {
+	m := g.gi.Relative(rel, isDir)
+	if m == nil {
+		return false, false
+	}
+	return m.Ignore(), true
+}
+
+// readGitignore parses dir's .gitignore, or returns nil when there is none.
+func readGitignore(dir string) *gitignoreFile {
+	data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		return nil
+	}
+	return &gitignoreFile{base: dir, gi: gitignore.New(bytes.NewReader(data), dir, nil)}
+}
+
+// loadGitignore caches a directory's .gitignore for the event-time checks.
+func (w *Watcher) loadGitignore(dir string) {
+	if !w.respectGitignore {
+		return
+	}
+	if _, ok := w.gitignores[dir]; ok {
+		return
+	}
+	if g := readGitignore(dir); g != nil {
+		w.gitignores[dir] = g
+	}
+}
+
+// gitignored reports whether path is ignored, walking its .gitignore chain
+// deepest first: the closest file with a matching pattern decides.
+func (w *Watcher) gitignored(path string, isDir bool) bool {
+	clean := filepath.Clean(path)
+	if _, ok := w.pinned[clean]; ok {
+		return false
+	}
+
+	for dir := filepath.Dir(clean); ; {
+		if g := w.gitignores[dir]; g != nil {
+			if rel, err := filepath.Rel(dir, clean); err == nil {
+				if ignored, matched := g.match(rel, isDir); matched {
+					return ignored
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// ancestorIgnored reports whether a .gitignore above a pinned root ignores it.
+// Only files up to the enclosing git repository count, as git scopes them.
+func ancestorIgnored(root string, isDir bool) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+
+	start := filepath.Dir(absRoot)
+	stop := gitRoot(start)
+	dirs := []string{}
+	for dir := start; ; {
+		dirs = append(dirs, dir)
+		if stop != "" && dir == stop {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	for _, dir := range dirs {
+		g := readGitignore(dir)
+		if g == nil {
+			continue
+		}
+		rel, err := filepath.Rel(dir, absRoot)
+		if err != nil {
+			continue
+		}
+		if ignored, matched := g.match(rel, isDir); matched {
+			return ignored
+		}
+	}
+	return false
+}
+
+// gitRoot returns the closest ancestor of dir that holds a .git, or "".
+func gitRoot(dir string) string {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// eventIsDir lets directory-only .gitignore patterns match a created dir.
+func eventIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // resetTimer restarts t for another d. A value a fired timer already parked

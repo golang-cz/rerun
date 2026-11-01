@@ -1,8 +1,10 @@
 package rerun
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +15,22 @@ func writeFiles(t *testing.T, paths ...string) {
 		if err := os.WriteFile(path, []byte("package x\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func mkdirs(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func writeGitignore(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -408,5 +426,241 @@ func TestWatchLiteralBracketDir(t *testing.T) {
 	change := writeUntilChange(t, changes, file, 2*time.Second)
 	if _, ok := change.Files[file]; !ok {
 		t.Fatalf("ChangeSet files = %v, want %s", change.Files, file)
+	}
+}
+
+// Pins the rules the walker relies on, so a library swap cannot change them
+// silently.
+func TestGitignorePatternSemantics(t *testing.T) {
+	dir := t.TempDir()
+	writeGitignore(t, dir, "# comment\n\nbuild/\n/dist\ndocs/**/*.md\n*.log\n!keep.log\n")
+
+	g := readGitignore(dir)
+	if g == nil {
+		t.Fatal("readGitignore returned nil")
+	}
+
+	tests := []struct {
+		rel   string
+		isDir bool
+		want  bool
+	}{
+		{"build", true, true},
+		{"build", false, false},
+		{"dist", true, true},
+		{"sub/dist", true, false},
+		{"docs/a.md", false, true},
+		{"docs/sub/a.md", false, true},
+		{"other/docs/a.md", false, false},
+		{"a.log", false, true},
+		{"sub/a.log", false, true},
+		{"keep.log", false, false},
+		{"sub/keep.log", false, false},
+		{"notes.txt", false, false},
+	}
+	for _, tt := range tests {
+		ignored, _ := g.match(tt.rel, tt.isDir)
+		if ignored != tt.want {
+			t.Errorf("match(%q, dir=%v) = %v, want %v", tt.rel, tt.isDir, ignored, tt.want)
+		}
+	}
+}
+
+// gitignore is additive to --except: an ignored dir never reaches fsnotify.
+func TestGitignoreSkipsDir(t *testing.T) {
+	dir := t.TempDir()
+	ignored := filepath.Join(dir, "node_modules")
+	src := filepath.Join(dir, "src")
+	mkdirs(t, filepath.Join(ignored, "pkg"), src)
+	writeGitignore(t, dir, "node_modules/\n")
+
+	dep := filepath.Join(ignored, "pkg", "index.js")
+	source := filepath.Join(src, "main.go")
+	writeFiles(t, dep, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	for _, watched := range w.watcher.WatchList() {
+		if watched == ignored {
+			t.Fatalf("watch list contains ignored dir %s", ignored)
+		}
+	}
+
+	writeFiles(t, dep)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
+func TestGitignoreFiltersFile(t *testing.T) {
+	dir := t.TempDir()
+	writeGitignore(t, dir, "*.log\n")
+	log := filepath.Join(dir, "run.log")
+	source := filepath.Join(dir, "run.go")
+	writeFiles(t, log, source)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, log)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, source, 2*time.Second)
+	if _, ok := change.Files[source]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, source)
+	}
+}
+
+func TestGitignoreNegationReincludes(t *testing.T) {
+	dir := t.TempDir()
+	writeGitignore(t, dir, "*.log\n!keep.log\n")
+	kept := filepath.Join(dir, "keep.log")
+	dropped := filepath.Join(dir, "other.log")
+	writeFiles(t, kept, dropped)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, dropped)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, kept, 2*time.Second)
+	if _, ok := change.Files[kept]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, kept)
+	}
+}
+
+// A deeper .gitignore overrides a shallower one, even where the root ignores.
+func TestGitignoreNestedOverridesRoot(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	mkdirs(t, sub)
+	writeGitignore(t, dir, "*.log\n")
+	writeGitignore(t, sub, "!keep.log\n")
+
+	kept := filepath.Join(sub, "keep.log")
+	dropped := filepath.Join(sub, "other.log")
+	writeFiles(t, kept, dropped)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, dropped)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, kept, 2*time.Second)
+	if _, ok := change.Files[kept]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, kept)
+	}
+}
+
+func TestNoGitignoreDisablesFiltering(t *testing.T) {
+	dir := t.TempDir()
+	writeGitignore(t, dir, "*.log\n")
+	log := filepath.Join(dir, "run.log")
+	writeFiles(t, log)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.RespectGitignore(false)
+	w.Add(dir)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	change := writeUntilChange(t, changes, log, 2*time.Second)
+	if _, ok := change.Files[log]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, log)
+	}
+}
+
+// An explicit pin outranks .gitignore, with one warning that it did.
+func TestGitignorePinnedRootWarnsAndWatches(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, filepath.Join(dir, ".git"))
+	writeGitignore(t, dir, "dist/\n")
+	dist := filepath.Join(dir, "dist")
+	mkdirs(t, dist)
+	file := filepath.Join(dist, "app.js")
+	writeFiles(t, file)
+
+	var stderr bytes.Buffer
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.stderr = &stderr
+
+	w.Add(dist)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	if got := stderr.String(); !strings.Contains(got, dist+" is .gitignored") {
+		t.Fatalf("stderr = %q, want a warning about %s", got, dist)
+	}
+	if got := strings.Count(stderr.String(), "is .gitignored"); got != 1 {
+		t.Fatalf("stderr = %q, want exactly one warning, got %d", stderr.String(), got)
+	}
+
+	change := writeUntilChange(t, changes, file, 2*time.Second)
+	if _, ok := change.Files[file]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, file)
+	}
+}
+
+// A pin scopes its whole subtree: shallower .gitignore rules stop at the
+// pinned root, while its own .gitignore still applies inside.
+func TestGitignorePinnedRootScopesDescendants(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, filepath.Join(dir, ".git"))
+	writeGitignore(t, dir, "*.log\n")
+
+	dist := filepath.Join(dir, "dist")
+	mkdirs(t, dist)
+	writeGitignore(t, dist, "*.tmp\n")
+
+	log := filepath.Join(dist, "a.log")
+	tmp := filepath.Join(dist, "b.tmp")
+	writeFiles(t, log, tmp)
+
+	w, err := NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Add(dist)
+	changes := w.Watch(20 * time.Millisecond)
+	defer w.Close()
+
+	writeFiles(t, tmp)
+	assertNoChange(t, changes, 400*time.Millisecond)
+
+	change := writeUntilChange(t, changes, log, 2*time.Second)
+	if _, ok := change.Files[log]; !ok {
+		t.Fatalf("ChangeSet files = %v, want %s", change.Files, log)
 	}
 }

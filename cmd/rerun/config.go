@@ -38,6 +38,8 @@ type Target struct {
 	Delay    time.Duration
 	Cooldown time.Duration
 	Grace    time.Duration
+	// NoGitignore turns off .gitignore filtering for this target.
+	NoGitignore bool
 	// Selected is false for `selected: false` targets: they exist in the
 	// list but start off until they are started by hand.
 	Selected bool

@@ -211,6 +211,8 @@ func (r *targetRunner) run(ctx context.Context) error {
 	}
 	defer watcher.Close()
 
+	watcher.RespectGitignore(!r.target.NoGitignore)
+
 	// Close the watcher on shutdown: the initial walk below can take seconds on
 	// a big tree and would otherwise hold the whole run back.
 	closeWatcher := make(chan struct{})

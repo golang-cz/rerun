@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,16 +87,17 @@ func TestResolveTargetsLeavesConfigUntouched(t *testing.T) {
 	}
 }
 
-func TestWarnNoGitignore(t *testing.T) {
-	var stderr bytes.Buffer
-	warnNoGitignore(Args{NoGitignore: true}, &stderr)
-	if got, want := stderr.String(), noGitignoreWarning+"\n"; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
+// -no-gitignore reaches both the ad-hoc target and every rerun.yml target.
+func TestNoGitignorePlumbsIntoTargets(t *testing.T) {
+	args := Args{NoGitignore: true, Cmd: []string{"cmd"}}
+	if !adHocTarget(args).NoGitignore {
+		t.Fatal("ad-hoc target did not inherit NoGitignore")
 	}
 
-	stderr.Reset()
-	warnNoGitignore(Args{}, &stderr)
-	if stderr.Len() != 0 {
-		t.Fatalf("unexpected warning without the flag: %q", stderr.String())
+	cfg := configFromYAML(t, threeTargetsYAML)
+	for _, target := range resolveTargets(cfg, args) {
+		if !target.NoGitignore {
+			t.Fatalf("target %q did not inherit NoGitignore", target.Name)
+		}
 	}
 }

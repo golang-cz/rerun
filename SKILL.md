@@ -19,6 +19,9 @@ rerun -- go test ./...
 Watches the current directory (`.gitignore` respected) and restarts
 `go test ./...` on every change.
 
+`.gitignore` files are read at startup, so an edit to one takes effect on the
+next `rerun`, not live.
+
 With explicit lists:
 
 ```bash
@@ -101,7 +104,7 @@ Unknown fields, duplicate fields, and non-string values are errors.
 ## Flags
 
 - `-delay`, `-cooldown`, `-grace` — override per run (CLI wins over rerun.yml)
-- `-no-gitignore` — (not yet implemented)
+- `-no-gitignore` — turn off .gitignore filtering and watch ignored files too
 - `-h`, `-version`
 
 ## Shutdown
