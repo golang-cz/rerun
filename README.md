@@ -50,7 +50,8 @@ with `v`; click a chip's `×`, or press `backspace` with the pane focused, to re
 Click the `×` after a column name in the table header to remove that column; a click on
 the name does nothing. Column picks are unsaved until `ctrl+s` writes them to rerun.yml;
 the footer reads `unsaved columns · ctrl+s save` until then, and a schema or target with
-unsaved columns gets a `*` after its name. Chips and expansions last for the session only. `cmd+s` works only where the
+unsaved columns gets a `*` after its name. A `columns:` list that a YAML alias uses elsewhere is
+not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, a batch in the fs drawer to list its files,

@@ -87,7 +87,9 @@ clicks do. A table header column name is inert; only the `×` after it removes t
 column. A schema or target whose columns are unsaved shows a `*` after its name. Picks are
 unsaved until `ctrl+s` writes them with the rerun.yml column writer; the footer shows
 `unsaved columns · ctrl+s save`, and the quit modal says so too. A target with a schema
-and no columns of its own writes its schema. `cmd+s` works only where the terminal
+and no columns of its own writes its schema. A `columns:` list that a YAML alias uses elsewhere
+is refused with a footer error (edit rerun.yml by hand). Writes keep the file's other bytes, indent,
+and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
 The fs drawer under the list is a change feed: one line per batch of changes
