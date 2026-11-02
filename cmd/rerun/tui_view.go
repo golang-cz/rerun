@@ -80,6 +80,10 @@ type tuiLayout struct {
 	offset int
 	drawer []drawerRow
 	marker rect
+	// chips and heads are the header's clickable cells: chip × cells on the
+	// title row, and table column names on the column header row.
+	chips []chipHit
+	heads []cellSpan
 }
 
 func displayWidth(s string) int { return lipgloss.Width(s) }
@@ -520,20 +524,22 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 	return b.String()
 }
 
-// rightLines is the stream pane, exactly m.height lines tall. The cursor row
-// owns a title line at the top; the bottom line carries the new-lines marker,
-// else a hint.
+// rightLines is the stream pane, exactly m.height lines tall. The fixed header
+// rows sit on top: the title row (cursor row's state, or the chips) and the
+// table's column names. The bottom line carries the new-lines marker, else a hint.
 func (m *tuiModel) rightLines(w int) []string {
-	titleH := 0
-	var title string
-	if m.cursorTarget() >= 0 {
-		title = m.titleLine(w)
-		titleH = 1
-	}
-
+	headH := m.headerRows()
 	m.vp.Width = w
-	m.vp.Height = max(1, m.height-titleH)
+	m.vp.Height = max(1, m.height-headH)
 	m.syncContent()
+
+	var header []string
+	if m.titleRows() == 1 {
+		header = append(header, m.titleLine(w))
+	}
+	if m.tableHeaderOn() {
+		header = append(header, m.columnHeader(w))
+	}
 
 	out := strings.Split(m.vp.View(), "\n")
 
@@ -559,12 +565,12 @@ func (m *tuiModel) rightLines(w int) []string {
 		markerShown := !m.follow && m.pending > 0
 		if markerShown {
 			marker := fmt.Sprintf("↓ %d new", m.pending)
-			m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + m.vp.Height - 1, w: w, h: 1}
+			m.layout.marker = rect{x: m.layout.leftW + 1, y: headH + m.vp.Height - 1, w: w, h: 1}
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		}
-		// One line, seven claimants, in precedence order: an open bar, the copy
+		// One line, eight claimants, in precedence order: an open bar, the copy
 		// hint, a notice, the new-lines marker (already drawn), the committed
-		// search counter, the filter count, then the m/s hint.
+		// search counter, the filter count, the m/s hint, then the unsaved columns.
 		switch {
 		case m.inputMode == inputSearch:
 			out[last] = m.bottomLine(w, m.searchStatus(true), "")
@@ -587,6 +593,8 @@ func (m *tuiModel) rightLines(w int) []string {
 			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
 			out[last] = m.bottomLine(w, m.hint, chip)
+		case m.dirty():
+			out[last] = m.bottomLine(w, unsavedNotice, chip)
 		case !m.follow:
 			// A frozen pane with nothing else to say still names the state.
 			out[last] = m.bottomLine(w, "", chip)
@@ -594,9 +602,7 @@ func (m *tuiModel) rightLines(w int) []string {
 	}
 
 	lines := make([]string, 0, m.height)
-	if titleH == 1 {
-		lines = append(lines, title)
-	}
+	lines = append(lines, header...)
 	lines = append(lines, out...)
 	for len(lines) < m.height {
 		lines = append(lines, strings.Repeat(" ", w))
@@ -698,20 +704,23 @@ func fileCount(n int) string {
 	return fmt.Sprintf("%d files", n)
 }
 
-// titleLine is the right pane's first line: the cursor row's state, how many
-// files its last change batch held, and its command. The state replaces the
-// uptime whenever the row is not running; an exited row leads with its exit
-// glyph. The url follows, linked, when the target has one.
+// titleLine is the right pane's first row: the value filter chips, then, for a
+// target row, its state, how many files its last change batch held, and its
+// command. The state replaces the uptime whenever the row is not running; an
+// exited row leads with its exit glyph. The url follows, linked, when the target
+// has one.
 func (m *tuiModel) titleLine(w int) string {
-	t := m.targets[m.cursorTarget()]
-
-	segs := make([]seg, 0, 5)
-	if t.state == stateExited {
-		segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
-	}
-	segs = append(segs, seg{text: fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)})
-	if t.spec.URL != "" {
-		segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
+	m.layout.chips = m.layout.chips[:0]
+	segs := m.chipSegs()
+	if m.cursorTarget() >= 0 {
+		t := m.targets[m.cursorTarget()]
+		if t.state == stateExited {
+			segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
+		}
+		segs = append(segs, seg{text: fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)})
+		if t.spec.URL != "" {
+			segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
+		}
 	}
 	return renderSegs(segs, m.styles.title, w)
 }
@@ -728,7 +737,7 @@ func (m *tuiModel) syncContent() {
 
 	lines := m.tableLines(m.paneLines())
 	m.paneCol = m.clampPaneCol(lines)
-	content := strings.Join(m.panLines(lines), "\n")
+	content := strings.Join(m.markLines(m.panLines(lines)), "\n")
 	if len(lines) == 0 {
 		content = m.styles.hint.Render(m.emptyHint())
 	}

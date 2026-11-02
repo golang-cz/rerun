@@ -55,6 +55,8 @@ type Target struct {
 	URL    string
 	// Columns are the effective columns: the target's own, else its schema's.
 	Columns []Column
+	// ownColumns is set when the target writes its own `columns:` instead of inheriting.
+	ownColumns bool
 	// Schema names the top-level `schemas:` entry the target uses, or "".
 	Schema   string
 	Delay    time.Duration
@@ -439,6 +441,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				return Target{}, err
 			}
 			target.Columns = cols
+			target.ownColumns = true
 
 		case "schema":
 			s, err := scalarField(src, name, field, value)

@@ -72,6 +72,16 @@ the cursor row's command, with its url linked. Mouse: click a row to solo it,
 double-click to stop/start like `space`, the button cell to mute, shift-click
 to solo, and a click on a schema header to select its targets.
 
+Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
+it, or `enter` with the pane focused (the bottom-most line), expands the pretty-printed
+object; `(−)` collapses it. In an expanded block, a click on a key adds it as a column of
+the selection (a selected schema, else the soloed target), and a click on a scalar adds a
+`.path == value` chip (ANDed with `v`; `×` or `backspace` removes it). A click on a table
+header column name removes that column. Picks are unsaved until `ctrl+s` writes them with
+the rerun.yml column writer; the footer shows `unsaved columns · ctrl+s save`. A target
+with a schema and no columns of its own writes its schema. `cmd+s` works only where the
+terminal forwards it.
+
 The fs drawer under the list is a change feed: one line per batch of changes
 (events within 150ms of each other), with the first changed file, `+N` for the
 rest, and the targets the batch restarted. `tab` focuses it, `j/k` move, `enter`

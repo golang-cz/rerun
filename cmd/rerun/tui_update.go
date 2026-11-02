@@ -237,11 +237,24 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		if m.drawerFocus {
+		switch {
+		case m.drawerFocus:
 			m.openCursorBatch()
-		} else if r, ok := m.cursorRow(); ok {
-			m.selectRow(r)
+		case m.paneFocus:
+			m.expandCursor()
+		default:
+			if r, ok := m.cursorRow(); ok {
+				m.selectRow(r)
+			}
 		}
+
+	case "backspace":
+		if m.paneFocus && len(m.chips) > 0 {
+			m.removeChip(len(m.chips) - 1)
+		}
+
+	case "ctrl+s":
+		m.saveColumns()
 
 	case " ":
 		if r, ok := m.cursorRow(); ok {
@@ -500,12 +513,12 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// A press in the log pane anchors a selection instead of acting on rows.
 	// The tail freezes on the first drag motion, so a plain click copies the
 	// line and keeps the stream live. Past the content, the press does nothing.
+	if m.inPaneHeader(msg.X, msg.Y) {
+		m.clickHeader(msg.X-m.layout.leftW-1, msg.Y)
+		return m, nil
+	}
 	if m.inPane(msg.X, msg.Y) {
-		if idx := m.paneRow(msg.X, msg.Y); idx >= 0 {
-			anchor := idx
-			m.selAnchor = &anchor
-			m.selEnd = idx
-		}
+		m.clickPane(msg.X, msg.Y)
 		return m, nil
 	}
 
@@ -550,12 +563,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // clearSelection drops the frozen selection highlight.
 func (m *tuiModel) clearSelection() { m.selAnchor = nil }
 
-func (m *tuiModel) titleHeight() int {
-	if m.cursorTarget() >= 0 {
-		return 1
-	}
-	return 0
-}
+// titleHeight is the pane's fixed header height, above the viewport.
+func (m *tuiModel) titleHeight() int { return m.headerRows() }
 
 // inPane reports whether a screen cell is inside the pane's viewport rows.
 func (m *tuiModel) inPane(x, y int) bool {
@@ -631,9 +640,9 @@ func (m *tuiModel) copySelection() {
 		return
 	}
 
-	raw := make([]string, 0, hi-lo+1)
-	for row := lo; row <= hi; row++ {
-		raw = append(raw, m.visibleRaw[m.paneRowRaw(row)])
+	raw := m.copyLines(lo, hi)
+	if len(raw) == 0 {
+		return
 	}
 	payload, n, truncated := copyPayload(raw)
 	if payload == "" {

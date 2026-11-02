@@ -236,6 +236,23 @@ type tuiModel struct {
 	// cellEvals counts the lines evaluated for the table, which the tests read.
 	cellEvals int
 
+	// visibleSeq and visibleObj mirror visible: each line's sequence number, which
+	// keys its expansion, and whether it is a JSON object.
+	visibleSeq []int
+	visibleObj []bool
+	nextSeq    int
+	// expanded is the set of sequence numbers shown pretty-printed.
+	expanded map[int]bool
+	// disp is the pane's rows once an expansion or filter is active: each shown
+	// line, then its expansion rows. dispText mirrors disp for paneLines.
+	disp      []dispRow
+	dispText  []string
+	dispDirty bool
+	// chips are the value filters clicked into the pane, ANDed with the v filter.
+	chips []pickChip
+	// edits are the unsaved column picks, one per schema or target node.
+	edits []colEdit
+
 	// tableFlip is c's raw/table flip for the current selection.
 	tableFlip bool
 
@@ -254,15 +271,14 @@ type tuiModel struct {
 	searchRow     int
 
 	// filter hides pane rows whose raw line does not match. A query starting
-	// with "." is a yq expression. paneSel indexes visible, paneView caches
-	// the flattened subset. filterErr is a yq parse error that suspends the
-	// filter; filterStash restores the committed filter when an edit is
-	// cancelled. filterOn reports which one is active.
+	// with "." is a yq expression. paneSel indexes the visible lines the
+	// filters keep. filterErr is a yq parse error that suspends the filter;
+	// filterStash restores the committed filter when an edit is cancelled.
+	// filterOn reports which one is active.
 	filter       string
 	filterErr    string
 	filterStash  string
 	paneSel      []int
-	paneView     []string
 	paneSelDirty bool
 
 	// prefixW is the pane prefix column: the longest target name, so every
@@ -322,6 +338,7 @@ func newTUI(targets []Target) *tuiModel {
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
 		visibleCells: []cellCache{},
+		expanded:     map[int]bool{},
 	}
 	m.vp = viewport.New(80, 20)
 
@@ -471,13 +488,18 @@ func (m *tuiModel) openTarget(i int) {
 // that target streams into it.
 func (m *tuiModel) addLine(i int, line string) {
 	t := m.targets[i]
-	m.merged = appendCapped(m.merged, mergedLine{target: i, name: t.spec.Name, text: line})
+	m.nextSeq++
+	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line)}
+	m.merged = appendCapped(m.merged, ml)
 	if m.streamsTo(i) {
-		m.visible = appendCapped(m.visible, m.prefixed(mergedLine{target: i, name: t.spec.Name, text: line}))
+		m.visible = appendCapped(m.visible, m.prefixed(ml))
 		m.visibleRaw = appendCapped(m.visibleRaw, line)
 		m.visibleIdx = appendCapped(m.visibleIdx, i)
 		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
-		if m.filterOn() {
+		m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
+		m.visibleObj = appendCapped(m.visibleObj, ml.obj)
+		m.dispDirty = true
+		if m.filterActive() {
 			m.paneSelDirty = true
 		}
 		if !m.follow {
@@ -691,6 +713,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	}
 
 	m.targets = rows
+	m.applyEdits()
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
 		m.solo = j
@@ -725,18 +748,18 @@ func eventTime(ev event, now time.Time) time.Time {
 	return ev.at
 }
 
-// paneLines is the merged stream, rebuilt when muting, soloing, or the filter
-// changed what belongs in it.
+// paneLines is the merged stream, rebuilt when muting, soloing, filtering, or
+// expanding changed what the pane shows.
 func (m *tuiModel) paneLines() []string {
 	m.ensurePane()
-	if !m.filterOn() {
+	if m.paneDirect() {
 		return m.visible
 	}
-	return m.paneView
+	return m.dispText
 }
 
-// ensurePane materializes visible and paneSel before a frame or a pointer
-// gesture reads them.
+// ensurePane materializes visible, paneSel and the display rows before a frame
+// or a pointer gesture reads them.
 func (m *tuiModel) ensurePane() {
 	if m.mergedDirty {
 		m.rebuildMerged()
@@ -744,47 +767,74 @@ func (m *tuiModel) ensurePane() {
 	if m.paneSelDirty {
 		m.rebuildPaneSel()
 	}
+	if m.dispDirty && !m.paneDirect() {
+		m.rebuildDisp()
+	}
 }
+
+// paneDirect reports whether the pane shows visible lines one to one. Filters
+// and expansions take the display-row path instead.
+func (m *tuiModel) paneDirect() bool { return !m.filterActive() && len(m.expanded) == 0 }
 
 // paneLen is how many rows the pane shows.
 func (m *tuiModel) paneLen() int {
 	m.ensurePane()
-	if !m.filterOn() {
+	if m.paneDirect() {
 		return len(m.visibleRaw)
 	}
-	return len(m.paneSel)
+	return len(m.disp)
 }
 
 // paneRowRaw maps a display row to its raw line's index in visibleRaw.
 func (m *tuiModel) paneRowRaw(row int) int {
 	m.ensurePane()
-	if !m.filterOn() {
+	if m.paneDirect() {
 		return row
 	}
-	return m.paneSel[row]
+	return m.disp[row].raw
 }
 
-// filterOn reports whether a filter is narrowing the pane. A query with a yq
-// parse error suspends the filter, so the pane stays live behind the error.
+// filterOn reports whether the v filter is narrowing the pane. A query with a
+// yq parse error suspends the filter, so the pane stays live behind the error.
 func (m *tuiModel) filterOn() bool { return m.filter != "" && m.filterErr == "" }
 
-// rebuildPaneSel re-derives the visible subset for the current filter. The
-// filter expression is parsed once here, never per line.
+// filterActive reports whether any filter, the v query or a chip, narrows the pane.
+func (m *tuiModel) filterActive() bool { return m.filterOn() || len(m.chips) > 0 }
+
+// rebuildPaneSel re-derives the visible subset for the current filters. The
+// filter expressions are parsed once here, never per line.
 func (m *tuiModel) rebuildPaneSel() {
 	m.paneSelDirty = false
-	if !m.filterOn() {
-		m.paneSel = nil
-		m.paneView = nil
+	m.dispDirty = true
+	m.paneSel = m.paneSel[:0]
+	if !m.filterActive() {
 		return
 	}
-	keep := m.filterFunc()
-	m.paneSel = m.paneSel[:0]
-	m.paneView = m.paneView[:0]
+	keep := m.lineKeeper()
 	for i := range m.visible {
 		if keep(m.visibleRaw[i]) {
 			m.paneSel = append(m.paneSel, i)
-			m.paneView = append(m.paneView, m.visible[i])
 		}
+	}
+}
+
+// lineKeeper is the per-line predicate for the v filter and every chip.
+func (m *tuiModel) lineKeeper() func(string) bool {
+	var query func(string) bool
+	if m.filterOn() {
+		query = m.filterFunc()
+	}
+	chips := m.chips
+	return func(line string) bool {
+		if query != nil && !query(line) {
+			return false
+		}
+		for _, c := range chips {
+			if !yqMatches(c.prog, line) {
+				return false
+			}
+		}
+		return true
 	}
 }
 
@@ -819,6 +869,9 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 	q := strings.ToLower(m.search)
 	n := m.paneLen()
 	for row := 0; row < n; row++ {
+		if m.rowInfo(row).sub >= 0 {
+			continue
+		}
 		if strings.Contains(strings.ToLower(m.visibleRaw[m.paneRowRaw(row)]), q) {
 			m.searchMatches = append(m.searchMatches, row)
 		}
@@ -923,6 +976,8 @@ type mergedLine struct {
 	target int
 	name   string
 	text   string
+	seq    int
+	obj    bool
 }
 
 func (m *tuiModel) prefixed(line mergedLine) string {
@@ -937,6 +992,8 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleRaw = m.visibleRaw[:0]
 	m.visibleIdx = m.visibleIdx[:0]
 	m.visibleCells = m.visibleCells[:0]
+	m.visibleSeq = m.visibleSeq[:0]
+	m.visibleObj = m.visibleObj[:0]
 	for _, line := range m.merged {
 		if !m.streamsTo(line.target) {
 			continue
@@ -945,9 +1002,12 @@ func (m *tuiModel) rebuildMerged() {
 		m.visibleRaw = appendCapped(m.visibleRaw, line.text)
 		m.visibleIdx = appendCapped(m.visibleIdx, line.target)
 		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
+		m.visibleSeq = appendCapped(m.visibleSeq, line.seq)
+		m.visibleObj = appendCapped(m.visibleObj, line.obj)
 	}
 	m.mergedDirty = false
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
+	m.dispDirty = true
 }
 
 // uptime renders a running target's age: 3s, 0m48s, 1m15s, 2h30m, 4d03h.

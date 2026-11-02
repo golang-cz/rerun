@@ -100,33 +100,46 @@ func (m *tuiModel) tableLines(lines []string) []string {
 
 	out := make([]string, len(lines))
 	for row := range lines {
-		raw := m.paneRowRaw(row)
-		c := m.visibleCells[raw]
-		if !c.evaluated() || c.raw {
+		r := m.rowInfo(row)
+		c := m.visibleCells[r.raw]
+		if r.sub >= 0 || !c.evaluated() || c.raw {
 			out[row] = lines[row]
 			continue
 		}
-		t := m.visibleTarget(raw)
+		t := m.visibleTarget(r.raw)
 		if t == nil {
 			out[row] = lines[row]
 			continue
 		}
-		var b strings.Builder
-		b.WriteString(padRight(t.spec.Name, m.prefixW))
-		b.WriteString("  ")
-		for i, v := range c.vals {
-			if i > 0 {
-				b.WriteString("  ")
-			}
-			w := 0
-			if i < len(widths) {
-				w = widths[i]
-			}
-			b.WriteString(padRight(v, w))
-		}
-		out[row] = truncate(strings.TrimRight(b.String(), " "), budget)
+		out[row], _ = tableRow(padRight(t.spec.Name, m.prefixW)+"  ", c.vals, widths, budget)
 	}
 	return out
+}
+
+// cellSpan is the cell range one table column occupies in a row, and its column index.
+type cellSpan struct{ x0, x1, col int }
+
+// tableRow lays cells out at widths after lead, two spaces apart, and reports
+// where each column sits. The row is cut to budget cells.
+func tableRow(lead string, cells []string, widths []int, budget int) (string, []cellSpan) {
+	var b strings.Builder
+	b.WriteString(lead)
+	x := displayWidth(lead)
+	spans := make([]cellSpan, 0, len(cells))
+	for i, v := range cells {
+		if i > 0 {
+			b.WriteString("  ")
+			x += 2
+		}
+		w := 0
+		if i < len(widths) {
+			w = widths[i]
+		}
+		b.WriteString(padRight(v, w))
+		spans = append(spans, cellSpan{x0: x, x1: x + w, col: i})
+		x += w
+	}
+	return truncate(strings.TrimRight(b.String(), " "), budget), spans
 }
 
 // evaluateCells parses every visible line that has no cached table form yet,
@@ -162,13 +175,16 @@ func (m *tuiModel) evaluateCell(raw int) cellCache {
 	return cellCache{vals: vals}
 }
 
-// tableWidths is the per-column width over the newest rows' cached cells. Each
-// contribution is capped at the row budget, so one huge cell cannot blow the
-// row or the frame.
+// tableWidths is the per-column width over the newest rows' cached cells and
+// the selection's column names, so a header always fits. Each contribution is
+// capped at the row budget, so one huge cell cannot blow the row or the frame.
 func (m *tuiModel) tableWidths() []int {
 	budget := m.tableBudget()
 	start := max(0, len(m.visibleCells)-tableWidthRows)
 	var widths []int
+	for _, c := range m.headerColumns() {
+		widths = append(widths, min(displayWidth(c.Name), budget))
+	}
 	for i := start; i < len(m.visibleCells); i++ {
 		c := m.visibleCells[i]
 		if !c.evaluated() || c.raw {

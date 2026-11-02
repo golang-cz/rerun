@@ -30,10 +30,10 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 		t.Fatal("a target with columns did not start in table mode")
 	}
 	lines := paneOf(m)[m.titleHeight():]
-	if got := strings.TrimRight(lines[0], " "); got != "web  GET     200" {
+	if got := dropMarker(lines[0]); got != "web  GET     200" {
 		t.Fatalf("row 0 = %q, want the padded table row", got)
 	}
-	if got := strings.TrimRight(lines[1], " "); got != "web  DELETE  500" {
+	if got := dropMarker(lines[1]); got != "web  DELETE  500" {
 		t.Fatalf("row 1 = %q, want the wider method column", got)
 	}
 
@@ -41,7 +41,7 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 	if m.tableOn() {
 		t.Fatal("c did not turn table mode off")
 	}
-	if got := strings.TrimRight(paneOf(m)[m.titleHeight()], " "); got != "web  "+jsonGet {
+	if got := dropMarker(paneOf(m)[m.titleHeight()]); got != "web  "+jsonGet {
 		t.Fatalf("raw row = %q, want the untouched JSON line", got)
 	}
 }
@@ -110,7 +110,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 
 	press(m, "c")
 	lines := paneOf(m)[m.titleHeight():]
-	if got := strings.TrimRight(lines[0], " "); got != "bad  "+jsonGet {
+	if got := dropMarker(lines[0]); got != "bad  "+jsonGet {
 		t.Fatalf("bad-expr row = %q, want raw text", got)
 	}
 	if got := strings.TrimRight(lines[1], " "); got != "bad  not json at all" {
@@ -195,4 +195,9 @@ func TestTableHintExpires(t *testing.T) {
 	if got := bottomPaneLine(m); strings.Contains(got, tableHint) {
 		t.Fatalf("the table hint outlived its window: %q", got)
 	}
+}
+
+// dropMarker is a JSON row without its (+) cell, which every JSON row carries.
+func dropMarker(row string) string {
+	return strings.TrimRight(strings.TrimSuffix(strings.TrimRight(row, " "), "(+)"), " ")
 }
