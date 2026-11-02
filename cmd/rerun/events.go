@@ -23,7 +23,7 @@ const (
 	evRunnerErr                   // rerun could not start a generation
 	evCleared                     // the screen clear the ad-hoc mode prints
 	evReconcile                   // a rerun.yml reload changed the target list
-	evNotice                      // rerun's own line: a config error, no target
+	evNotice                      // rerun's own line about the config; err is set when a reload failed
 	evLoop                        // a target looks like it is rewriting its own trigger file
 )
 

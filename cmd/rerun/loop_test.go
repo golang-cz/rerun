@@ -101,8 +101,8 @@ type modelSink struct{ m *tuiModel }
 
 func (s *modelSink) emit(ev event) { s.m.applyEvent(ev) }
 
-// The warning lands in the pane once, even across a 5th looping cycle.
-func TestLoopWarningLineAppearsOnce(t *testing.T) {
+// The warning goes to the footer, never the stream, even across a 5th looping cycle.
+func TestLoopWarningGoesToFooter(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	r := newTargetRunner(Target{Name: "web", Cmd: "true", Selected: true, Grace: rerun.DefaultGrace}, &modelSink{m: m})
 
@@ -111,13 +111,12 @@ func TestLoopWarningLineAppearsOnce(t *testing.T) {
 	}
 
 	want := "rerun: loop suspected — web restarted 4× in a row after gen.go changed; it may be writing it — add it to except"
-	var got int
-	for _, line := range m.merged {
-		if line.text == want {
-			got++
-		}
+	if m.notice != want || !m.noticeErr {
+		t.Fatalf("footer = %q (error %v), want the loop warning as an error", m.notice, m.noticeErr)
 	}
-	if got != 1 {
-		t.Fatalf("warning line appears %d times, want 1", got)
+	for _, line := range m.visibleRaw {
+		if line == want {
+			t.Fatalf("the loop warning reached the stream: %q", line)
+		}
 	}
 }

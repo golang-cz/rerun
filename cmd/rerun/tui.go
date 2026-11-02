@@ -229,8 +229,8 @@ type tuiModel struct {
 	// target's own text. len(visibleRaw) always equals len(visible).
 	visibleRaw []string
 
-	// visibleIdx mirrors visible with each line's target row, or -1 for rerun's
-	// own notice lines. len(visibleIdx) always equals len(visible).
+	// visibleIdx mirrors visible with each line's target row. len(visibleIdx)
+	// always equals len(visible).
 	visibleIdx []int
 
 	// visibleCells caches each visible line's table form, so a chatty stream
@@ -280,6 +280,10 @@ type tuiModel struct {
 	// tick expires it.
 	hint      string
 	hintUntil time.Time
+	// notice is the bottom-line message: info fades at noticeUntil, errors wait for a key.
+	notice      string
+	noticeErr   bool
+	noticeUntil time.Time
 
 	// lastClick and lastClickAt track the previous row click, so a second
 	// click within doubleClickWindow reads as a double-click.
@@ -495,7 +499,7 @@ func (m *tuiModel) openTarget(i int) {
 		return
 	}
 	if err := openURL(t.spec.URL); err != nil {
-		m.addLine(i, fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err))
+		m.showNotice(fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err), true)
 	}
 }
 
@@ -523,29 +527,30 @@ func (m *tuiModel) addLine(i int, line string) {
 	m.vpDirty = true
 }
 
-// addNotice appends one of rerun's own lines to the pane: a config banner, not
-// a target's output. The mute and solo filters never hide it.
-func (m *tuiModel) addNotice(line string) {
-	if line == "" {
+// showNotice puts rerun's own message on the bottom line; newest wins.
+func (m *tuiModel) showNotice(text string, isErr bool) {
+	if text == "" {
 		return
 	}
-	// A banner owns one pane row: past the width it would wrap and break the
-	// frame's grid.
-	if w := m.paneWidth(); w > 0 {
-		line = truncate(line, w)
+	m.notice = text
+	m.noticeErr = isErr
+	m.noticeUntil = time.Time{}
+	if !isErr {
+		m.noticeUntil = m.now.Add(noticeDuration)
 	}
-	m.merged = appendCapped(m.merged, mergedLine{target: -1, text: line})
-	m.visible = appendCapped(m.visible, line)
-	m.visibleRaw = appendCapped(m.visibleRaw, line)
-	m.visibleIdx = appendCapped(m.visibleIdx, -1)
-	m.visibleCells = appendCapped(m.visibleCells, cellCache{raw: true})
-	if m.filterOn() {
-		m.paneSelDirty = true
+}
+
+// noticeLive reports whether the bottom line should show the notice now.
+func (m *tuiModel) noticeLive() bool {
+	return m.notice != "" && (m.noticeErr || m.now.Before(m.noticeUntil))
+}
+
+// dismissErrorNotice clears an error on a key press; info fades on its timer.
+func (m *tuiModel) dismissErrorNotice() {
+	if m.noticeErr {
+		m.notice = ""
+		m.noticeErr = false
 	}
-	if !m.follow {
-		m.pending++
-	}
-	m.vpDirty = true
 }
 
 // paneWidth is the stream pane's width, or 0 before the first size message.
@@ -582,11 +587,11 @@ func (m *tuiModel) applyEvent(ev event) {
 		if ev.cfg != nil {
 			m.rebuildRows(ev.cfg)
 		}
-		m.addNotice(ev.line)
+		m.showNotice(ev.line, false)
 		return
 
 	case evNotice:
-		m.addNotice(ev.line)
+		m.showNotice(ev.line, ev.err != nil)
 		return
 	}
 
@@ -631,7 +636,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		if t.spec.Open && t.spec.URL != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
 			if err := openURL(t.spec.URL); err != nil {
-				m.addLine(i, fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err))
+				m.showNotice(fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err), true)
 			}
 		}
 
@@ -642,7 +647,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.unseen = true
 
 	case evWatcherErr:
-		m.addLine(i, fmt.Sprintf("watcher error: %v", ev.err))
+		m.showNotice(fmt.Sprintf("rerun: %s: watcher error: %v", t.spec.Name, ev.err), true)
 
 	case evRunnerErr:
 		// Nothing is running after a spawn failure, so the row leaves the
@@ -651,10 +656,10 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = -1
 		t.exitLabel = "exit error"
 		t.unseen = true
-		m.addLine(i, fmt.Sprintf("rerun: %v", ev.err))
+		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
-		m.addLine(i, fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except", t.spec.Name, loopCycles, ev.line))
+		m.showNotice(fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except", t.spec.Name, loopCycles, ev.line), true)
 
 	case evCleared:
 		// The TUI owns the screen; the clear bytes belong to the plain path.

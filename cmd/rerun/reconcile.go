@@ -127,7 +127,7 @@ func oneLine(s string) string {
 func (g *targetGroup) watchConfig(path string) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		g.sink.emit(event{kind: evNotice, line: configErrorLine(err)})
+		g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 		return
 	}
 	defer watcher.Close()
@@ -136,7 +136,7 @@ func (g *targetGroup) watchConfig(path string) {
 	// The directory, not the file: an editor that swaps the file in with a
 	// rename would otherwise leave the watch pointing at the old inode.
 	if err := watcher.Add(filepath.Dir(clean)); err != nil {
-		g.sink.emit(event{kind: evNotice, line: configErrorLine(err)})
+		g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 		return
 	}
 
@@ -182,7 +182,7 @@ func (g *targetGroup) watchConfig(path string) {
 			if !ok {
 				return
 			}
-			g.sink.emit(event{kind: evNotice, line: configErrorLine(err)})
+			g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 
 		case <-timeoutC:
 			g.reload(clean)
@@ -195,7 +195,7 @@ func (g *targetGroup) watchConfig(path string) {
 func (g *targetGroup) reload(path string) {
 	cfg, err := ParseConfig(path)
 	if err != nil {
-		g.sink.emit(event{kind: evNotice, line: configErrorLine(err)})
+		g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 		return
 	}
 	g.applyConfig(cfg.Targets)

@@ -1458,8 +1458,8 @@ func TestRunnerErrorLeavesRunningState(t *testing.T) {
 	if got := m.status(m.targets[0]); got != "exit error" {
 		t.Errorf("status = %q, want exit error", got)
 	}
-	if got := strings.Join(m.paneLines(), "\n"); !strings.Contains(got, "executable file not found") {
-		t.Errorf("the stream is missing the runner error:\n%s", got)
+	if !strings.Contains(m.notice, "executable file not found") || !m.noticeErr {
+		t.Errorf("the footer is missing the runner error: %q", m.notice)
 	}
 }
 

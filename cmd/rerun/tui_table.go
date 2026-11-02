@@ -188,7 +188,7 @@ func (t *tuiTarget) columns() ([]*yqlib.ExpressionNode, bool) {
 }
 
 // visibleTarget resolves a raw-line index to the target that produced it, or
-// nil for one of rerun's own notice lines.
+// nil when no target row owns it.
 func (m *tuiModel) visibleTarget(i int) *tuiTarget {
 	if i < 0 || i >= len(m.visibleIdx) {
 		return nil

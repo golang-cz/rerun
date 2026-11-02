@@ -10,6 +10,9 @@ import (
 // hintDuration is how long the ALL-row m/s hint stays in the bottom line.
 const hintDuration = 3 * time.Second
 
+// noticeDuration is how long an info notice stays; errors wait for a key press.
+const noticeDuration = 4 * time.Second
+
 // doubleClickWindow is how close two row clicks must be to stop/start the row.
 const doubleClickWindow = 400 * time.Millisecond
 
@@ -84,6 +87,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any key ends a frozen selection; copy feedback survives its 3s window.
 	m.clearSelection()
+	m.dismissErrorNotice()
 
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
 	// into the query instead of running their commands.

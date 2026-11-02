@@ -566,9 +566,9 @@ func (m *tuiModel) rightLines(w int) []string {
 			m.layout.marker = rect{x: m.layout.leftW + 1, y: titleH + m.vp.Height - 1, w: w, h: 1}
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		}
-		// One line, six claimants, in precedence order: an open bar, the copy
-		// hint, the new-lines marker (already drawn), the committed search
-		// counter, the filter count, then the m/s hint.
+		// One line, seven claimants, in precedence order: an open bar, the copy
+		// hint, a notice, the new-lines marker (already drawn), the committed
+		// search counter, the filter count, then the m/s hint.
 		switch {
 		case m.inputMode == inputSearch:
 			out[last] = m.bottomLine(w, m.searchStatus(true), "")
@@ -580,6 +580,9 @@ func (m *tuiModel) rightLines(w int) []string {
 			// The OSC 52 sequence rides the hint line, so the renderer writes it
 			// once and the terminal executes the copy.
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip))) + m.copySeq
+		case m.noticeLive():
+			// A notice outranks the marker: a hidden error reads as no error.
+			out[last] = m.bottomLine(w, m.notice, chip)
 		case markerShown:
 			// The marker owns the line and was drawn above.
 		case m.search != "":

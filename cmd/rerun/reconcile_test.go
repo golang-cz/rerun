@@ -343,8 +343,8 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 	if got := m.targets[2].state; got != stateOff {
 		t.Fatalf("the added row's state = %v, want off", got)
 	}
-	if got := strings.Join(m.paneLines(), "\n"); !strings.Contains(got, "config reloaded") {
-		t.Fatalf("the banner is missing from the pane:\n%s", got)
+	if !strings.Contains(m.notice, "config reloaded") {
+		t.Fatalf("the banner is missing from the footer: %q", m.notice)
 	}
 	// Retained output keeps its own target: api is soloed, so only it streams.
 	if got := strings.Join(m.paneLines(), "\n"); !strings.Contains(got, "api says hi") || strings.Contains(got, "web says hi") {
@@ -661,11 +661,10 @@ func TestReconcileBannerClampsToPaneWidth(t *testing.T) {
 		t.Fatalf("the fixture banner is %d cells, not past the pane width %d", displayWidth(line), w)
 	}
 
-	m.addNotice(line)
+	m.showNotice(line, false)
 
-	got := m.visibleRaw[len(m.visibleRaw)-1]
-	if w := m.paneWidth(); displayWidth(got) > w {
-		t.Fatalf("banner = %q (%d cells), want at most the pane width %d", got, displayWidth(got), w)
+	if got, w := bottomPaneLine(m), m.paneWidth(); displayWidth(got) > w {
+		t.Fatalf("footer = %q (%d cells), want at most the pane width %d", got, displayWidth(got), w)
 	}
 }
 
