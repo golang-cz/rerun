@@ -66,11 +66,12 @@ type drawerRow struct {
 	dim     bool
 }
 
-// recordFeed folds one change batch into the feed. A change within feedJoin of the
-// newest batch's first event joins it, so one save of one file is one line.
-func (m *tuiModel) recordFeed(target string, cs rerun.ChangeSet, at time.Time) {
+// recordFeed folds one change batch into the feed and returns the batch's id, or 0
+// for an empty batch. A change within feedJoin of the newest batch's first event
+// joins it, so one save of one file is one line.
+func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time) int {
 	if len(cs.Files) == 0 {
-		return
+		return 0
 	}
 	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin {
 		m.feedSeq++
@@ -81,10 +82,21 @@ func (m *tuiModel) recordFeed(target string, cs rerun.ChangeSet, at time.Time) {
 		key := m.feedPath(path)
 		b.files[key] = mergeOp(b.files[key], opGlyph(cs.Ops[path]))
 	}
-	if !slices.Contains(b.targets, target) {
-		b.targets = append(b.targets, target)
-	}
 	m.trimFeed()
+	return b.id
+}
+
+// feedRestart names a target in the batch its change restarted, once its spawn
+// lands, and flashes its row. A batch aged out of the feed names no one.
+func (m *tuiModel) feedRestart(t *tuiTarget, at time.Time) {
+	id := t.restartBatch
+	t.restartBatch = 0
+	t.flashUntil = at.Add(restartFlash)
+	for i := range m.feed {
+		if m.feed[i].id == id && !slices.Contains(m.feed[i].targets, t.spec.Name) {
+			m.feed[i].targets = append(m.feed[i].targets, t.spec.Name)
+		}
+	}
 }
 
 // recordConfigFeed lists a rerun.yml reload under the batch holding that file,

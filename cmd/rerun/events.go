@@ -46,6 +46,8 @@ type event struct {
 	// change is the whole batch behind evChanged, which the TUI keeps so the
 	// row can show the files it last reacted to.
 	change rerun.ChangeSet
+	// restarts is true when a spawn follows the batch, so the feed can name the target.
+	restarts bool
 	// cfg is the reconciled target list behind evReconcile.
 	cfg *configChange
 }

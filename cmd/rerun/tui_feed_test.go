@@ -20,7 +20,8 @@ const feedWidth = 60
 // way a test expects.
 func changeAt(m *tuiModel, name string, at time.Time, ops map[string]fsnotify.Op) {
 	m.now = at
-	m.applyEvent(event{kind: evChanged, target: name, count: len(ops), at: at, change: changeBatch(ops)})
+	m.applyEvent(event{kind: evChanged, target: name, count: len(ops), at: at, change: changeBatch(ops), restarts: true})
+	m.applyEvent(event{kind: evStarted, target: name, at: at})
 }
 
 // leftPane renders one frame and returns the left column as drawn, styling
@@ -59,10 +60,10 @@ func feedBatchY(m *tuiModel, n int) int {
 // the next one.
 func TestFeedJoinsChangesWithin150msOfTheBatchStart(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
-	changeAt(m, "api", ledgerClock.Add(100*time.Millisecond), map[string]fsnotify.Op{"b.go": fsnotify.Write})
-	changeAt(m, "worker", ledgerClock.Add(200*time.Millisecond), map[string]fsnotify.Op{"c.go": fsnotify.Write})
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	changeAt(m, "api", spawnClock.Add(100*time.Millisecond), map[string]fsnotify.Op{"b.go": fsnotify.Write})
+	changeAt(m, "worker", spawnClock.Add(200*time.Millisecond), map[string]fsnotify.Op{"c.go": fsnotify.Write})
 
 	if len(m.feed) != 2 {
 		t.Fatalf("batches = %d, want 2: the 200ms change starts its own", len(m.feed))
@@ -79,9 +80,9 @@ func TestFeedJoinsChangesWithin150msOfTheBatchStart(t *testing.T) {
 // the write that follows it.
 func TestFeedDedupesFilesAcrossTargets(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Create})
-	changeAt(m, "api", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write, "apps/b.go": fsnotify.Remove})
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Create})
+	changeAt(m, "api", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write, "apps/b.go": fsnotify.Remove})
 
 	if len(m.feed) != 1 {
 		t.Fatalf("batches = %d, want 1", len(m.feed))
@@ -100,12 +101,12 @@ func TestFeedConfigReloadJoinsItsBatchOrOpensOne(t *testing.T) {
 
 	m := newTestModel(t, target("web"))
 	m.group.configPath = cfg
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{
 		filepath.Join(root, "apps/a.go"): fsnotify.Write,
 		cfg:                              fsnotify.Write,
 	})
-	m.applyEvent(event{kind: evReconcile, at: ledgerClock.Add(150 * time.Millisecond), line: "reloaded"})
+	m.applyEvent(event{kind: evReconcile, at: spawnClock.Add(150 * time.Millisecond), line: "reloaded"})
 
 	if len(m.feed) != 1 {
 		t.Fatalf("batches = %d, want the reload to join the batch", len(m.feed))
@@ -119,9 +120,9 @@ func TestFeedConfigReloadJoinsItsBatchOrOpensOne(t *testing.T) {
 
 	n := newTestModel(t, target("web"))
 	n.group.configPath = cfg
-	n.now = ledgerClock
-	changeAt(n, "web", ledgerClock, map[string]fsnotify.Op{filepath.Join(root, "apps/a.go"): fsnotify.Write})
-	n.applyEvent(event{kind: evReconcile, at: ledgerClock.Add(time.Second), line: "reloaded"})
+	n.now = spawnClock
+	changeAt(n, "web", spawnClock, map[string]fsnotify.Op{filepath.Join(root, "apps/a.go"): fsnotify.Write})
+	n.applyEvent(event{kind: evReconcile, at: spawnClock.Add(time.Second), line: "reloaded"})
 
 	if len(n.feed) != 2 {
 		t.Fatalf("batches = %d, want the reload in its own batch", len(n.feed))
@@ -137,16 +138,16 @@ func TestFeedConfigReloadJoinsItsBatchOrOpensOne(t *testing.T) {
 // Batches older than a minute drop off; with none left the newest stays, dimmed.
 func TestFeedExpiresAfterAMinuteAndKeepsTheLatestDimmed(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	changeAt(m, "web", ledgerClock.Add(-2*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
-	changeAt(m, "web", ledgerClock.Add(-30*time.Second), map[string]fsnotify.Op{"new.go": fsnotify.Write})
-	m.now = ledgerClock
+	changeAt(m, "web", spawnClock.Add(-2*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
+	changeAt(m, "web", spawnClock.Add(-30*time.Second), map[string]fsnotify.Op{"new.go": fsnotify.Write})
+	m.now = spawnClock
 
 	batches, dim := m.feedVisible()
 	if dim || len(batches) != 1 || batches[0].files["new.go"] == 0 {
 		t.Fatalf("visible = %d batches (dim %v), want only new.go undimmed", len(batches), dim)
 	}
 
-	m.now = ledgerClock.Add(5 * time.Minute)
+	m.now = spawnClock.Add(5 * time.Minute)
 	rows := m.drawerRows()
 	if len(rows) != 2 || rows[1].kind != drawerBatch || !rows[1].dim {
 		t.Fatalf("drawer = %+v, want the header and the dimmed latest batch", rows)
@@ -159,13 +160,13 @@ func TestFeedExpiresAfterAMinuteAndKeepsTheLatestDimmed(t *testing.T) {
 // A line reads time, the first file with +N for the rest, and the targets it restarted.
 func TestFeedLineNamesFileCountAndTargets(t *testing.T) {
 	m := newTestModel(t, target("omsx-api"), target("backoffice"))
-	m.now = ledgerClock
-	changeAt(m, "omsx-api", ledgerClock, map[string]fsnotify.Op{
+	m.now = spawnClock
+	changeAt(m, "omsx-api", spawnClock, map[string]fsnotify.Op{
 		"apps/api/rpc/users.go": fsnotify.Write,
 		"apps/api/rpc/x.go":     fsnotify.Write,
 		"apps/api/rpc/y.go":     fsnotify.Write,
 	})
-	changeAt(m, "backoffice", ledgerClock, map[string]fsnotify.Op{"apps/api/rpc/users.go": fsnotify.Write})
+	changeAt(m, "backoffice", spawnClock, map[string]fsnotify.Op{"apps/api/rpc/users.go": fsnotify.Write})
 
 	got := drawerOf(m)
 	if want := "fs · last 1m"; !strings.HasPrefix(got[0], want) {
@@ -179,9 +180,9 @@ func TestFeedLineNamesFileCountAndTargets(t *testing.T) {
 // A narrow column cuts the targets with an ellipsis and keeps the path whole.
 func TestFeedLineTruncatesTargetsWithAnEllipsis(t *testing.T) {
 	m := newTestModel(t, target("omsx-api"), target("backoffice"), target("worker-one"), target("auth-api"))
-	m.now = ledgerClock
+	m.now = spawnClock
 	for _, name := range []string{"omsx-api", "backoffice", "worker-one", "auth-api"} {
-		changeAt(m, name, ledgerClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+		changeAt(m, name, spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	}
 
 	got := drawerAt(m, 30)
@@ -196,8 +197,8 @@ func TestFeedLineTruncatesTargetsWithAnEllipsis(t *testing.T) {
 // A directory with one changed file prints its full path; 2+ files get a header.
 func TestFeedFileListGroupsByDirectory(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{
 		"pkg/api/a.go": fsnotify.Create,
 		"pkg/api/b.go": fsnotify.Write,
 		"solo/one.go":  fsnotify.Remove,
@@ -226,8 +227,8 @@ func TestFeedFileListGroupsByDirectory(t *testing.T) {
 // A click on a batch line focuses the drawer and lists its files.
 func TestFeedClickOpensTheBatchFiles(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 
 	m.handleMouse(mouse(2, feedBatchY(m, 0), false))
 	if !m.drawerFocus || m.feedOpen == 0 {
@@ -247,13 +248,13 @@ func TestFeedClickOpensTheBatchFiles(t *testing.T) {
 // follows the cursor. Unfocused, they move the target cursor as before.
 func TestFeedScrollFollowsTheCursor(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.now = ledgerClock.Add(10 * time.Second)
+	m.now = spawnClock.Add(10 * time.Second)
 	for i := 0; i < 9; i++ {
-		changeAt(m, "web", ledgerClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{
+		changeAt(m, "web", spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{
 			fmt.Sprintf("f%d.go", i): fsnotify.Write,
 		})
 	}
-	m.now = ledgerClock.Add(10 * time.Second)
+	m.now = spawnClock.Add(10 * time.Second)
 
 	press(m, "j")
 	if m.cursor != 1 {
@@ -273,13 +274,13 @@ func TestFeedScrollFollowsTheCursor(t *testing.T) {
 // A restarted target's row is highlighted for about a second.
 func TestRestartFlashExpires(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 
 	web := m.targets[0]
-	if !web.flashing(ledgerClock.Add(500 * time.Millisecond)) {
+	if !web.flashing(spawnClock.Add(500 * time.Millisecond)) {
 		t.Fatalf("row not flashing 500ms after the restart")
 	}
-	if web.flashing(ledgerClock.Add(1500 * time.Millisecond)) {
+	if web.flashing(spawnClock.Add(1500 * time.Millisecond)) {
 		t.Fatalf("row still flashing 1.5s after the restart")
 	}
 }
@@ -287,8 +288,8 @@ func TestRestartFlashExpires(t *testing.T) {
 // t hides the drawer and drops its open list and focus; t again shows the feed.
 func TestFeedDrawerTogglesWithT(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.now = ledgerClock
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	press(m, "tab", "enter", "t")
 
 	m.View()
@@ -314,14 +315,33 @@ func TestFeedDrawerStaysHiddenUntilSomethingChanged(t *testing.T) {
 	}
 }
 
-// A stopped target's changes still feed the drawer.
-func TestStoppedTargetFeedsTheFeed(t *testing.T) {
+// A stopped target's changes still feed the drawer, but it restarted nothing,
+// so the batch names no target.
+func TestStoppedTargetFeedsTheFeedWithoutNamingItself(t *testing.T) {
 	m := newTestModel(t, Target{Name: "web", Cmd: "true", Selected: false, Grace: target("web").Grace})
-	m.now = ledgerClock
-	m.applyEvent(event{kind: evChanged, target: "web", count: 1, first: "a.go", at: ledgerClock, change: oneFile("a.go")})
+	m.now = spawnClock
+	m.applyEvent(event{kind: evChanged, target: "web", count: 1, first: "a.go", at: spawnClock, change: oneFile("a.go")})
 
-	if len(m.feed) != 1 || !reflect.DeepEqual(m.feed[0].targets, []string{"web"}) {
-		t.Fatalf("feed = %+v, want the stopped target's batch", m.feed)
+	if len(m.feed) != 1 || len(m.feed[0].targets) != 0 {
+		t.Fatalf("feed = %+v, want one batch naming no target", m.feed)
+	}
+}
+
+// A batch names only the targets that restarted for it, not the stopped one that
+// saw the same files.
+func TestFeedNamesOnlyTargetsThatRestarted(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.group.configPath = ""
+	m.now = spawnClock
+	m.targets[1].state = stateStopped
+	cs := oneFile("a.go")
+	m.applyEvent(event{kind: evChanged, target: "web", count: 1, first: "a.go", at: spawnClock, change: cs, restarts: true})
+	m.applyEvent(event{kind: evChanged, target: "api", count: 1, first: "a.go", at: spawnClock, change: cs})
+	m.applyEvent(event{kind: evStarted, target: "web", at: spawnClock})
+	m.applyEvent(event{kind: evStarted, target: "api", at: spawnClock})
+
+	if got, want := m.feed[0].targets, []string{"web"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("targets = %v, want %v", got, want)
 	}
 }
 
@@ -335,7 +355,7 @@ func TestListScrollKeepsTheCursorVisibleUnderATallDrawer(t *testing.T) {
 	m.height = 10
 	m.cursor = len(m.targets)
 	for i, d := range defs {
-		changeAt(m, d.Name, ledgerClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
+		changeAt(m, d.Name, spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
 	}
 	m.View()
 
@@ -362,7 +382,7 @@ func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 		m := newTestModel(t, target("web"), target("backoffice-webapp"))
 		m.width = width
 		m.cursor = 2
-		changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{
+		changeAt(m, "web", spawnClock, map[string]fsnotify.Op{
 			"apps/api/deep/types.gen.go": fsnotify.Write,
 			"apps/root.go":               fsnotify.Write,
 		})
@@ -390,7 +410,7 @@ func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 func TestVersionLineOwnsTheBottomRowUnderTheDrawer(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.height = 14
-	changeAt(m, "web", ledgerClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 	lines := leftPane(m)
 
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {

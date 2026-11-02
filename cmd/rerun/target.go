@@ -713,7 +713,7 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 	// A target the user stopped waits for space or r, not for files. The batch
 	// is still reported, so the row can say which files it did not use.
 	if r.userStopped() {
-		r.reportChange(changeSet)
+		r.reportChange(changeSet, false)
 		return
 	}
 
@@ -724,7 +724,7 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		return
 	}
 
-	r.reportChange(changeSet)
+	r.reportChange(changeSet, true)
 	r.detectLoop(changeSet)
 	r.spawn(ctx)
 }
@@ -787,16 +787,17 @@ func (r *targetRunner) trackFastCycle(changeSet rerun.ChangeSet) []string {
 	return shared
 }
 
-// reportChange tells the front-end which files changed, whether or not a spawn
+// reportChange tells the front-end which files changed, and whether a spawn
 // follows.
-func (r *targetRunner) reportChange(changeSet rerun.ChangeSet) {
+func (r *targetRunner) reportChange(changeSet rerun.ChangeSet, restarts bool) {
 	r.sink.emit(event{
-		kind:   evChanged,
-		target: r.target.Name,
-		count:  len(changeSet.Files),
-		first:  changeSet.FirstFile,
-		change: changeSet,
-		at:     time.Now(),
+		kind:     evChanged,
+		target:   r.target.Name,
+		count:    len(changeSet.Files),
+		first:    changeSet.FirstFile,
+		change:   changeSet,
+		restarts: restarts,
+		at:       time.Now(),
 	})
 }
 

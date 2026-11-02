@@ -220,18 +220,18 @@ func sevenFiles() rerun.ChangeSet {
 	return rerun.ChangeSet{FirstFile: "a.go", Files: files, Ops: ops}
 }
 
-// ledgerModel is three targets whose first row carries one seven-file spawn.
-func ledgerModel(t *testing.T) *tuiModel {
+// spawnModel is three targets whose first row carries one seven-file spawn.
+func spawnModel(t *testing.T) *tuiModel {
 	t.Helper()
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	spawnWithChange(m, "web", sevenFiles(), ledgerClock)
+	spawnWithChange(m, "web", sevenFiles(), spawnClock)
 	return m
 }
 
 // The target list is one line per target again, so every list line maps
 // straight to a row; the drawer under it resolves to the target of its entry.
 func TestListLinesMapScreenLinesToTargets(t *testing.T) {
-	m := ledgerModel(t)
+	m := spawnModel(t)
 	m.View()
 	if m.layout.offset != 0 {
 		t.Fatalf("offset = %d, want the list from the top", m.layout.offset)
@@ -262,7 +262,7 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 // The cursor row stays visible in the list area above the drawer, however tall
 // the drawer grew.
 func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
-	m := ledgerModel(t)
+	m := spawnModel(t)
 	m.cursor = 3 // worker, the last row
 	m.height = 4 // no room for a drawer at all
 	m.View()
@@ -282,7 +282,7 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	}
 	many := newTestModel(t, defs...)
 	for _, name := range names {
-		spawnWithChange(many, name, oneFile("a.go"), ledgerClock)
+		spawnWithChange(many, name, oneFile("a.go"), spawnClock)
 	}
 	many.cursor = len(many.targets)
 	many.height = 8

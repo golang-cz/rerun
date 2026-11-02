@@ -439,7 +439,7 @@ func (m *tuiModel) targetLine(i, leftW int) string {
 	return renderSegs(segs, style, leftW)
 }
 
-// opColor ties a ledger file glyph to the row palette: a created file is
+// opColor ties a feed file glyph to the row palette: a created file is
 // green, a removed one red, a written one yellow.
 func opColor(op string) string {
 	switch op {

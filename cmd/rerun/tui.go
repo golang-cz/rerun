@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -146,13 +145,9 @@ type tuiTarget struct {
 	// flashUntil ends the row highlight a restart leaves behind.
 	flashUntil time.Time
 
-	// pending is every change recorded since the last spawn: paths merged, the
-	// latest op winning. A spawn commits it to the ledger; a target the user
-	// stopped keeps it until a manual start.
-	pending map[string]byte
-	// ledger is the target's past spawns, newest first, each with the file
-	// changes that triggered it.
-	ledger []ledgerEntry
+	// restartBatch is the feed batch the last change restarted the target for,
+	// named once its spawn lands; 0 when no restart is in flight.
+	restartBatch int
 
 	// colSpec is the spec the cached column expressions were parsed from, so
 	// a spec swap reparses exactly once. colBad marks a spec whose expression
@@ -198,9 +193,6 @@ type tuiModel struct {
 	feedOpen    int
 	feedTop     int
 	drawerFocus bool
-
-	// ledgerSeq stamps every committed ledger entry with a unique id.
-	ledgerSeq int
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -456,6 +448,7 @@ func (m *tuiModel) showHint(text string) {
 
 func (m *tuiModel) stopTarget(i int) {
 	t := m.targets[i]
+	t.restartBatch = 0
 	t.state = stateStopped
 	t.exitLabel = ""
 	t.runner.control(ctrlStop)
@@ -463,6 +456,7 @@ func (m *tuiModel) stopTarget(i int) {
 
 func (m *tuiModel) startTarget(i int) {
 	t := m.targets[i]
+	t.restartBatch = 0
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.runner.control(ctrlStart)
@@ -470,6 +464,7 @@ func (m *tuiModel) startTarget(i int) {
 
 func (m *tuiModel) rebootTarget(i int) {
 	t := m.targets[i]
+	t.restartBatch = 0
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.exitLabel = ""
@@ -620,13 +615,13 @@ func (m *tuiModel) applyEvent(ev event) {
 		m.captureURL(t, ev.line)
 
 	case evChanged:
-		// Retain the whole batch: the row's reboot ledger records it and the
-		// pane header counts it. The batch writes no pane line of its own.
+		// The batch writes no pane line; the pane header and the feed show it.
 		at := eventTime(ev, m.now)
 		t.lastChange = ev.change
-		t.recordChange(ev.change)
-		m.recordFeed(ev.target, ev.change, at)
-		t.flashUntil = at.Add(restartFlash)
+		t.restartBatch = 0
+		if id := m.recordFeed(ev.change, at); ev.restarts {
+			t.restartBatch = id
+		}
 
 	case evStarting:
 		// Queued behind the start stagger: the glyph stays running but the
@@ -645,8 +640,9 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = -1
 		t.exitLabel = ""
 		t.backoffUntil = time.Time{}
-		m.ledgerSeq++
-		t.commitLedger(ev.at, m.ledgerSeq)
+		if t.restartBatch != 0 {
+			m.feedRestart(t, eventTime(ev, m.now))
+		}
 		if t.spec.Open && t.spec.URL != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
 			if err := openURL(t.spec.URL); err != nil {
@@ -667,6 +663,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		// Nothing is running after a spawn failure, so the row leaves the
 		// running state the way an exit does.
 		t.state = stateExited
+		t.restartBatch = 0
 		t.exitCode = -1
 		t.exitLabel = "exit error"
 		t.unseen = true
@@ -681,7 +678,7 @@ func (m *tuiModel) applyEvent(ev event) {
 }
 
 // rebuildRows adopts a reconciled target list. Rows are matched by name, so a
-// row keeps its stream, its mute, and its reboot ledger across a reload; only
+// row keeps its stream and its mute across a reload; only
 // a name that just appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
 	old := m.targets
@@ -752,71 +749,12 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.recomputeSearch(false)
 }
 
-// ledgerCap bounds a target's reboot ledger: the three newest spawns. The
-// drawer no longer reads it, but the row keeps it for the pointer and status.
-const ledgerCap = 3
-
 // eventTime is the event's own stamp, or the frame clock for one that carries none.
 func eventTime(ev event, now time.Time) time.Time {
 	if ev.at.IsZero() {
 		return now
 	}
 	return ev.at
-}
-
-// ledgerEntry is one spawn of a target and the file changes that triggered it.
-// Paths stay as the watcher reported them, so a moved watch root is relative
-// to the root in force when the entry renders.
-type ledgerEntry struct {
-	id    int // unique per committed entry, so expansion survives a rebuild
-	at    time.Time
-	files []changeFile
-}
-
-// changeFile is one file of a ledger entry: its path and its fsnotify op.
-// The op is `+` created, `~` written or renamed, `-` removed.
-type changeFile struct {
-	path string
-	op   byte
-}
-
-// pendingStopped reports whether a batch is recorded but no spawn will use it:
-// the target is stopped or booted off, so its changes wait for a manual start.
-func (t *tuiTarget) pendingStopped() bool {
-	return len(t.pending) > 0 && (t.state == stateStopped || t.state == stateOff)
-}
-
-// recordChange merges a change batch into the target's pending set, so a path
-// that changed twice keeps its latest op. The next spawn commits the set.
-func (t *tuiTarget) recordChange(cs rerun.ChangeSet) {
-	if len(cs.Files) == 0 {
-		return
-	}
-	if t.pending == nil {
-		t.pending = make(map[string]byte, len(cs.Files))
-	}
-	for path := range cs.Files {
-		t.pending[path] = opGlyph(cs.Ops[path])
-	}
-}
-
-// commitLedger files the pending batch as the newest ledger entry, stamped with
-// the spawn time. A spawn with nothing recorded commits nothing, which is what
-// a manual start after no change looks like.
-func (t *tuiTarget) commitLedger(at time.Time, id int) {
-	if len(t.pending) == 0 {
-		return
-	}
-	files := make([]changeFile, 0, len(t.pending))
-	for path, op := range t.pending {
-		files = append(files, changeFile{path: path, op: op})
-	}
-	sort.Slice(files, func(a, b int) bool { return files[a].path < files[b].path })
-	t.pending = nil
-	t.ledger = append([]ledgerEntry{{id: id, at: at, files: files}}, t.ledger...)
-	if len(t.ledger) > ledgerCap {
-		t.ledger = t.ledger[:ledgerCap]
-	}
 }
 
 // paneLines is the merged stream, rebuilt when muting, soloing, or the filter
