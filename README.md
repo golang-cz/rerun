@@ -30,7 +30,7 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` scroll it when focused, `home`/`end` jump to its top-left or
 live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
-toggle the fs drawer under the list, `m` mute a stream, `s` or `enter`
+toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream, `s` or `enter`
 solo (`esc` clears), `o` open the url, `G` resume the live tail, `p` browse the
 scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
@@ -38,7 +38,7 @@ scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 table for targets that define `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
-button cell to mute, a folder in the fs drawer to expand it,
+button cell to mute, a batch in the fs drawer to list its files,
 shift-click to solo, and a click on the ALL row to clear
 solo. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
@@ -47,13 +47,16 @@ stream; soloing narrows it to one target, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
 last change batch held, and its command, with its url linked. The fs drawer
-at the bottom of the left column is a change tree of the folders rerun.yml
-watches: one line per root, with the recursive count of changed files beneath
-it; clicking a folder folds out its sub-folders and files, one `+`/`~`/`−`
-glyph (created, written, removed) and relative age each.
-`t` toggles the drawer, which grows on demand and never takes more than eight
-lines. A target the user stopped or booted off still feeds the tree, like any
-other change.
+at the bottom of the left column is a feed of recent change batches, newest
+first. A batch is every change within 150ms of its first event, so one save
+across several targets is one line: `15:04:05  path +N  → targets`. The path is
+the first changed file relative to the rerun.yml dir, `+N` counts the rest, and
+the arrow names the targets it restarted (`config` for a rerun.yml reload). The
+feed keeps batches for a minute and dims the newest when all have aged out.
+`tab` focuses the drawer: `j/k` move through the batches, `enter` (or a click)
+lists a batch's files with `+`/`~`/`−` glyphs, `esc` closes the list. A target
+whose row a batch restarted lights up for a second. `t` toggles the drawer,
+which grows on demand and never takes more than seven lines.
 
 #### Examples:
 ```bash

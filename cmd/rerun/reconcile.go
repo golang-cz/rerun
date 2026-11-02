@@ -285,6 +285,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 	line := reconcileSummary(actions)
 	g.sink.emit(event{
 		kind: evReconcile,
+		at:   time.Now(),
 		line: line,
 		cfg: &configChange{
 			targets: fresh,

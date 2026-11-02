@@ -143,6 +143,8 @@ type tuiTarget struct {
 	// lastChange is the newest change batch the target reacted to, which the
 	// pane's title line counts.
 	lastChange rerun.ChangeSet
+	// flashUntil ends the row highlight a restart leaves behind.
+	flashUntil time.Time
 
 	// pending is every change recorded since the last spawn: paths merged, the
 	// latest op winning. A spawn commits it to the ledger; a target the user
@@ -187,14 +189,17 @@ type tuiModel struct {
 	// expansion.
 	drawerOpen bool
 
-	// treeFiles is the drawer's only source: every changed path across all
-	// targets, newest op winning, with the change time the tree sorts and ages
-	// by. treeExpanded holds the folded-out folders, keyed by folder path.
-	treeFiles    map[string]treeFile
-	treeExpanded map[string]bool
+	// feed is the drawer's change batches, oldest first. feedOpen names the batch
+	// whose file list is open (0 for none), feedCursor the batch j/k select, and
+	// feedTop the first body line the drawer shows.
+	feed        []feedBatch
+	feedSeq     int
+	feedCursor  int
+	feedOpen    int
+	feedTop     int
+	drawerFocus bool
 
-	// ledgerSeq stamps every committed ledger entry with a unique id. The
-	// ledger outlives the entry rendering; the drawer reads the tree instead.
+	// ledgerSeq stamps every committed ledger entry with a unique id.
 	ledgerSeq int
 
 	// version and buildTime are the ldflags stamp, rendered on the left
@@ -307,21 +312,19 @@ func newTUI(targets []Target) *tuiModel {
 	group := newTargetGroup(targets, tuiSink(events), "")
 
 	m := &tuiModel{
-		group:        group,
-		events:       events,
-		stop:         make(chan struct{}),
-		version:      version,
-		buildTime:    buildTime,
-		solo:         -1,
-		follow:       true,
-		drawerOpen:   true,
-		treeFiles:    map[string]treeFile{},
-		treeExpanded: map[string]bool{},
-		now:          time.Now(),
-		lastClick:    -1,
-		hover:        -1,
-		searchRow:    -1,
-		styles:       newTUIStyles(),
+		group:      group,
+		events:     events,
+		stop:       make(chan struct{}),
+		version:    version,
+		buildTime:  buildTime,
+		solo:       -1,
+		follow:     true,
+		drawerOpen: true,
+		now:        time.Now(),
+		lastClick:  -1,
+		hover:      -1,
+		searchRow:  -1,
+		styles:     newTUIStyles(),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
@@ -431,8 +434,16 @@ func (m *tuiModel) refreshUnseen() {
 	}
 }
 
-// toggleDrawer shows or hides the fs drawer under the target list.
-func (m *tuiModel) toggleDrawer() { m.drawerOpen = !m.drawerOpen }
+// toggleDrawer shows or hides the fs drawer under the target list, closing any
+// open file list and dropping its focus when it hides.
+func (m *tuiModel) toggleDrawer() {
+	m.drawerOpen = !m.drawerOpen
+	if !m.drawerOpen {
+		m.drawerFocus = false
+		m.feedOpen = 0
+		m.feedTop = 0
+	}
+}
 
 // showTargetHint flags that m/s need a row, not the ALL rollup.
 func (m *tuiModel) showTargetHint() { m.showHint(allRowHint) }
@@ -587,6 +598,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		if ev.cfg != nil {
 			m.rebuildRows(ev.cfg)
 		}
+		m.recordConfigFeed(eventTime(ev, m.now))
 		m.showNotice(ev.line, false)
 		return
 
@@ -610,9 +622,11 @@ func (m *tuiModel) applyEvent(ev event) {
 	case evChanged:
 		// Retain the whole batch: the row's reboot ledger records it and the
 		// pane header counts it. The batch writes no pane line of its own.
+		at := eventTime(ev, m.now)
 		t.lastChange = ev.change
 		t.recordChange(ev.change)
-		m.recordTree(ev.change)
+		m.recordFeed(ev.target, ev.change, at)
+		t.flashUntil = at.Add(restartFlash)
 
 	case evStarting:
 		// Queued behind the start stagger: the glyph stays running but the
@@ -742,39 +756,12 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 // drawer no longer reads it, but the row keeps it for the pointer and status.
 const ledgerCap = 3
 
-// treeCap bounds the drawer's change tree: 200 changed paths. Past the cap the
-// oldest entries are dropped, so the drawer keeps the newest activity.
-const treeCap = 200
-
-// treeFile is one path in the drawer's change tree: when it last changed and
-// its fsnotify op, `+` created, `~` written or renamed, `-` removed.
-type treeFile struct {
-	at time.Time
-	op byte
-}
-
-// recordTree merges a change batch into the drawer's global tree: every target
-// feeds the same map, so the drawer is one view of the whole repo. A repeated
-// path keeps its newest time and op; the oldest paths fall out past the cap.
-func (m *tuiModel) recordTree(cs rerun.ChangeSet) {
-	if len(cs.Files) == 0 {
-		return
+// eventTime is the event's own stamp, or the frame clock for one that carries none.
+func eventTime(ev event, now time.Time) time.Time {
+	if ev.at.IsZero() {
+		return now
 	}
-	if m.treeFiles == nil {
-		m.treeFiles = make(map[string]treeFile, len(cs.Files))
-	}
-	for path := range cs.Files {
-		m.treeFiles[cleanTreePath(path)] = treeFile{at: m.now, op: opGlyph(cs.Ops[path])}
-	}
-	for len(m.treeFiles) > treeCap {
-		oldest, oldestAt := "", time.Time{}
-		for path, f := range m.treeFiles {
-			if oldest == "" || f.at.Before(oldestAt) {
-				oldest, oldestAt = path, f.at
-			}
-		}
-		delete(m.treeFiles, oldest)
-	}
+	return ev.at
 }
 
 // ledgerEntry is one spawn of a target and the file changes that triggered it.

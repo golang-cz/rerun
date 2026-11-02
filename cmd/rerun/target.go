@@ -796,6 +796,7 @@ func (r *targetRunner) reportChange(changeSet rerun.ChangeSet) {
 		count:  len(changeSet.Files),
 		first:  changeSet.FirstFile,
 		change: changeSet,
+		at:     time.Now(),
 	})
 }
 

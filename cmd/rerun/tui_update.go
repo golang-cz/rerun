@@ -144,6 +144,13 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "esc":
 		switch {
+		case m.drawerFocus:
+			if m.feedOpened() != nil {
+				m.feedOpen = 0
+				m.feedTop = 0
+			} else {
+				m.drawerFocus = false
+			}
 		case m.paneFocus:
 			m.paneFocus = false
 		case m.search != "":
@@ -155,24 +162,43 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "up":
-		if m.paneFocus {
+		switch {
+		case m.paneFocus:
 			m.scrollUp(1)
-		} else {
+		case m.drawerFocus:
+			m.moveDrawer(-1)
+		default:
 			m.moveCursor(-1)
 		}
 
 	case "down":
-		if m.paneFocus {
+		switch {
+		case m.paneFocus:
 			m.scrollDown(1)
-		} else {
+		case m.drawerFocus:
+			m.moveDrawer(1)
+		default:
 			m.moveCursor(1)
 		}
 
 	case "k":
-		m.moveCursor(-1)
+		if m.drawerFocus {
+			m.moveDrawer(-1)
+		} else {
+			m.moveCursor(-1)
+		}
 
 	case "j":
-		m.moveCursor(1)
+		if m.drawerFocus {
+			m.moveDrawer(1)
+		} else {
+			m.moveCursor(1)
+		}
+
+	case "tab":
+		if m.drawerOpen && len(m.feed) > 0 {
+			m.setDrawerFocus(!m.drawerFocus)
+		}
 
 	case "left":
 		if m.paneFocus {
@@ -187,6 +213,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "right":
 		if !m.paneFocus {
 			m.paneFocus = true
+			m.drawerFocus = false
 		} else {
 			m.paneCol++
 			m.vpDirty = true
@@ -213,9 +240,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "enter":
-		if m.cursor == 0 {
+		switch {
+		case m.drawerFocus:
+			m.openCursorBatch()
+		case m.cursor == 0:
 			m.clearSolo()
-		} else {
+		default:
 			m.toggleSolo(m.cursor - 1)
 		}
 
@@ -496,16 +526,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.clearSelection()
 
-	// The drawer is a change tree, not a target list: a folder line folds its
-	// children in or out, a file line does nothing. It never solos a target.
+	// The drawer never solos a target: a click focuses it and opens a batch's files.
 	if msg.X < m.layout.leftW {
 		if drow, inDrawer := m.inDrawer(msg.Y); inDrawer {
-			if drow.kind == drawerFolder {
-				m.toggleTreeFolder(drow.path)
-			}
+			m.clickDrawer(drow)
 			return m, nil
 		}
 	}
+	m.drawerFocus = false
 
 	row := m.rowAt(msg.X, msg.Y)
 	if row < 0 {

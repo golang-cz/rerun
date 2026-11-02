@@ -71,6 +71,12 @@ the cursor row's command, with its url linked. Mouse: click a row to solo it,
 double-click to stop/start like `space`, the button cell to mute, shift-click
 to solo, and a click on the ALL row to clear solo.
 
+The fs drawer under the list is a change feed: one line per batch of changes
+(events within 150ms of each other), with the first changed file, `+N` for the
+rest, and the targets the batch restarted. `tab` focuses it, `j/k` move, `enter`
+lists a batch's files, `esc` closes. A rerun.yml reload shows as the `config`
+target. Batches older than a minute drop off.
+
 ## Building rerun.yml
 
 Flat top-level map, one entry per target (Makefile-like). `cmd` is required;

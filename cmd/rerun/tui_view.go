@@ -64,6 +64,7 @@ type seg struct {
 	text  string
 	color string
 	link  string
+	faint bool
 }
 
 // rect is a cell area on screen, used for mouse hit testing.
@@ -335,81 +336,67 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	return m.targetLine(idx-1, leftW)
 }
 
-// drawerLine draws one line of the fs drawer: its `fs ·────` separator, a
-// folder with its recursive changed-file count and age, or a file with its op
-// and age. The count and age share a right-aligned column, the reboot arrow
-// after it.
+// drawerLine draws one line of the fs drawer: its header, a feed batch, or a
+// file list's directory and file lines.
 func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
+	base := m.styles.base
+	if row.dim {
+		base = m.styles.muted
+	}
 	switch row.kind {
 	case drawerSep:
-		label := truncate("fs ·", leftW)
-		if gap := leftW - displayWidth(label); gap > 0 {
-			return m.styles.divider.Render(label + strings.Repeat("─", gap))
-		}
-		return m.styles.divider.Render(label)
+		label := truncate(row.label+" ", leftW)
+		return m.styles.divider.Render(label + strings.Repeat("─", max(0, leftW-displayWidth(label))))
 
-	case drawerFolder:
-		segs := []seg{
-			{text: treeIndent(row.depth)},
-			{text: row.glyph, color: colorGray},
-			{text: " " + row.label},
-		}
-		suffix := fmt.Sprintf("%d · %s", row.count, relAge(m.now.Sub(row.at)))
-		return m.treeCell(segs, suffix, targetArrow(row.targets), leftW)
+	case drawerBatch:
+		return batchLine(row, leftW, base)
+
+	case drawerDir:
+		return renderSegs([]seg{{text: row.label}}, m.styles.all, leftW)
 
 	case drawerFile:
 		segs := []seg{
-			{text: treeIndent(row.depth)},
-			{text: row.op, color: opColor(row.op)},
+			{text: strings.Repeat(" ", row.indent)},
+			{text: row.glyph, color: opColor(row.glyph)},
 			{text: " " + row.label},
 		}
-		return m.treeCell(segs, relAge(m.now.Sub(row.at)), targetArrow(row.targets), leftW)
+		return renderSegs(segs, base, leftW)
 	}
 	return strings.Repeat(" ", leftW)
 }
 
-// targetArrow is the drawer line's reboot suffix: the target names, space
-// separated, led by the arrow. No target draws nothing.
-func targetArrow(names []string) string {
-	if len(names) == 0 {
+// batchLine draws a feed batch as `15:04:05  path +N  → targets`. The path keeps
+// its room; the targets truncate with an ellipsis to fit what is left.
+func batchLine(row drawerRow, leftW int, base lipgloss.Style) string {
+	stamp := row.at.Format("15:04:05")
+	avail := leftW - displayWidth(stamp) - 2
+	path := row.label
+	if row.extra > 0 {
+		path += fmt.Sprintf(" +%d", row.extra)
+	}
+	arrow := ""
+	if len(row.targets) > 0 {
+		arrow = "  → " + strings.Join(row.targets, ", ")
+	}
+	path = ellipsize(path, avail)
+	arrow = ellipsize(arrow, avail-displayWidth(path))
+	return renderSegs([]seg{
+		{text: stamp, faint: true},
+		{text: "  "},
+		{text: path},
+		{text: arrow, color: colorGray},
+	}, base, leftW)
+}
+
+// ellipsize cuts s to w cells, ending a cut string with an ellipsis.
+func ellipsize(s string, w int) string {
+	if w <= 0 {
 		return ""
 	}
-	return "→ " + strings.Join(names, " ")
-}
-
-// treeIndent is a folder or file line's left margin: a root sits at column 0,
-// one cell per level below it.
-func treeIndent(depth int) string {
-	return strings.Repeat(" ", depth)
-}
-
-// treeSuffixW is the drawer's smallest right column: the recursive count and
-// age on a folder line, the age on a file line. A longer suffix widens its own
-// line rather than truncating the number.
-const treeSuffixW = 6
-
-// treeCell right-aligns a suffix in the drawer's count and age column, padding
-// the label out to it, with the arrow appended after. A column narrower than
-// the label truncates the label, the line renderer the arrow's tail.
-func (m *tuiModel) treeCell(segs []seg, suffix, arrow string, leftW int) string {
-	labelW := 0
-	for _, s := range segs {
-		labelW += displayWidth(s.text)
+	if displayWidth(s) <= w {
+		return s
 	}
-	colW := max(treeSuffixW, displayWidth(suffix))
-	tail := ""
-	if arrow != "" {
-		tail = " " + arrow
-	}
-	fill := max(0, leftW-colW-labelW-displayWidth(tail))
-	pad := max(0, colW-displayWidth(suffix))
-	segs = append(segs, seg{text: strings.Repeat(" ", fill)})
-	segs = append(segs, seg{text: strings.Repeat(" ", pad)})
-	segs = append(segs, seg{text: suffix, color: colorGray})
-	if tail != "" {
-		segs = append(segs, seg{text: tail, color: colorGray})
-	}
-	return renderSegs(segs, m.styles.base, leftW)
+	return truncate(s, w-1) + "…"
 }
 
 // allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
@@ -445,7 +432,11 @@ func (m *tuiModel) targetLine(i, leftW int) string {
 		{text: " "},
 		{text: btn, color: btnColor},
 	}
-	return renderSegs(segs, m.rowStyle(i+1), leftW)
+	style := m.rowStyle(i + 1)
+	if t.flashing(m.now) {
+		style = style.Reverse(true)
+	}
+	return renderSegs(segs, style, leftW)
 }
 
 // opColor ties a ledger file glyph to the row palette: a created file is
@@ -507,6 +498,9 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 		style := base
 		if s.color != "" {
 			style = style.Foreground(lipgloss.Color(s.color))
+		}
+		if s.faint {
+			style = style.Faint(true)
 		}
 		text := truncate(s.text, width-cells)
 		if text == "" {
@@ -691,23 +685,6 @@ func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
 }
 
-// relAge renders a drawer entry's age as one word: 12s, 3m, 1h, 4d. The
-// uptime ladder without the finer units; a future stamp reads as 0s.
-func relAge(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours())/24)
-}
-
 // fileCount renders `1 file` or `3 files`.
 func fileCount(n int) string {
 	if n == 1 {
@@ -815,7 +792,8 @@ var helpKeys = [][2]string{
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (ALL row: every target)"},
 	{"r", "reboot (grace applies; ALL row: every selected target)"},
-	{"t", "toggle the fs drawer (a change tree; click a folder to expand)"},
+	{"t", "toggle the fs drawer (the change feed)"},
+	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (M)"},
 	{"s enter", "solo the target's stream (S; again or esc to clear)"},
 	{"esc", "clear search, then filter, then solo"},
@@ -839,14 +817,14 @@ func (m *tuiModel) helpView() string {
 	b.WriteString("\n")
 	for _, line := range []string{
 		"mouse: click a row to solo it (again or on ALL to clear), click a",
-		"drawer folder to expand it, double-click to stop/start like space,",
+		"drawer batch to list its files, double-click to stop/start like space,",
 		"click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and pauses the tail",
 		"(p, G, or ↓ N new resume). shift-drag uses the terminal selection.",
 		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
 		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"the fs drawer at the bottom of the left column is a change tree of the",
-		"folders rerun.yml watches, with the changed files and their ages; t",
+		"the fs drawer at the bottom of the left column is a feed of the change",
+		"batches of the last minute, each naming the targets it restarted; t",
 		"toggles it, and it never takes more than half the column.",
 		"a filter starting with . runs a yq expression per JSON line.",
 		"saving rerun.yml reloads it: the banner names what changed.",
