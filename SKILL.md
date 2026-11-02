@@ -63,13 +63,14 @@ merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the full key list.
 
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
-`s` or `enter` solo a target's stream (`esc` or a second press clears), `o` open
-the url, `G` live output. The right pane is always the merged stream; soloing
+`s` or `enter` solo a target's stream or select a schema's targets (`esc` or a
+second press clears). On a schema header, `space`, `r`, and `m` act on its
+targets. `o` open the url, `G` live output. The right pane is always the merged stream; soloing
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to solo it,
 double-click to stop/start like `space`, the button cell to mute, shift-click
-to solo, and a click on the ALL row to clear solo.
+to solo, and a click on a schema header to select its targets.
 
 The fs drawer under the list is a change feed: one line per batch of changes
 (events within 150ms of each other), with the first changed file, `+N` for the

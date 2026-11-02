@@ -157,9 +157,14 @@ func overlayCenter(frame, box string, width, height int) string {
 
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
-	nameW := 4 // "ALL" plus the badge
+	nameW := 4 // the floor keeps the badge and status readable for short names
 	for _, t := range m.targets {
-		nameW = max(nameW, displayWidth(t.spec.Name))
+		w := displayWidth(t.spec.Name)
+		if t.spec.Schema != "" {
+			w += 2 // a member's name sits under its schema header's indent
+			nameW = max(nameW, displayWidth(t.spec.Schema))
+		}
+		nameW = max(nameW, w)
 	}
 	leftW = nameW + statusW + 5
 	if limit := max(8, m.width/2); leftW > limit {
@@ -183,9 +188,8 @@ func badge(unseen bool) string {
 	return " "
 }
 
-// listLen is how many screen lines the target list holds: the ALL rollup and
-// one line per target. The fs drawer hangs below it.
-func (m *tuiModel) listLen() int { return len(m.targets) + 1 }
+// listLen counts the list's screen lines: schema headers and targets.
+func (m *tuiModel) listLen() int { return len(m.listRows()) }
 
 // listHeight is how many screen rows the target list has: everything above the
 // drawer, which itself sits above a blank divider and the version line.
@@ -326,14 +330,14 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	if row, ok := m.inDrawer(y); ok {
 		return m.drawerLine(row, leftW)
 	}
-	idx := m.layout.offset + y
-	if idx < 0 || idx >= m.listLen() {
+	r, ok := m.listRowAt(m.layout.offset + y)
+	if !ok {
 		return strings.Repeat(" ", leftW)
 	}
-	if idx == 0 {
-		return m.allLine(leftW)
+	if r.header {
+		return m.schemaLine(m.layout.offset+y, r, leftW)
 	}
-	return m.targetLine(idx-1, leftW)
+	return m.targetLine(m.layout.offset+y, r, leftW)
 }
 
 // drawerLine draws one line of the fs drawer: its header, a feed batch, or a
@@ -399,22 +403,10 @@ func ellipsize(s string, w int) string {
 	return truncate(s, w-1) + "…"
 }
 
-// allLine is the rollup row: `3● 1✓ 1✗`, with a badge for unseen output.
-func (m *tuiModel) allLine(leftW int) string {
-	segs := []seg{
-		{text: " "},
-		{text: " "},
-		{text: padRight("ALL", nameWidth(leftW))},
-		{text: badge(m.anyUnseen())},
-	}
-	segs = append(segs, m.rollupSegs()...)
-	return renderSegs(segs, m.rowStyle(0), leftW)
-}
+func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
+	t := m.targets[r.target]
 
-func (m *tuiModel) targetLine(i, leftW int) string {
-	t := m.targets[i]
-
-	btn := m.button(i)
+	btn := m.button(r.target)
 	btnColor := ""
 	switch btn {
 	case "M":
@@ -423,16 +415,22 @@ func (m *tuiModel) targetLine(i, leftW int) string {
 		btnColor = colorSolo
 	}
 
-	segs := []seg{
-		{text: t.glyph(), color: stateColor(t)},
-		{text: " "},
-		{text: padRight(t.spec.Name, nameWidth(leftW)), link: t.spec.URL},
-		{text: badge(t.unseen)},
-		{text: padRight(m.status(t), statusW), color: statusColor(t)},
-		{text: " "},
-		{text: btn, color: btnColor},
+	name := nameWidth(leftW)
+	var segs []seg
+	if r.indent {
+		segs = append(segs, seg{text: "  "})
+		name = max(0, name-2)
 	}
-	style := m.rowStyle(i + 1)
+	segs = append(segs,
+		seg{text: t.glyph(), color: stateColor(t)},
+		seg{text: " "},
+		seg{text: padRight(t.spec.Name, name), link: t.spec.URL},
+		seg{text: badge(t.unseen)},
+		seg{text: padRight(m.status(t), statusW), color: statusColor(t)},
+		seg{text: " "},
+		seg{text: btn, color: btnColor},
+	)
+	style := m.rowStyle(row, r)
 	if t.flashing(m.now) {
 		style = style.Reverse(true)
 	}
@@ -451,15 +449,19 @@ func opColor(op string) string {
 	return colorYellow
 }
 
-func (m *tuiModel) rowStyle(row int) lipgloss.Style {
+func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 	switch {
 	case row == m.cursor:
 		return m.styles.cursor
 	case row == m.hover:
 		return m.styles.hover
-	case row > 0 && m.targets[row-1].muted:
+	case r.header && m.schemaSel == r.schema:
+		return m.styles.solo
+	case r.header:
+		return m.styles.base
+	case m.targets[r.target].muted:
 		return m.styles.muted
-	case row > 0 && m.solo == row-1:
+	case m.solo == r.target:
 		return m.styles.solo
 	}
 	return m.styles.base
@@ -520,11 +522,11 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 
 // rightLines is the stream pane, exactly m.height lines tall. The cursor row
 // owns a title line at the top; the bottom line carries the new-lines marker,
-// else the ALL-row hint.
+// else a hint.
 func (m *tuiModel) rightLines(w int) []string {
 	titleH := 0
 	var title string
-	if m.cursor > 0 {
+	if m.cursorTarget() >= 0 {
 		title = m.titleLine(w)
 		titleH = 1
 	}
@@ -667,6 +669,9 @@ func (m *tuiModel) stateChip() string {
 	if m.solo >= 0 {
 		parts = append(parts, "solo "+m.targets[m.solo].spec.Name)
 	}
+	if m.schemaSel != "" {
+		parts = append(parts, "schema "+m.schemaSel)
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -698,7 +703,7 @@ func fileCount(n int) string {
 // uptime whenever the row is not running; an exited row leads with its exit
 // glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
-	t := m.targets[m.cursor-1]
+	t := m.targets[m.cursorTarget()]
 
 	segs := make([]seg, 0, 5)
 	if t.state == stateExited {
@@ -767,6 +772,9 @@ func (m *tuiModel) emptyHint() string {
 	if m.solo >= 0 {
 		return "solo: " + m.targets[m.solo].spec.Name
 	}
+	if m.schemaSel != "" {
+		return "schema: " + m.schemaSel
+	}
 	if m.filter != "" {
 		return "no lines match the filter · esc clears"
 	}
@@ -790,13 +798,13 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows; ↑/↓ scroll the pane when focused"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
-	{"space", "start / stop (ALL row: every target)"},
-	{"r", "reboot (grace applies; ALL row: every selected target)"},
+	{"space", "start / stop (schema row: its targets)"},
+	{"r", "reboot (grace applies; schema row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
-	{"m", "mute the target's stream (M)"},
-	{"s enter", "solo the target's stream (S; again or esc to clear)"},
-	{"esc", "clear search, then filter, then solo"},
+	{"m", "mute the target's stream (M; schema row: its targets)"},
+	{"s enter", "solo a target, or select a schema's targets (S; again or esc to clear)"},
+	{"esc", "clear search, then filter, then solo or schema"},
 	{"o", "open the target's url"},
 	{"G", "resume the live tail"},
 	{"p", "browse the scrollback (again/G to live)"},
@@ -816,7 +824,7 @@ func (m *tuiModel) helpView() string {
 	}
 	b.WriteString("\n")
 	for _, line := range []string{
-		"mouse: click a row to solo it (again or on ALL to clear), click a",
+		"mouse: click a row to solo it or a schema to select its targets (again to clear), click a",
 		"drawer batch to list its files, double-click to stop/start like space,",
 		"click a row's button cell to mute.",
 		"click a pane line to copy it; drag copies a range and pauses the tail",

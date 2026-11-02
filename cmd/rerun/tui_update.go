@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// hintDuration is how long the ALL-row m/s hint stays in the bottom line.
+// hintDuration is how long a transient hint stays in the bottom line.
 const hintDuration = 3 * time.Second
 
 // noticeDuration is how long an info notice stays; errors wait for a key press.
@@ -15,9 +15,6 @@ const noticeDuration = 4 * time.Second
 
 // doubleClickWindow is how close two row clicks must be to stop/start the row.
 const doubleClickWindow = 400 * time.Millisecond
-
-// allRowHint is the one transient message, shown when m/s hit the ALL rollup.
-const allRowHint = "m/s need a target row - j/k to select"
 
 type (
 	tickMsg      time.Time
@@ -158,7 +155,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.filter != "":
 			m.clearFilter()
 		default:
-			m.clearSolo()
+			m.clearScope()
 		}
 
 	case "up":
@@ -236,54 +233,42 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pending = 0
 			m.vp.GotoBottom()
 		} else {
-			m.cursor = len(m.targets)
+			m.cursor = max(0, m.listLen()-1)
 		}
 
 	case "enter":
-		switch {
-		case m.drawerFocus:
+		if m.drawerFocus {
 			m.openCursorBatch()
-		case m.cursor == 0:
-			m.clearSolo()
-		default:
-			m.toggleSolo(m.cursor - 1)
+		} else if r, ok := m.cursorRow(); ok {
+			m.selectRow(r)
 		}
 
 	case " ":
-		if m.cursor == 0 {
-			m.toggleAll()
-		} else {
-			m.toggleTarget(m.cursor - 1)
+		if r, ok := m.cursorRow(); ok {
+			m.toggleRow(r)
 		}
 
 	case "m":
-		if m.cursor > 0 {
-			m.toggleMute(m.cursor - 1)
-		} else {
-			m.showTargetHint()
+		if r, ok := m.cursorRow(); ok {
+			m.muteRow(r)
 		}
 
 	case "s":
-		if m.cursor > 0 {
-			m.toggleSolo(m.cursor - 1)
-		} else {
-			m.clearSolo()
-			m.showTargetHint()
+		if r, ok := m.cursorRow(); ok {
+			m.selectRow(r)
 		}
 
 	case "r":
-		if m.cursor == 0 {
-			m.rebootAll()
-		} else {
-			m.rebootTarget(m.cursor - 1)
+		if r, ok := m.cursorRow(); ok {
+			m.rebootRow(r)
 		}
 
 	case "t":
 		m.toggleDrawer()
 
 	case "o":
-		if m.cursor > 0 {
-			m.openTarget(m.cursor - 1)
+		if i := m.cursorTarget(); i >= 0 {
+			m.openTarget(i)
 		}
 
 	case "p":
@@ -411,7 +396,7 @@ func (m *tuiModel) cancelInput() {
 }
 
 func (m *tuiModel) moveCursor(delta int) {
-	m.cursor = min(max(m.cursor+delta, 0), len(m.targets))
+	m.cursor = min(max(m.cursor+delta, 0), max(0, m.listLen()-1))
 }
 
 func (m *tuiModel) toggleTarget(i int) {
@@ -539,28 +524,22 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if row < 0 {
 		return m, nil
 	}
+	r, _ := m.listRowAt(row)
 
 	switch {
 	case msg.Shift:
-		if row > 0 {
-			m.toggleSolo(row - 1)
-		}
-	case row > 0 && msg.X == m.layout.leftW-1:
-		m.toggleMute(row - 1)
+		m.selectRow(r)
+	case msg.X == m.layout.leftW-1:
+		m.muteRow(r)
 	default:
 		m.cursor = row
-		// The pair's first click already soloed the row; the second click
-		// stops/starts it, and the solo stays.
-		double := row > 0 && m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
+		// The second click of a pair starts or stops the row, keeping the selection.
+		double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
 		if double {
-			m.toggleTarget(row - 1)
+			m.toggleRow(r)
 			m.lastClick = -1 // a fast third click must not read as another double
 		} else {
-			if row > 0 {
-				m.toggleSolo(row - 1)
-			} else {
-				m.clearSolo()
-			}
+			m.selectRow(r)
 			m.lastClick = row
 		}
 		m.lastClickAt = time.Now()
@@ -571,9 +550,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // clearSelection drops the frozen selection highlight.
 func (m *tuiModel) clearSelection() { m.selAnchor = nil }
 
-// titleHeight is 1 when the cursor row's title takes the pane's first line.
 func (m *tuiModel) titleHeight() int {
-	if m.cursor > 0 {
+	if m.cursorTarget() >= 0 {
 		return 1
 	}
 	return 0
@@ -671,7 +649,7 @@ func (m *tuiModel) copySelection() {
 	m.copyUntil = m.now.Add(hintDuration)
 }
 
-// rowAt resolves a screen cell to a row: 0 = ALL, 1..n = target, -1 = none.
+// rowAt resolves a screen cell to a list row index, or -1 for none.
 // The drawer is not target-scoped: no drawer line resolves to a row.
 func (m *tuiModel) rowAt(x, y int) int {
 	// The last screen row is the version line, never a list row.

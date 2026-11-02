@@ -20,7 +20,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneFocus {
 		t.Fatal("pane starts focused")
 	}
-	before := paneOf(m)[0]
+	before := paneOf(m)[m.titleHeight()]
 
 	press(m, "right")
 	if !m.paneFocus {
@@ -34,7 +34,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneCol != 1 {
 		t.Fatalf("paneCol = %d, want 1", m.paneCol)
 	}
-	after := paneOf(m)[0]
+	after := paneOf(m)[m.titleHeight()]
 	if after == before {
 		t.Fatalf("pane line did not shift: %q", after)
 	}
@@ -109,18 +109,18 @@ func TestUnfocusedArrowsMoveCursor(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 
 	press(m, "down", "down")
-	if m.cursor != 2 {
-		t.Fatalf("cursor = %d, want 2", m.cursor)
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1: the last row stops it", m.cursor)
 	}
 	press(m, "up")
-	if m.cursor != 1 {
-		t.Fatalf("cursor = %d, want 1", m.cursor)
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", m.cursor)
 	}
 
 	// j/k stay on the cursor even while the pane holds focus.
 	press(m, "right", "j")
-	if m.cursor != 2 {
-		t.Fatalf("j while focused: cursor = %d, want 2", m.cursor)
+	if m.cursor != 1 {
+		t.Fatalf("j while focused: cursor = %d, want 1", m.cursor)
 	}
 }
 
@@ -148,8 +148,8 @@ func TestUnfocusedHomeAndEndMoveCursor(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 
 	press(m, "end")
-	if m.cursor != len(m.targets) {
-		t.Fatalf("end: cursor = %d, want %d", m.cursor, len(m.targets))
+	if m.cursor != len(m.targets)-1 {
+		t.Fatalf("end: cursor = %d, want %d", m.cursor, len(m.targets)-1)
 	}
 	press(m, "home")
 	if m.cursor != 0 {
@@ -162,7 +162,7 @@ func TestFocusedEscReturnsToListAndKeepsScroll(t *testing.T) {
 	m.applyEvents(streamEvents("web", "old", 60).events)
 	m.View()
 
-	m.cursor = 1
+	m.cursor = 0
 	press(m, "s")
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0", m.solo)

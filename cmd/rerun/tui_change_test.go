@@ -55,8 +55,7 @@ func TestChangeBatchAddsNoPaneLine(t *testing.T) {
 	}
 }
 
-// Only a batch whose spawn lands names its target; a batch the spawn never
-// answered, or a manual start, leaves the feed alone.
+// A target is named only once its spawn lands.
 func TestRestartNamesTheTargetOnlyWhenItsSpawnLands(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.now = spawnClock

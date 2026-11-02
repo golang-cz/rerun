@@ -26,11 +26,10 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 	addLines(m, "web", jsonGet, jsonPost)
 	m.View()
 
-	press(m, "c")
-	if !m.table {
-		t.Fatal("c did not turn table mode on")
+	if !m.tableOn() {
+		t.Fatal("a target with columns did not start in table mode")
 	}
-	lines := paneOf(m)
+	lines := paneOf(m)[m.titleHeight():]
 	if got := strings.TrimRight(lines[0], " "); got != "web  GET     200" {
 		t.Fatalf("row 0 = %q, want the padded table row", got)
 	}
@@ -39,10 +38,10 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 	}
 
 	press(m, "c")
-	if m.table {
+	if m.tableOn() {
 		t.Fatal("c did not turn table mode off")
 	}
-	if got := strings.TrimRight(paneOf(m)[0], " "); got != "web  "+jsonGet {
+	if got := strings.TrimRight(paneOf(m)[m.titleHeight()], " "); got != "web  "+jsonGet {
 		t.Fatalf("raw row = %q, want the untouched JSON line", got)
 	}
 }
@@ -76,15 +75,15 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	press(m, "esc")
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 0, false))
-	m.handleMouse(release(x, 0))
+	m.handleMouse(mouse(x, 1, false))
+	m.handleMouse(release(x, 1))
 	if got := decodeCopy(t, m.copySeq); got != jsonGet+"\n" {
 		t.Fatalf("copied %q, want the raw line", got)
 	}
 }
 
 // A row with no columns, or one whose line is not a JSON object, keeps its
-// raw text, so the ALL view can mix both kinds.
+// raw text, so the merged view can mix both kinds.
 func TestTableMixesRawAndColumnRows(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"), target("api"))
 	addLines(m, "web", jsonGet)
@@ -92,7 +91,7 @@ func TestTableMixesRawAndColumnRows(t *testing.T) {
 	m.View()
 
 	press(m, "c")
-	lines := paneOf(m)
+	lines := paneOf(m)[m.titleHeight():]
 	if got := strings.TrimRight(lines[0], " "); !strings.Contains(got, "GET") || strings.Contains(got, jsonGet) {
 		t.Fatalf("web row = %q, want a table row", got)
 	}
@@ -110,7 +109,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 	m.View()
 
 	press(m, "c")
-	lines := paneOf(m)
+	lines := paneOf(m)[m.titleHeight():]
 	if got := strings.TrimRight(lines[0], " "); got != "bad  "+jsonGet {
 		t.Fatalf("bad-expr row = %q, want raw text", got)
 	}
@@ -126,7 +125,7 @@ func TestTableHintsWithoutColumns(t *testing.T) {
 	m.View()
 
 	press(m, "c")
-	if m.table {
+	if m.tableOn() {
 		t.Fatal("c turned table mode on without any columns")
 	}
 	if got := bottomPaneLine(m); !strings.Contains(got, tableHint) {
@@ -139,8 +138,6 @@ func TestTableHintsWithoutColumns(t *testing.T) {
 func TestTableEvaluatesEachLineOnce(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
-	m.View()
-	press(m, "c")
 	m.View()
 	first := m.cellEvals
 	if first != 2 {
@@ -160,7 +157,6 @@ func TestTableWidthsAreCappedByThePane(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", fmt.Sprintf(`{"request":{"method":%q},"response":{"status":1}}`, huge))
 	m.View()
-	press(m, "c")
 
 	out := m.tableLines(m.paneLines())
 	if got := m.tableWidths()[0]; got > m.tableBudget() {

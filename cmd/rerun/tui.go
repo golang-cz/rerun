@@ -14,7 +14,7 @@ import (
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
-// lineCap bounds each target's scrollback and the merged ALL stream. Phase B
+// lineCap bounds each target's scrollback and the merged stream. Phase B
 // swaps this for golang-cz/ringbuf.
 const lineCap = 10_000
 
@@ -145,8 +145,7 @@ type tuiTarget struct {
 	// flashUntil ends the row highlight a restart leaves behind.
 	flashUntil time.Time
 
-	// restartBatch is the feed batch the last change restarted the target for,
-	// named once its spawn lands; 0 when no restart is in flight.
+	// restartBatch is the feed batch a change restarted the target for, until its spawn lands.
 	restartBatch int
 
 	// colSpec is the spec the cached column expressions were parsed from, so
@@ -168,7 +167,7 @@ type tuiModel struct {
 
 	targets []*tuiTarget
 
-	cursor int // highlighted row: 0 = ALL, 1..n = target
+	cursor int // highlighted list row, an index into listRows
 	help   bool
 	// confirmQuit is the `q` modal: the frame keeps running behind it, and
 	// only enter quits.
@@ -237,9 +236,11 @@ type tuiModel struct {
 	// cellEvals counts the lines evaluated for the table, which the tests read.
 	cellEvals int
 
-	// table renders the pane as a table of each row target's columns; the raw
-	// lines, and so search, filter, and copy, are untouched.
-	table bool
+	// tableFlip is c's raw/table flip for the current selection.
+	tableFlip bool
+
+	// schemaSel is the schema whose members the pane merges, or "" for none.
+	schemaSel string
 
 	// inputMode names the bottom-line bar that is open, input its in-progress
 	// text. While one is open it owns every key and the bottom line.
@@ -334,25 +335,26 @@ func newTUI(targets []Target) *tuiModel {
 		}
 		m.targets = append(m.targets, row)
 	}
+	groupTargets(m.targets)
 	for _, t := range m.targets {
 		m.prefixW = max(m.prefixW, displayWidth(t.spec.Name))
 	}
 	return m
 }
 
-// rowOf maps a target name to its row index, or -1.
-func (m *tuiModel) rowOf(name string) int {
+// targetIndex maps a target name to its index in m.targets, or -1.
+func (m *tuiModel) targetIndex(name string) int {
 	for i, t := range m.targets {
 		if t.spec.Name == name {
-			return i + 1
+			return i
 		}
 	}
 	return -1
 }
 
-// streamsTo reports whether the target's output belongs in the merged ALL
-// stream: muted targets are out, and while one target is soloed every other
-// target is out. rerun's own lines and lines whose row is gone always show.
+// streamsTo reports whether the target's output belongs in the merged stream:
+// muted targets are out, and a solo or schema selection drops the rest.
+// rerun's own lines and lines whose row is gone always show.
 func (m *tuiModel) streamsTo(i int) bool {
 	if i < 0 || i >= len(m.targets) {
 		return true
@@ -360,7 +362,13 @@ func (m *tuiModel) streamsTo(i int) bool {
 	if m.targets[i].muted {
 		return false
 	}
-	return m.solo < 0 || m.solo == i
+	switch {
+	case m.solo >= 0:
+		return m.solo == i
+	case m.schemaSel != "":
+		return m.targets[i].spec.Schema == m.schemaSel
+	}
+	return true
 }
 
 // button is the row's stream button: blank, M, or S.
@@ -391,29 +399,10 @@ func (m *tuiModel) toggleMute(i int) {
 
 func (m *tuiModel) toggleSolo(i int) {
 	if m.solo == i {
-		m.clearSolo()
+		m.clearScope()
 		return
 	}
-	m.solo = i
-	m.targets[i].muted = false
-	m.refreshUnseen()
-	m.group.setSoloGuard(true)
-	m.mergedDirty = true
-	m.vpDirty = true
-	m.recomputeSearch(false)
-}
-
-// clearSolo drops the solo filter and restores the other rows' lines.
-func (m *tuiModel) clearSolo() {
-	if m.solo < 0 {
-		return
-	}
-	m.solo = -1
-	m.refreshUnseen() // the hidden rows' lines are back in the pane
-	m.group.setSoloGuard(false)
-	m.mergedDirty = true
-	m.vpDirty = true
-	m.recomputeSearch(false)
+	m.selectScope(i, "")
 }
 
 // refreshUnseen drops the badge from every row whose stream is in the pane
@@ -436,9 +425,6 @@ func (m *tuiModel) toggleDrawer() {
 		m.feedTop = 0
 	}
 }
-
-// showTargetHint flags that m/s need a row, not the ALL rollup.
-func (m *tuiModel) showTargetHint() { m.showHint(allRowHint) }
 
 // showHint posts a transient message to the pane's bottom line.
 func (m *tuiModel) showHint(text string) {
@@ -469,34 +455,6 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.lastStart = m.now
 	t.exitLabel = ""
 	t.runner.control(ctrlReboot)
-}
-
-// toggleAll stops every running target, or starts everything that is down.
-func (m *tuiModel) toggleAll() {
-	anyRunning := false
-	for _, t := range m.targets {
-		if t.state.up() {
-			anyRunning = true
-			break
-		}
-	}
-	for i, t := range m.targets {
-		switch {
-		case anyRunning && t.state.up():
-			m.stopTarget(i)
-		case !anyRunning && !t.state.up():
-			m.startTarget(i)
-		}
-	}
-}
-
-// rebootAll reboots every target that is selected in rerun.yml.
-func (m *tuiModel) rebootAll() {
-	for i, t := range m.targets {
-		if t.spec.Selected {
-			m.rebootTarget(i)
-		}
-	}
 }
 
 func (m *tuiModel) openTarget(i int) {
@@ -602,11 +560,10 @@ func (m *tuiModel) applyEvent(ev event) {
 		return
 	}
 
-	row := m.rowOf(ev.target)
-	if row <= 0 {
+	i := m.targetIndex(ev.target)
+	if i < 0 {
 		return
 	}
-	i := row - 1
 	t := m.targets[i]
 
 	switch ev.kind {
@@ -678,8 +635,8 @@ func (m *tuiModel) applyEvent(ev event) {
 }
 
 // rebuildRows adopts a reconciled target list. Rows are matched by name, so a
-// row keeps its stream and its mute across a reload; only
-// a name that just appeared gets a new row.
+// row keeps its stream and its mute across a reload; only a name that just
+// appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
@@ -687,18 +644,18 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		byName[t.spec.Name] = t
 	}
 
-	// The cursor and the solo follow a target by name, never by index: a reload
-	// can reorder, add, and drop rows underneath them.
-	curName, soloName := "", ""
-	if m.cursor > 0 && m.cursor <= len(old) {
-		curName = old[m.cursor-1].spec.Name
+	// The cursor and selection follow their row by name: a reload reorders rows.
+	cursorKey := ""
+	if r, ok := m.cursorRow(); ok {
+		cursorKey = m.rowKey(r)
 	}
+	soloName := ""
 	if m.solo >= 0 && m.solo < len(old) {
 		soloName = old[m.solo].spec.Name
 	}
+	schema := m.schemaSel
 
 	rows := make([]*tuiTarget, 0, len(c.targets))
-	index := make(map[string]int, len(c.targets))
 	for i, spec := range c.targets {
 		row, known := byName[spec.Name]
 		if !known {
@@ -713,7 +670,11 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 			row.state = initialState(spec)
 		}
 		rows = append(rows, row)
-		index[spec.Name] = i
+	}
+	groupTargets(rows)
+	index := make(map[string]int, len(rows))
+	for i, row := range rows {
+		index[row.spec.Name] = i
 	}
 
 	// Stream lines carry a row index, so every retained line is remapped. A
@@ -730,13 +691,20 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	}
 
 	m.targets = rows
-	m.cursor = 0
-	if j, ok := index[curName]; ok {
-		m.cursor = j + 1
-	}
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
 		m.solo = j
+	}
+	m.schemaSel = ""
+	if schema != "" && len(m.schemaMembers(schema)) > 0 {
+		m.schemaSel = schema
+	}
+	m.cursor = min(m.cursor, max(0, m.listLen()-1))
+	for i, r := range m.listRows() {
+		if m.rowKey(r) == cursorKey {
+			m.cursor = i
+			break
+		}
 	}
 	m.prefixW = 0
 	for _, row := range rows {
@@ -948,7 +916,7 @@ func (m *tuiModel) filterStatus() string {
 	return fmt.Sprintf("%d lines", m.paneLen())
 }
 
-// mergedLine is one line of the arrival-ordered log the ALL pane filters. The
+// mergedLine is one line of the arrival-ordered log the pane filters. The
 // name is the target's name at arrival, so a line whose row is gone keeps its
 // prefix instead of jumping to whatever row took its index.
 type mergedLine struct {
@@ -1040,50 +1008,6 @@ func (t *tuiTarget) glyph() string {
 		return "○"
 	}
 	return "·"
-}
-
-// rollupSegs is the ALL row's `3● 1✓ 1✗` count.
-func (m *tuiModel) rollupSegs() []seg {
-	var running, ok, bad int
-	for _, t := range m.targets {
-		switch {
-		case t.state == stateRunning || t.state == stateStarting:
-			running++
-		case (t.state == stateExited || t.state == stateBackoff) && t.exitCode == 0:
-			ok++
-		case t.state == stateExited || t.state == stateBackoff:
-			bad++
-		}
-	}
-
-	var segs []seg
-	add := func(n int, glyph string, color string) {
-		if n == 0 {
-			return
-		}
-		if len(segs) > 0 {
-			segs = append(segs, seg{text: " "})
-		}
-		segs = append(segs, seg{text: fmt.Sprintf("%d", n), color: color}, seg{text: glyph, color: color})
-	}
-	add(running, "●", colorYellow)
-	add(ok, "✓", colorGreen)
-	add(bad, "✗", colorRed)
-
-	if len(segs) == 0 {
-		return []seg{{text: "—", color: colorGray}}
-	}
-	return segs
-}
-
-// anyUnseen reports whether any row hides unseen output.
-func (m *tuiModel) anyUnseen() bool {
-	for _, t := range m.targets {
-		if t.unseen {
-			return true
-		}
-	}
-	return false
 }
 
 // osc8 wraps text in an OSC 8 hyperlink, which terminals that support it make

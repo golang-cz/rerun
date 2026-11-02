@@ -13,10 +13,10 @@ func TestURLCapturedFromOutputRelinksTheRow(t *testing.T) {
 		t.Fatalf("spec url = %q, want the captured url", got)
 	}
 	leftW, _ := m.layoutWidths()
-	if got := m.targetLine(0, leftW); !strings.Contains(got, "http://localhost:5173") {
+	if got := m.targetLine(0, listRow{target: 0}, leftW); !strings.Contains(got, "http://localhost:5173") {
 		t.Fatalf("row link = %q, want the captured url", got)
 	}
-	m.cursor = 1
+	m.cursor = 0
 	if got := m.titleLine(80); !strings.Contains(got, "http://localhost:5173") {
 		t.Fatalf("title line = %q, want the captured url", got)
 	}

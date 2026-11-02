@@ -247,7 +247,7 @@ func TestFeedClickOpensTheBatchFiles(t *testing.T) {
 // Arrow keys move the feed cursor once the drawer is focused, and the window
 // follows the cursor. Unfocused, they move the target cursor as before.
 func TestFeedScrollFollowsTheCursor(t *testing.T) {
-	m := newTestModel(t, target("web"))
+	m := newTestModel(t, target("web"), target("api"))
 	m.now = spawnClock.Add(10 * time.Second)
 	for i := 0; i < 9; i++ {
 		changeAt(m, "web", spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{
@@ -353,7 +353,7 @@ func TestListScrollKeepsTheCursorVisibleUnderATallDrawer(t *testing.T) {
 	}
 	m := newTestModel(t, defs...)
 	m.height = 10
-	m.cursor = len(m.targets)
+	m.cursor = len(m.targets) - 1
 	for i, d := range defs {
 		changeAt(m, d.Name, spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
 	}

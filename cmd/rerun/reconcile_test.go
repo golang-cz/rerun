@@ -237,25 +237,25 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 		t.Fatalf("offset = %d, want the list from the top", m.layout.offset)
 	}
 
-	// ALL, web, api, worker; the drawer takes the rows above the version line.
-	for y, want := range []int{0, 1, 2, 3} {
+	// web, api, worker; the drawer takes the rows above the version line.
+	for y, want := range []int{0, 1, 2} {
 		if got := m.rowAt(2, y); got != want {
 			t.Fatalf("rowAt line %d = %d, want %d", y, got, want)
 		}
 	}
-	if got := m.rowAt(2, 4); got != -1 {
+	if got := m.rowAt(2, 3); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
 	if got := m.rowAt(2, m.height-2-len(m.layout.drawer)); got != -1 {
 		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 
-	// A click on the ALL row still clears the solo.
+	// A click on the soloed row clears the solo.
 	m.toggleSolo(1)
 	m.View()
-	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 1, false))
 	if m.solo != -1 {
-		t.Fatalf("solo after a click on ALL = %d, want none", m.solo)
+		t.Fatalf("solo after a click on the soloed row = %d, want none", m.solo)
 	}
 }
 
@@ -263,10 +263,10 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 // the drawer grew.
 func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m := spawnModel(t)
-	m.cursor = 3 // worker, the last row
+	m.cursor = 2 // worker, the last row
 	m.height = 4 // no room for a drawer at all
 	m.View()
-	if got := m.rowAt(2, m.height-2); got != 3 {
+	if got := m.rowAt(2, m.height-2); got != 2 {
 		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
 	}
 	if got := len(m.layout.drawer); got != 0 {
@@ -284,7 +284,7 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	for _, name := range names {
 		spawnWithChange(many, name, oneFile("a.go"), spawnClock)
 	}
-	many.cursor = len(many.targets)
+	many.cursor = len(many.targets) - 1
 	many.height = 8
 	many.View()
 
@@ -309,7 +309,7 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "web", line: "web says hi"})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "api says hi"})
-	m.cursor = 1    // web
+	m.cursor = 0    // web
 	m.toggleSolo(1) // api
 	m.targets[0].muted = true
 	m.targets[0].unseen = true
@@ -330,7 +330,7 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 		t.Fatalf("rows = %v, want the new config's order", got)
 	}
 	// The cursor and the solo follow their target, not their old index.
-	if m.cursor != 2 || m.solo != 0 {
+	if m.cursor != 1 || m.solo != 0 {
 		t.Fatalf("cursor = %d solo = %d, want web selected and api soloed", m.cursor, m.solo)
 	}
 	if !web.muted || !web.unseen {

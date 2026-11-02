@@ -86,8 +86,7 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time) int {
 	return b.id
 }
 
-// feedRestart names a target in the batch its change restarted, once its spawn
-// lands, and flashes its row. A batch aged out of the feed names no one.
+// feedRestart names the target in its change's batch once the spawn lands.
 func (m *tuiModel) feedRestart(t *tuiTarget, at time.Time) {
 	id := t.restartBatch
 	t.restartBatch = 0

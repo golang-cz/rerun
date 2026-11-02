@@ -125,7 +125,7 @@ func TestStreamButtonMuteToggle(t *testing.T) {
 		t.Fatalf("buttons = %q, want blank", got)
 	}
 
-	m.cursor = 1
+	m.cursor = 0
 	press(m, "m")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{"M", " ", " "}) {
 		t.Fatalf("after m: buttons = %q, want M on row 1", got)
@@ -147,7 +147,7 @@ func TestStreamButtonSoloHidesOtherMuteStates(t *testing.T) {
 	m := newTestModel(t)
 	m.toggleMute(0)
 
-	m.cursor = 2
+	m.cursor = 1
 	press(m, "s")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
 		t.Fatalf("solo on row 2: buttons = %q, want other rows blank", got)
@@ -167,7 +167,7 @@ func TestStreamButtonSoloUnmutesAndIsExclusive(t *testing.T) {
 	m := newTestModel(t)
 	m.toggleMute(0)
 
-	m.cursor = 1
+	m.cursor = 0
 	press(m, "s")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{"S", " ", " "}) {
 		t.Fatalf("buttons = %q, want S on row 1", got)
@@ -176,7 +176,7 @@ func TestStreamButtonSoloUnmutesAndIsExclusive(t *testing.T) {
 		t.Error("s must unmute the row it solos")
 	}
 
-	m.cursor = 2
+	m.cursor = 1
 	press(m, "s")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
 		t.Fatalf("buttons = %q, want only one S", got)
@@ -187,31 +187,13 @@ func TestStreamButtonMuteOnSoloRowIsNoOp(t *testing.T) {
 	m := newTestModel(t)
 	m.toggleSolo(1)
 
-	m.cursor = 2
+	m.cursor = 1
 	press(m, "m")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
 		t.Fatalf("buttons = %q, m on the solo row must be a no-op", got)
 	}
 	if m.targets[1].muted {
 		t.Error("m muted the solo row")
-	}
-}
-
-func TestRollupCounts(t *testing.T) {
-	m := newTestModel(t, target("a"), target("b"), target("c"), target("d"), target("e"))
-	m.targets[0].state, m.targets[1].state, m.targets[2].state = stateRunning, stateRunning, stateRunning
-	m.targets[3].state, m.targets[3].exitCode = stateExited, 0
-	m.targets[4].state, m.targets[4].exitCode = stateExited, 1
-
-	if got, want := segText(m.rollupSegs()), "3● 1✓ 1✗"; got != want {
-		t.Fatalf("rollup = %q, want %q", got, want)
-	}
-
-	// Stopped and off rows are not counted.
-	m.targets[0].state = stateStopped
-	m.targets[1].state = stateOff
-	if got, want := segText(m.rollupSegs()), "1● 1✓ 1✗"; got != want {
-		t.Fatalf("rollup = %q, want %q", got, want)
 	}
 }
 
@@ -434,7 +416,7 @@ func TestSoloPaneKeepsPrefix(t *testing.T) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
-	m.clearSolo()
+	m.clearScope()
 	if got, want := m.paneLines(), []string{"web  hello", "api  world"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged pane after un-solo = %q, want %q", got, want)
 	}
@@ -448,7 +430,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	web.Cmd = "vite dev"
 	m := newTestModel(t, web, target("api"))
 
-	m.cursor = 1
+	m.cursor = 0
 	_, rightW := m.layoutWidths()
 	lines := paneOf(m)
 
@@ -475,7 +457,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	}
 
 	// The title follows the cursor row.
-	m.cursor = 2
+	m.cursor = 1
 	if line := paneOf(m)[0]; !strings.Contains(line, "· sleep 1") {
 		t.Fatalf("title after moving = %q, want the api row's command", line)
 	}
@@ -513,7 +495,7 @@ func TestRightPaneTitleShowsRowState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newTestModel(t, web, target("api"))
-			m.cursor = 1
+			m.cursor = 0
 			m.targets[0].state = tt.state
 			if tt.setup != nil {
 				tt.setup(m)
@@ -530,7 +512,7 @@ func TestRightPaneTitleLinksTheURL(t *testing.T) {
 	web.Cmd = "vite dev"
 	web.URL = "http://localhost:5173"
 	m := newTestModel(t, web, target("api"))
-	m.cursor = 1
+	m.cursor = 0
 
 	_, rightW := m.layoutWidths()
 	line := paneOf(m)[0]
@@ -548,7 +530,7 @@ func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
 	web.URL = "http://localhost:5173/very/long/path"
 	m := newTestModel(t, web, target("api"))
 	m.width = 30
-	m.cursor = 1
+	m.cursor = 0
 
 	_, rightW := m.layoutWidths()
 	line := paneOf(m)[0]
@@ -560,9 +542,10 @@ func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
 	}
 }
 
-func TestNoTitleOnAllRowAndPaneUsesFullHeight(t *testing.T) {
+func TestNoTitleOnSchemaRowAndPaneUsesFullHeight(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "vite dev"
+	web.Schema = "front"
 	m := newTestModel(t, web, target("api"))
 	m.applyEvent(event{kind: evOutput, target: "frontend", line: "hello"})
 
@@ -575,17 +558,17 @@ func TestNoTitleOnAllRowAndPaneUsesFullHeight(t *testing.T) {
 	m.cursor = 0
 	lines := paneOf(m)
 	if m.vp.Height != m.height {
-		t.Fatalf("ALL row viewport height = %d, want the full %d", m.vp.Height, m.height)
+		t.Fatalf("schema row viewport height = %d, want the full %d", m.vp.Height, m.height)
 	}
 	if strings.Contains(lines[0], "$ vite dev") {
-		t.Fatalf("ALL row still shows a title: %q", lines[0])
+		t.Fatalf("schema row still shows a title: %q", lines[0])
 	}
 }
 
 // The left column has no command footer now, so its bottom list line is a
 // row; only the version line under it is inert.
 func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	m.height = 4
 	m.View()
 
@@ -618,7 +601,7 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 
 func TestSoloKeysAndClear(t *testing.T) {
 	m := newTestModel(t)
-	m.cursor = 2
+	m.cursor = 1
 
 	press(m, "s")
 	if m.solo != 1 {
@@ -639,38 +622,19 @@ func TestSoloKeysAndClear(t *testing.T) {
 	}
 }
 
-func TestEnterOnAllRowClearsSolo(t *testing.T) {
+func TestEnterOnSoloedRowClearsIt(t *testing.T) {
 	m := newTestModel(t)
 	m.toggleSolo(2)
-	m.cursor = 0
+	m.cursor = 2
 	press(m, "enter")
 	if m.solo != -1 {
 		t.Fatalf("solo = %d, want cleared", m.solo)
 	}
 }
 
-func TestAllRowMuteSoloShowsHint(t *testing.T) {
-	for _, key := range []string{"m", "s"} {
-		t.Run(key, func(t *testing.T) {
-			m := newTestModel(t)
-			m.cursor = 0
-			press(m, key)
-			if view := m.View(); !strings.Contains(view, allRowHint) {
-				t.Fatalf("the ALL-row hint is not in the view:\n%s", view)
-			}
-
-			m.now = m.now.Add(hintDuration + time.Second)
-			if view := m.View(); strings.Contains(view, allRowHint) {
-				t.Fatalf("the hint outlived its window:\n%s", view)
-			}
-		})
-	}
-}
-
 func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
-	m := newTestModel(t)
-	m.cursor = 0
-	press(m, "m") // arms the ALL-row hint
+	m := newTestModel(t, target("web"))
+	press(m, "c") // arms the table hint, which has no columns to show
 	m.follow = false
 	m.pending = 2
 
@@ -678,8 +642,8 @@ func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
 	if !strings.Contains(view, "↓ 2 new") {
 		t.Fatalf("the new-lines marker is not in the view:\n%s", view)
 	}
-	if strings.Contains(view, allRowHint) {
-		t.Fatalf("the ALL-row hint took the marker's line:\n%s", view)
+	if strings.Contains(view, tableHint) {
+		t.Fatalf("the table hint took the marker's line:\n%s", view)
 	}
 }
 
@@ -697,7 +661,7 @@ func queuedCtrl(t *testing.T, r *targetRunner) ctrlKind {
 
 func TestSpaceStopsAndStartsTheHighlightedTarget(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.cursor = 1
+	m.cursor = 0
 
 	press(m, " ")
 	if m.targets[0].state != stateStopped {
@@ -713,25 +677,6 @@ func TestSpaceStopsAndStartsTheHighlightedTarget(t *testing.T) {
 	}
 	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStart {
 		t.Fatalf("control = %v, want ctrlStart", got)
-	}
-}
-
-func TestSpaceOnAllRowStopsAndStartsEverything(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.cursor = 0
-
-	press(m, " ")
-	for i, row := range m.targets {
-		if row.state != stateStopped {
-			t.Errorf("target %d state = %v, want stopped", i, row.state)
-		}
-	}
-
-	press(m, " ")
-	for i, row := range m.targets {
-		if row.state != stateRunning {
-			t.Errorf("target %d state = %v, want running", i, row.state)
-		}
 	}
 }
 
@@ -752,7 +697,7 @@ func TestUnselectedTargetStartsOff(t *testing.T) {
 	}
 
 	// Space starts it by hand.
-	m.cursor = 1
+	m.cursor = 0
 	press(m, " ")
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state after space = %v, want running", m.targets[0].state)
@@ -777,25 +722,10 @@ func TestNamedRunListsEveryTargetAndStartsOffOnDemand(t *testing.T) {
 		}
 	}
 
-	m.cursor = 2 // the api row, named off by the yml and not on the command line
+	m.cursor = 1 // the api row, named off by the yml and not on the command line
 	press(m, " ")
 	if m.targets[1].state != stateRunning {
 		t.Fatalf("state after space = %v, want running", m.targets[1].state)
-	}
-}
-
-func TestRebootOnAllRowTouchesSelectedTargetsOnly(t *testing.T) {
-	off := target("job")
-	off.Selected = false
-	m := newTestModel(t, off, target("web"))
-	m.cursor = 0
-
-	press(m, "r")
-	if m.targets[0].state != stateOff {
-		t.Errorf("unselected target state = %v, want off", m.targets[0].state)
-	}
-	if m.targets[1].state != stateRunning {
-		t.Errorf("selected target state = %v, want running", m.targets[1].state)
 	}
 }
 
@@ -900,17 +830,14 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 		}
 	}
 
-	web := lines[1]
+	web := lines[0]
 	for _, want := range []string{"●", "web", "0m48s", "M"} {
 		if !strings.Contains(web, want) {
 			t.Errorf("web row %q is missing %q", web, want)
 		}
 	}
-	if api := lines[2]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
+	if api := lines[1]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
 		t.Errorf("api row = %q, want ✓ and exit 0", api)
-	}
-	if all := lines[0]; !strings.Contains(all, "1●") || !strings.Contains(all, "1✓") {
-		t.Errorf("ALL row = %q, want the 1● 1✓ rollup", all)
 	}
 }
 
@@ -963,7 +890,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	// The stream button cell is the last cell of the left column. It mutes
 	// only: no solo, even though the click lands on a target row.
 	btnX := m.layout.leftW - 1
-	m.handleMouse(mouse(btnX, 1, false))
+	m.handleMouse(mouse(btnX, 0, false))
 	if got := m.button(0); got != "M" {
 		t.Fatalf("button after click = %q, want M", got)
 	}
@@ -975,8 +902,8 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	}
 
 	// A single click on a name cell moves the cursor there and solos it.
-	m.handleMouse(mouse(2, 2, false))
-	if m.cursor != 2 {
+	m.handleMouse(mouse(2, 1, false))
+	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 2", m.cursor)
 	}
 	if m.solo != 1 {
@@ -989,16 +916,16 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	// A second click on the soloed row clears solo. Slowing it past the
 	// double-click window keeps it a single click; the pair case is below.
 	slowClick(m)
-	m.handleMouse(mouse(2, 2, false))
+	m.handleMouse(mouse(2, 1, false))
 	if m.solo != -1 {
 		t.Fatalf("solo = %d, want cleared after the second single click", m.solo)
 	}
-	if m.cursor != 2 {
+	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 2 still", m.cursor)
 	}
 
 	// Shift-click solos the row under the pointer.
-	m.handleMouse(mouse(2, 1, true))
+	m.handleMouse(mouse(2, 0, true))
 	if got := m.button(0); got != "S" {
 		t.Fatalf("button after shift-click = %q, want S", got)
 	}
@@ -1006,32 +933,6 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 		t.Fatalf("solo = %d, want 0 after shift-click", m.solo)
 	}
 
-	// Clicking the ALL row moves the cursor back to it and clears solo.
-	m.handleMouse(mouse(2, 0, false))
-	if m.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", m.cursor)
-	}
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
-	}
-}
-
-func TestMouseClickAllRowClearsSolo(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.View()
-
-	m.handleMouse(mouse(2, 1, false))
-	if m.solo != 0 {
-		t.Fatalf("solo = %d, want 0 after one click", m.solo)
-	}
-
-	m.handleMouse(mouse(2, 0, false))
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
-	}
-	if m.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", m.cursor)
-	}
 }
 
 func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
@@ -1039,8 +940,8 @@ func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
 	m.View()
 
 	// The pair's first click solos the row; the second stops it.
-	m.handleMouse(mouse(2, 1, false))
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 0, false))
 
 	if m.targets[0].state != stateStopped {
 		t.Fatalf("state = %v, want stopped after a double-click", m.targets[0].state)
@@ -1051,7 +952,7 @@ func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0 (the first click's solo survives)", m.solo)
 	}
-	if m.cursor != 1 {
+	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 1", m.cursor)
 	}
 	if m.lastClick != -1 {
@@ -1069,8 +970,8 @@ func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
 		t.Fatalf("setup: state = %v, want off", m.targets[0].state)
 	}
 
-	m.handleMouse(mouse(2, 1, false))
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 0, false))
 
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state = %v, want running after a double-click on an off row", m.targets[0].state)
@@ -1083,42 +984,17 @@ func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
 	}
 }
 
-func TestMouseDoubleClickOnAllRowDoesNotToggleAll(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.View()
-
-	m.handleMouse(mouse(2, 0, false))
-	m.handleMouse(mouse(2, 0, false))
-
-	for i, row := range m.targets {
-		if row.state != stateRunning {
-			t.Fatalf("target %d state = %v, want running (ALL is not a service)", i, row.state)
-		}
-		select {
-		case c := <-row.runner.ctrlCh:
-			t.Fatalf("target %d queued %v, want none on an ALL-row double-click", i, c.kind)
-		default:
-		}
-	}
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared by the ALL-row click", m.solo)
-	}
-	if m.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", m.cursor)
-	}
-}
-
 func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.View()
 
 	// Two quick clicks stop the running row and leave it soloed.
-	m.handleMouse(mouse(2, 1, false))
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 0, false))
 	queuedCtrl(t, m.targets[0].runner) // drain the stop
 
 	// The third click is a fresh single: it toggles solo, never stop/start.
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 0, false))
 	if m.solo != -1 {
 		t.Fatalf("solo = %d, want cleared by the third click's solo toggle", m.solo)
 	}
@@ -1136,15 +1012,15 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.View()
 
-	m.handleMouse(motion(2, 1))
-	if m.hover != 1 {
+	m.handleMouse(motion(2, 0))
+	if m.hover != 0 {
 		t.Fatalf("hover = %d, want 1 after a motion over row 1", m.hover)
 	}
 
 	// A wiggle inside the same row must not alter the frame.
 	before := m.View()
-	m.handleMouse(motion(1, 1))
-	if m.hover != 1 {
+	m.handleMouse(motion(1, 0))
+	if m.hover != 0 {
 		t.Fatalf("hover = %d, want 1 still", m.hover)
 	}
 	if m.cursor != 0 {
@@ -1154,12 +1030,12 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 		t.Fatalf("the view changed on a same-row motion:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 
-	m.handleMouse(motion(2, 2))
-	if m.hover != 2 {
+	m.handleMouse(motion(2, 1))
+	if m.hover != 1 {
 		t.Fatalf("hover = %d, want 2 after a motion onto another row", m.hover)
 	}
 
-	m.handleMouse(motion(m.layout.leftW+1, 2))
+	m.handleMouse(motion(m.layout.leftW+1, 1))
 	if m.hover != -1 {
 		t.Fatalf("hover = %d, want -1 outside the left column", m.hover)
 	}
@@ -1195,12 +1071,12 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 	}
 
 	// o opens the highlighted row's url, and does nothing without one.
-	m.cursor = 2
+	m.cursor = 1
 	press(m, "o")
 	if len(opened) != 1 {
 		t.Fatalf("o on a target without a url opened %q", opened)
 	}
-	m.cursor = 1
+	m.cursor = 0
 	press(m, "o")
 	if len(opened) != 2 {
 		t.Fatalf("o did not open the url, opened = %q", opened)
@@ -1249,10 +1125,10 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 		t.Errorf("glyph = %q, want ·", got)
 	}
 	frame := strings.Split(m.View(), "\n")
-	if got := frame[1]; !strings.Contains(got, "waiting") {
+	if got := frame[0]; !strings.Contains(got, "waiting") {
 		t.Errorf("row 1 = %q, want the waiting status", got)
 	}
-	if got := frame[2]; !strings.Contains(got, "manual") {
+	if got := frame[1]; !strings.Contains(got, "manual") {
 		t.Errorf("row 2 = %q, want the manual status", got)
 	}
 

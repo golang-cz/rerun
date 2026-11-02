@@ -31,19 +31,21 @@ Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` scroll it when focused, `home`/`end` jump to its top-left or
 live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
 toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream, `s` or `enter`
-solo (`esc` clears), `o` open the url, `G` resume the live tail, `p` browse the
+solo a target or select a schema's targets (`esc` clears). On a schema header,
+`space`, `r`, and `m` act on its targets. `o` open the url, `G` resume the live tail, `p` browse the
 scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
 (a leading `.` runs a yq expression per JSON line); `c` toggles the columns
-table for targets that define `columns`. A JSON output line's top-level `url`,
+table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, a batch in the fs drawer to list its files,
-shift-click to solo, and a click on the ALL row to clear
-solo. Click a pane line to copy it; drag copies a range and browses the scrollback
+shift-click to solo, and a click on a schema header to select its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
-The right pane is always the merged
-stream; soloing narrows it to one target, keeping the name prefixes. Each
+Targets with a `schema:` are listed under a `▾ name` header that counts
+its running members; targets without one follow. The right pane is always the
+merged stream; soloing narrows it to one target, and selecting a schema to its
+members, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's uptime, how many files its
 last change batch held, and its command, with its url linked. The fs drawer

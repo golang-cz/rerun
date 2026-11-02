@@ -23,34 +23,66 @@ type cellCache struct {
 
 func (c cellCache) evaluated() bool { return c.raw || c.vals != nil }
 
-// toggleTable flips the pane between raw lines and the columns table. A pane
-// with nothing to tabulate says so instead of toggling.
+// toggleTable flips the selection between raw lines and the columns table. A
+// selection with nothing to tabulate says so instead of toggling.
 func (m *tuiModel) toggleTable() {
-	if m.table {
-		m.table = false
-		m.vpDirty = true
-		return
-	}
 	if !m.columnsAvailable() {
 		m.showHint(tableHint)
 		return
 	}
-	m.table = true
+	m.tableFlip = !m.tableFlip
 	m.vpDirty = true
 }
 
-// columnsAvailable reports whether the row under the cursor can drive a table:
-// a target row needs its own columns, and the ALL row needs columns anywhere.
-func (m *tuiModel) columnsAvailable() bool {
-	if m.cursor > 0 {
-		return len(m.targets[m.cursor-1].spec.Columns) > 0
+// tableOn is the selection's default layout, flipped by c.
+func (m *tuiModel) tableOn() bool { return m.tableDefault() != m.tableFlip }
+
+// tableDefault is the layout a selection starts in; nothing selected needs shared columns.
+func (m *tuiModel) tableDefault() bool {
+	if m.solo < 0 && m.schemaSel == "" {
+		return m.sharedColumns()
 	}
-	for _, t := range m.targets {
-		if len(t.spec.Columns) > 0 {
+	return m.anyColumns(m.scopeMembers())
+}
+
+// columnsAvailable reports whether c has a table to offer the selection.
+func (m *tuiModel) columnsAvailable() bool { return m.anyColumns(m.scopeMembers()) }
+
+// scopeMembers is the target indices the selection shows.
+func (m *tuiModel) scopeMembers() []int {
+	switch {
+	case m.solo >= 0:
+		return []int{m.solo}
+	case m.schemaSel != "":
+		return m.schemaMembers(m.schemaSel)
+	}
+	all := make([]int, len(m.targets))
+	for i := range all {
+		all[i] = i
+	}
+	return all
+}
+
+func (m *tuiModel) anyColumns(members []int) bool {
+	for _, i := range members {
+		if len(m.targets[i].spec.Columns) > 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// sharedColumns reports whether every target has the same non-empty columns.
+func (m *tuiModel) sharedColumns() bool {
+	if len(m.targets) == 0 || len(m.targets[0].spec.Columns) == 0 {
+		return false
+	}
+	for _, t := range m.targets[1:] {
+		if !slices.Equal(t.spec.Columns, m.targets[0].spec.Columns) {
+			return false
+		}
+	}
+	return true
 }
 
 // tableLines renders the pane as a table: each row keeps its name prefix and
@@ -59,7 +91,7 @@ func (m *tuiModel) columnsAvailable() bool {
 // expressions do not compile, keeps its raw text. Only rows not yet evaluated
 // are parsed, so a chatty stream pays one decode per arriving line.
 func (m *tuiModel) tableLines(lines []string) []string {
-	if !m.table || len(lines) == 0 {
+	if !m.tableOn() || len(lines) == 0 {
 		return lines
 	}
 	m.evaluateCells()
