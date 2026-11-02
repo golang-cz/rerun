@@ -729,3 +729,27 @@ func TestRetireInterruptsTheCooldown(t *testing.T) {
 		t.Fatalf("starts = %d, want 1: a removed target started a generation", starts)
 	}
 }
+
+// A schema's columns edit reaches every target that uses it, and like a columns
+// edit it restarts nothing.
+func TestSchemaColumnsChangeIsCosmetic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n")
+	old, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"c {.d}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n")
+	fresh, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	if actions := diffTargets(old.Targets, fresh.Targets); len(actions) != 0 {
+		t.Fatalf("actions = %+v, want none for a schema columns-only change", actions)
+	}
+	if got := fresh.Targets[0].Columns; !reflect.DeepEqual(got, []Column{{Name: "c", Expr: ".d"}}) {
+		t.Fatalf("columns = %+v, want the schema's new columns on the target", got)
+	}
+}

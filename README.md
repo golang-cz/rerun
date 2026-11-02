@@ -117,13 +117,34 @@ Each top-level key is one target. Fields:
 | `except` | paths or globs to ignore, a string or a list |
 | `cmd` | shell command to run, required |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
-| `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `[method {.request.method}, status {.response.status}]` |
+| `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
+| `schema` | name of a `schemas:` entry to take columns from; the target's own `columns` win |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
 | `delay` | batch window before restarting (default 200ms) |
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |
+
+#### Schemas
+
+Targets that log the same JSON shape can share columns. Define them once under
+the reserved top-level `schemas:` key, then point each target at one with
+`schema:`:
+
+```yaml
+schemas:
+  backend:
+    columns: ["level {.level}", "msg {.msg}", "status {.status}"]
+
+omsx-api:
+  schema: backend
+  cmd: make -C apps/api run
+```
+
+A target's own `columns` wins over its schema's. A `schema:` that names no
+schema is a config error. Quote each column entry: a `{` inside a plain entry
+of a `[...]` list is a YAML error.
 
 #### Reloading
 

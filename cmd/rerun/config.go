@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -46,13 +47,16 @@ const (
 )
 
 type Target struct {
-	Name     string
-	Desc     string
-	On       []string
-	Except   []string
-	Cmd      string
-	URL      string
-	Columns  []Column
+	Name   string
+	Desc   string
+	On     []string
+	Except []string
+	Cmd    string
+	URL    string
+	// Columns are the effective columns: the target's own, else its schema's.
+	Columns []Column
+	// Schema names the top-level `schemas:` entry the target uses, or "".
+	Schema   string
 	Delay    time.Duration
 	Cooldown time.Duration
 	Grace    time.Duration
@@ -258,6 +262,11 @@ func ParseConfig(path string) (*Config, error) {
 	}
 
 	cfg := &Config{Path: path}
+	schemas, err := parseSchemas(src, root)
+	if err != nil {
+		return nil, err
+	}
+
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key, value := deref(root.Content[i]), deref(root.Content[i+1])
@@ -269,28 +278,120 @@ func ParseConfig(path string) (*Config, error) {
 			return nil, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
 		}
 		seen[name] = true
+		if name == schemasKey {
+			continue
+		}
 
-		target, err := parseTarget(src, name, key, value)
+		target, err := parseTarget(src, name, key, value, schemas)
 		if err != nil {
 			return nil, err
 		}
 		cfg.Targets = append(cfg.Targets, target)
 	}
 
+	if len(cfg.Targets) == 0 {
+		return nil, src.at(root, nodeSpan(root), "no targets defined")
+	}
 	return cfg, nil
+}
+
+// schemasKey is the reserved top-level key that holds named column schemas.
+const schemasKey = "schemas"
+
+// schemaFields is the accepted keys inside a `schemas:` entry.
+var schemaFields = []string{"columns"}
+
+// parseSchemas reads the top-level `schemas:` block into name -> columns. A
+// null block is an empty one, and each schema must name its columns.
+func parseSchemas(src *configSource, root *yaml.Node) (map[string][]Column, error) {
+	schemas := make(map[string][]Column)
+	found := false
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := deref(root.Content[i])
+		if key.Kind != yaml.ScalarNode || key.Value != schemasKey {
+			continue
+		}
+		if found {
+			return nil, src.at(key, len(schemasKey), fmt.Sprintf("duplicate top-level key %q", schemasKey))
+		}
+		found = true
+
+		block := deref(root.Content[i+1])
+		if block.Kind == yaml.ScalarNode && block.Tag == "!!null" {
+			continue
+		}
+		if block.Kind != yaml.MappingNode {
+			return nil, src.at(block, nodeSpan(block), fmt.Sprintf("%s: expected a mapping of schema names", schemasKey))
+		}
+		for j := 0; j+1 < len(block.Content); j += 2 {
+			nameNode, value := deref(block.Content[j]), deref(block.Content[j+1])
+			if nameNode.Kind != yaml.ScalarNode {
+				return nil, src.at(nameNode, 1, "schema names must be strings")
+			}
+			name := nameNode.Value
+			if _, ok := schemas[name]; ok {
+				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate schema %q", name))
+			}
+			cols, err := parseSchema(src, name, nameNode, value)
+			if err != nil {
+				return nil, err
+			}
+			schemas[name] = cols
+		}
+	}
+	return schemas, nil
+}
+
+func parseSchema(src *configSource, name string, keyNode, node *yaml.Node) ([]Column, error) {
+	node = deref(node)
+	owner := fmt.Sprintf("schema %q", name)
+	if node.Kind != yaml.MappingNode {
+		return nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: expected a mapping of fields", owner))
+	}
+
+	var cols []Column
+	seen := make(map[string]bool)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := deref(node.Content[i])
+		field := key.Value
+		if seen[field] {
+			return nil, src.at(key, len(field), fmt.Sprintf("%s: duplicate field %q", owner, field))
+		}
+		seen[field] = true
+
+		switch field {
+		case "columns":
+			parsed, err := parseColumnList(src, owner, field, deref(node.Content[i+1]))
+			if err != nil {
+				return nil, err
+			}
+			cols = parsed
+
+		default:
+			e := src.at(key, len(field), fmt.Sprintf("%s: unknown field %q", owner, field))
+			e.note = "fields: " + strings.Join(schemaFields, ", ")
+			return nil, e
+		}
+	}
+
+	if !seen["columns"] {
+		return nil, src.at(keyNode, len(name), fmt.Sprintf("%s: columns is required", owner))
+	}
+	return cols, nil
 }
 
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsMatchParser
 // fails when the two drift apart.
-var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "schema", "open", "selected", "start", "delay", "cooldown", "grace"}
 
-func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Target, error) {
+func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string][]Column) (Target, error) {
 	node = deref(node)
 	if node.Kind != yaml.MappingNode {
 		return Target{}, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: expected a mapping of fields", name))
 	}
 
+	owner := fmt.Sprintf("target %q", name)
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -311,7 +412,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Targ
 			target.Desc = s
 
 		case "on", "except":
-			list, _, err := stringOrList(src, name, field, value)
+			list, _, err := stringOrList(src, owner, field, value)
 			if err != nil {
 				return Target{}, err
 			}
@@ -333,19 +434,21 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Targ
 			}
 
 		case "columns":
-			list, nodes, err := stringOrList(src, name, field, value)
+			cols, err := parseColumnList(src, owner, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			cols := make([]Column, 0, len(list))
-			for i, raw := range list {
-				col, err := parseColumn(raw)
-				if err != nil {
-					return Target{}, src.at(nodes[i], len(raw), fmt.Sprintf("target %q: field %q: %s in %q", name, field, err, raw))
-				}
-				cols = append(cols, col)
-			}
 			target.Columns = cols
+
+		case "schema":
+			s, err := scalarField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			if _, ok := schemas[s]; !ok {
+				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: unknown schema %q", name, field, s))
+			}
+			target.Schema = s
 
 		case "start":
 			s, err := scalarField(src, name, field, value)
@@ -395,6 +498,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node) (Targ
 		}
 	}
 
+	if target.Schema != "" && !seen["columns"] {
+		target.Columns = slices.Clone(schemas[target.Schema])
+	}
 	if strings.TrimSpace(target.Cmd) == "" {
 		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: cmd is required", name))
 	}
@@ -460,7 +566,26 @@ func yamlType(node *yaml.Node) string {
 	return strings.TrimPrefix(node.Tag, "!!")
 }
 
-func stringOrList(src *configSource, name, field string, node *yaml.Node) ([]string, []*yaml.Node, error) {
+// parseColumnList reads a `columns:` value, a list of `name {.yq.expr}` entries.
+func parseColumnList(src *configSource, owner, field string, node *yaml.Node) ([]Column, error) {
+	list, nodes, err := stringOrList(src, owner, field, node)
+	if err != nil {
+		return nil, err
+	}
+	cols := make([]Column, 0, len(list))
+	for i, raw := range list {
+		col, err := parseColumn(raw)
+		if err != nil {
+			return nil, src.at(nodes[i], len(raw), fmt.Sprintf("%s: field %q: %s in %q", owner, field, err, raw))
+		}
+		cols = append(cols, col)
+	}
+	return cols, nil
+}
+
+// stringOrList reads a string or a list of strings. owner names the entry in
+// error messages, e.g. `target "api"`.
+func stringOrList(src *configSource, owner, field string, node *yaml.Node) ([]string, []*yaml.Node, error) {
 	node = deref(node)
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -469,7 +594,7 @@ func stringOrList(src *configSource, name, field string, node *yaml.Node) ([]str
 			return nil, nil, nil
 		}
 		if node.Tag != "!!str" {
-			return nil, nil, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: field %q: expected a string or a list of strings, got %s", name, field, yamlType(node)))
+			return nil, nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: field %q: expected a string or a list of strings, got %s", owner, field, yamlType(node)))
 		}
 		return []string{node.Value}, []*yaml.Node{node}, nil
 
@@ -479,7 +604,7 @@ func stringOrList(src *configSource, name, field string, node *yaml.Node) ([]str
 		for _, item := range node.Content {
 			item = deref(item)
 			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" {
-				return nil, nil, src.at(item, nodeSpan(item), fmt.Sprintf("target %q: field %q: expected a list of strings, got %s", name, field, yamlType(item)))
+				return nil, nil, src.at(item, nodeSpan(item), fmt.Sprintf("%s: field %q: expected a list of strings, got %s", owner, field, yamlType(item)))
 			}
 			list = append(list, item.Value)
 			nodes = append(nodes, item)
@@ -487,7 +612,7 @@ func stringOrList(src *configSource, name, field string, node *yaml.Node) ([]str
 		return list, nodes, nil
 
 	default:
-		return nil, nil, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: field %q: expected a string or a list of strings", name, field))
+		return nil, nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: field %q: expected a string or a list of strings", owner, field))
 	}
 }
 

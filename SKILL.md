@@ -108,6 +108,12 @@ start, unnamed ones stay off (still listed, still startable with `space`).
 `start: manual` watches nothing and runs only when `r` asks for it.
 Unknown fields, duplicate fields, and non-string values are errors.
 
+Targets that log the same JSON shape can share columns: define them once under
+the reserved top-level `schemas:` key (`schemas: {backend: {columns: ["level {.level}"]}}`)
+and set `schema: backend` on each target. A target's own `columns` wins over its
+schema's, and a `schema:` naming no schema is an error. Quote each column entry,
+since a `{` inside a plain `[...]` entry is a YAML error.
+
 ## Flags
 
 - `-delay`, `-cooldown`, `-grace` — override per run (CLI wins over rerun.yml)

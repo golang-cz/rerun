@@ -132,7 +132,32 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, open, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, schema, open, selected, start, delay, cooldown, grace"},
+		},
+		{
+			name:    "unknown schema",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  cmd: echo hi\n",
+			wantSub: []string{`target "api"`, `field "schema"`, `unknown schema "nope"`},
+		},
+		{
+			name:    "schema without columns",
+			content: "schemas:\n  backend: {}\n\napi:\n  cmd: echo hi\n",
+			wantSub: []string{`schema "backend"`, "columns is required"},
+		},
+		{
+			name:    "unknown field inside a schema",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
+			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns"},
+		},
+		{
+			name:    "schemas with no targets",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n",
+			wantSub: []string{"no targets defined"},
+		},
+		{
+			name:    "schemas is not a mapping",
+			content: "schemas: 5\napi:\n  cmd: echo hi\n",
+			wantSub: []string{"schemas: expected a mapping of schema names"},
 		},
 		{
 			name:    "bad duration",
@@ -281,6 +306,18 @@ func TestParseConfigErrorPositions(t *testing.T) {
 			content: "api:\n  cmd: echo hi\n  on: 5\n",
 			head:    `:3:7: target "api": field "on": expected a string or a list of strings, got int`,
 			excerpt: []string{"  3 |   on: 5", "    |       ^"},
+		},
+		{
+			name:    "unknown schema points at the name",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  cmd: echo hi\n",
+			head:    `:6:11: target "api": field "schema": unknown schema "nope"`,
+			excerpt: []string{"  6 |   schema: nope", "    |" + strings.Repeat(" ", 11) + "^^^^"},
+		},
+		{
+			name:    "unknown field inside a schema points at the key",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
+			head:    `:4:5: schema "backend": unknown field "bogus"`,
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns"},
 		},
 		{
 			name:    "cmd is required points at the target",
@@ -664,6 +701,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"cmd":      "echo hi",
 		"url":      "http://localhost:1",
 		"columns":  `["a {.b}"]`,
+		"schema":   "backend",
 		"open":     "true",
 		"selected": "false",
 		"start":    "onchange",
@@ -682,7 +720,11 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		if field == "cmd" {
 			line = "" // the base already writes cmd once
 		}
-		writeFile(t, path, "api:\n  cmd: echo hi\n"+line+"\n")
+		prefix := ""
+		if field == "schema" {
+			prefix = "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n"
+		}
+		writeFile(t, path, prefix+"api:\n  cmd: echo hi\n"+line+"\n")
 
 		if _, err := ParseConfig(path); err != nil {
 			t.Errorf("field %q: ParseConfig = %v, want nil", field, err)
@@ -773,5 +815,55 @@ func TestLoadConfigNotFound(t *testing.T) {
 	_, err := LoadConfig(dir)
 	if !errors.Is(err, ErrConfigNotFound) {
 		t.Fatalf("LoadConfig = %v, want ErrConfigNotFound", err)
+	}
+}
+
+func TestParseConfigSchemaColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n\nweb:\n  cmd: echo web\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	api, _ := cfg.Find("api")
+	want := []Column{{Name: "level", Expr: ".level"}, {Name: "msg", Expr: ".msg"}}
+	if api.Schema != "backend" || !reflect.DeepEqual(api.Columns, want) {
+		t.Errorf("api schema = %q columns = %+v, want backend and %+v", api.Schema, api.Columns, want)
+	}
+	web, _ := cfg.Find("web")
+	if web.Schema != "" || len(web.Columns) != 0 {
+		t.Errorf("web schema = %q columns = %+v, want none", web.Schema, web.Columns)
+	}
+}
+
+func TestParseConfigTargetColumnsBeatSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\"]\n\napi:\n  schema: backend\n  columns: [\"status {.status}\"]\n  cmd: echo hi\n\nempty:\n  schema: backend\n  columns: []\n  cmd: echo hi\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	api, _ := cfg.Find("api")
+	if api.Schema != "backend" || !reflect.DeepEqual(api.Columns, []Column{{Name: "status", Expr: ".status"}}) {
+		t.Errorf("api schema = %q columns = %+v, want the target's own columns", api.Schema, api.Columns)
+	}
+	empty, _ := cfg.Find("empty")
+	if len(empty.Columns) != 0 {
+		t.Errorf("empty columns = %+v, want an explicit empty list to win", empty.Columns)
+	}
+}
+
+func TestParseConfigSchemasOnlyBlockIsNullSafe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "schemas:\napi:\n  cmd: echo hi\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if got := cfg.Names(); !reflect.DeepEqual(got, []string{"api"}) {
+		t.Errorf("names = %v, want [api]", got)
 	}
 }
