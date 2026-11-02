@@ -123,18 +123,21 @@ func TestQuitConfirmOtherKeyStays(t *testing.T) {
 	}
 }
 
-// Inside help, q closes the overlay and never arms the modal.
-func TestQuitConfirmQInHelpClosesHelp(t *testing.T) {
+// Inside help, q closes the overlay into the quit confirm, so the modal shows.
+func TestQuitConfirmQInHelpOpensTheConfirm(t *testing.T) {
 	m := newTestModel(t)
 	press(m, "?")
 	if _, cmd := m.Update(keyMsg("q")); cmd != nil {
-		t.Fatal("q in the help overlay returned a quit command")
+		t.Fatal("q in the help overlay returned a quit command instead of asking")
 	}
-	if m.confirmQuit {
-		t.Fatal("q in the help overlay armed the confirm modal")
+	if !m.confirmQuit {
+		t.Fatal("q in the help overlay did not arm the confirm modal")
 	}
 	if m.help {
-		t.Fatal("q did not close the help overlay")
+		t.Fatal("q left the help overlay open under the modal")
+	}
+	if !strings.Contains(m.View(), "Quit rerun?") {
+		t.Error("the confirm modal does not render after q from help")
 	}
 }
 

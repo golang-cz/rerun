@@ -184,30 +184,6 @@ func TestOpGlyphMapping(t *testing.T) {
 	}
 }
 
-func TestRelToWatchTrimsTheRoot(t *testing.T) {
-	tests := []struct {
-		name  string
-		roots []string
-		path  string
-		want  string
-	}{
-		{name: "default root", path: "src/a.go", want: "src/a.go"},
-		{name: "dot slash root", roots: []string{"./"}, path: "./src/a.go", want: "src/a.go"},
-		{name: "named root", roots: []string{"apps/api"}, path: "apps/api/main.go", want: "main.go"},
-		{name: "second root matches", roots: []string{"web", "api"}, path: "api/main.go", want: "main.go"},
-		{name: "outside every root", roots: []string{"api"}, path: "web/main.go", want: "web/main.go"},
-		{name: "the root itself", roots: []string{"api"}, path: "api", want: "api"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := relToWatch(tt.roots, tt.path); got != tt.want {
-				t.Fatalf("relToWatch(%v, %q) = %q, want %q", tt.roots, tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
 // sevenFiles is a change batch big enough to exceed the drawer's file cap.
 func sevenFiles() rerun.ChangeSet {
 	files := map[string]struct{}{}

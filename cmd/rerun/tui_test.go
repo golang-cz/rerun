@@ -78,11 +78,21 @@ func slowClick(m *tuiModel) {
 	m.lastClickAt = m.lastClickAt.Add(-doubleClickWindow)
 }
 
-// buttons is the stream button of every row, in row order.
+// buttons is each row's stream state in row order: S solo, M muted, blank otherwise.
+// fadeNotice expires the info notice, so the bottom line shows the state chips.
+func fadeNotice(m *tuiModel) { m.noticeUntil = time.Time{} }
+
 func buttons(m *tuiModel) []string {
 	out := make([]string, len(m.targets))
 	for i := range m.targets {
-		out[i] = m.button(i)
+		switch m.streamWord(i) {
+		case "solo":
+			out[i] = "S"
+		case "muted":
+			out[i] = "M"
+		default:
+			out[i] = " "
+		}
 	}
 	return out
 }
@@ -100,17 +110,17 @@ func TestUptimeFormat(t *testing.T) {
 		in   time.Duration
 		want string
 	}{
-		{0, "0s"},
-		{3 * time.Second, "3s"},
-		{9 * time.Second, "9s"},
-		{48 * time.Second, "0m48s"},
-		{75 * time.Second, "1m15s"},
-		{30 * time.Minute, "30m00s"},
-		{90 * time.Minute, "1h30m"},
-		{150 * time.Minute, "2h30m"},
-		{23 * time.Hour, "23h00m"},
+		{0, "0:00"},
+		{3 * time.Second, "0:03"},
+		{9 * time.Second, "0:09"},
+		{48 * time.Second, "0:48"},
+		{75 * time.Second, "1:15"},
+		{30 * time.Minute, "30:00"},
+		{90 * time.Minute, "1:30:00"},
+		{150 * time.Minute, "2:30:00"},
+		{23 * time.Hour, "23:00:00"},
 		{99 * time.Hour, "4d03h"},
-		{-time.Second, "0s"},
+		{-time.Second, "0:00"},
 	}
 	for _, tt := range tests {
 		if got := uptime(tt.in); got != tt.want {
@@ -291,7 +301,7 @@ func TestUnseenBadgeClearsOnSoloSwitch(t *testing.T) {
 
 func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
-	m.help = true
+	m.help, m.helpAll = true, true
 	view := m.View()
 	for _, want := range []string{"● run", "○ stopped", "✓ ok", "✗ exit", "· off", "✱ unseen"} {
 		if !strings.Contains(view, want) {
@@ -434,7 +444,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	_, rightW := m.layoutWidths()
 	lines := paneOf(m)
 
-	if !strings.HasPrefix(lines[0], "0s · 0 files · vite dev") {
+	if !strings.HasPrefix(lines[0], "0:00 · 0 files · vite dev") {
 		t.Fatalf("title = %q, want the cursor row's uptime, files, and command", lines[0])
 	}
 	if got := displayWidth(lines[0]); got != rightW {
@@ -452,7 +462,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 		first:  "src/a.go",
 		change: rerun.ChangeSet{Files: map[string]struct{}{"src/a.go": {}, "src/b.go": {}, "src/c.go": {}}},
 	})
-	if line := paneOf(m)[0]; !strings.HasPrefix(line, "0s · 3 files · vite dev") {
+	if line := paneOf(m)[0]; !strings.HasPrefix(line, "0:00 · 3 files · vite dev") {
 		t.Fatalf("title after a change = %q, want the file count", line)
 	}
 
@@ -476,7 +486,7 @@ func TestRightPaneTitleShowsRowState(t *testing.T) {
 	}{
 		{name: "running", state: stateRunning, setup: func(m *tuiModel) {
 			m.now = m.targets[0].lastStart.Add(12 * time.Second)
-		}, want: "0m12s · 0 files · make run"},
+		}, want: "0:12 · 0 files · make run"},
 		{name: "exited ok", state: stateExited, setup: func(m *tuiModel) {
 			m.targets[0].exitCode = 0
 			m.targets[0].exitLabel = "exit 0"
@@ -581,8 +591,7 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	}
 }
 
-// The left column is nameW + the fixed glyph, badge, separators, status, and
-// button.
+// The left column is nameW + the fixed glyph, space, two-cell marker, and status.
 func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
 	leftW, _ := m.layoutWidths()
@@ -591,8 +600,8 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	if got := nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+16 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+16)
+	if leftW != wantName+15 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+15)
 	}
 	if statusW != 11 {
 		t.Fatalf("statusW = %d, want 11", statusW)
@@ -732,18 +741,22 @@ func TestNamedRunListsEveryTargetAndStartsOffOnDemand(t *testing.T) {
 func TestHelpOverlayToggles(t *testing.T) {
 	m := newTestModel(t)
 	press(m, "?")
-	if !m.help {
-		t.Fatal("? did not open the help overlay")
+	if !m.help || m.helpAll {
+		t.Fatal("? did not open the short help overlay")
 	}
+	if view := m.View(); !strings.Contains(view, "s enter") || strings.Contains(view, "shift-drag") {
+		t.Errorf("short help should list the core keys only:\n%s", view)
+	}
+	press(m, "?")
 	view := m.View()
 	for _, want := range []string{"mute", "solo", "shift-drag", "open the target's url"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("help overlay is missing %q", want)
+			t.Errorf("full help overlay is missing %q", want)
 		}
 	}
 	press(m, "?")
 	if m.help {
-		t.Fatal("? did not close the help overlay")
+		t.Fatal("? did not close the full help overlay")
 	}
 }
 
@@ -793,6 +806,7 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 func TestSoloChipAppendsToFrozen(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.toggleSolo(0)
+	fadeNotice(m)
 	press(m, "p")
 	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G) · solo web") {
 		t.Fatalf("bottom line = %q, want paused then solo", got)
@@ -831,10 +845,13 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 	}
 
 	web := lines[0]
-	for _, want := range []string{"●", "web", "0m48s", "M"} {
+	for _, want := range []string{"●", "web", "0:48"} {
 		if !strings.Contains(web, want) {
 			t.Errorf("web row %q is missing %q", web, want)
 		}
+	}
+	if title := lines[0]; !strings.Contains(title, "muted") {
+		t.Errorf("pane title %q does not name the muted row", title)
 	}
 	if api := lines[1]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
 		t.Errorf("api row = %q, want ✓ and exit 0", api)
@@ -887,19 +904,14 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.View()
 
-	// The stream button cell is the last cell of the left column. It mutes
-	// only: no solo, even though the click lands on a target row.
-	btnX := m.layout.leftW - 1
-	m.handleMouse(mouse(btnX, 0, false))
-	if got := m.button(0); got != "M" {
-		t.Fatalf("button after click = %q, want M", got)
+	// The right edge is the status column now; a click there never mutes.
+	m.toggleMute(0)
+	m.handleMouse(mouse(m.layout.leftW-1, 1, false))
+	if m.targets[1].muted {
+		t.Fatal("a right-edge click muted the row")
 	}
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want none after a button-cell click", m.solo)
-	}
-	if !m.targets[0].muted {
-		t.Error("the button-cell click did not mute")
-	}
+	slowClick(m)
+	m.clearScope()
 
 	// A single click on a name cell moves the cursor there and solos it.
 	m.handleMouse(mouse(2, 1, false))
@@ -926,8 +938,8 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 
 	// Shift-click solos the row under the pointer.
 	m.handleMouse(mouse(2, 0, true))
-	if got := m.button(0); got != "S" {
-		t.Fatalf("button after shift-click = %q, want S", got)
+	if got := m.streamWord(0); got != "solo" {
+		t.Fatalf("stream after shift-click = %q, want solo", got)
 	}
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0 after shift-click", m.solo)
@@ -1086,8 +1098,8 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 func TestRowStatusText(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.now = m.targets[0].lastStart.Add(65 * time.Second)
-	if got := m.status(m.targets[0]); got != "1m05s" {
-		t.Errorf("running status = %q, want 1m05s", got)
+	if got := m.status(m.targets[0]); got != "1:05" {
+		t.Errorf("running status = %q, want 1:05", got)
 	}
 
 	m.targets[0].state = stateExited
@@ -1134,7 +1146,7 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 
 	// The first run takes the row to the ordinary running state.
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: m.now}})
-	if got := m.status(m.targets[0]); got != "0s" {
+	if got := m.status(m.targets[0]); got != "0:00" {
 		t.Errorf("status after the first run = %q, want 0s", got)
 	}
 }
@@ -1477,7 +1489,7 @@ func TestStartingAndStartedEventsMoveTheRow(t *testing.T) {
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state after started = %v, want running", m.targets[0].state)
 	}
-	if got := m.status(m.targets[0]); got != "0s" {
+	if got := m.status(m.targets[0]); got != "0:00" {
 		t.Fatalf("status after started = %q, want 0s", got)
 	}
 }

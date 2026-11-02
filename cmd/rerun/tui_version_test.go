@@ -48,7 +48,7 @@ func TestVersionText(t *testing.T) {
 func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.version = "v9.9.9"
-	m.width, m.height = 40, 6
+	m.width, m.height = 120, 6
 
 	lines := strings.Split(m.View(), "\n")
 	if len(lines) != m.height {
@@ -60,7 +60,7 @@ func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	}
 
 	leftW, _ := m.layoutWidths()
-	text := "rerun · v9.9.9 · ?"
+	text := "rerun · v9.9.9 · ? help"
 	got := string([]rune(plainLine(bottom))[:leftW])
 	if want := text + strings.Repeat(" ", leftW-displayWidth(text)); got != want {
 		t.Fatalf("left column = %q, want %q", got, want)
@@ -89,7 +89,7 @@ func TestVersionCellEndsWithHelpCue(t *testing.T) {
 			if w := displayWidth(got); w != tc.leftW {
 				t.Fatalf("versionCell(%d) width = %d: %q", tc.leftW, w, got)
 			}
-			if hasCue := strings.HasSuffix(strings.TrimRight(got, " "), "· ?"); hasCue != tc.cue {
+			if hasCue := strings.HasSuffix(strings.TrimRight(got, " "), "· ? help"); hasCue != tc.cue {
 				t.Fatalf("versionCell(%d) = %q, cue %v, want %v", tc.leftW, got, hasCue, tc.cue)
 			}
 		})

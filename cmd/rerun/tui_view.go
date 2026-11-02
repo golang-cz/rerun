@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,13 +16,18 @@ const (
 	colorGreen  = "2"
 	colorRed    = "1"
 	colorGray   = "8"
-	colorSolo   = "6"
 )
 
-// Left column geometry: glyph, space, name, badge, status, space, button —
-// nameW + statusW + 5 cells. The status column fits `exit segv`, `4d03h`, and
+// Left column geometry: glyph, space, name, a two-cell marker, status —
+// nameW + statusW + 4 cells. The status column fits `exit segv`, `4d03h`, and
 // `backoff 10s` (11 cells).
 const statusW = 11
+
+// markerW is the two cells between a name and its status: unsaved, then unseen.
+const markerW = 2
+
+// narrowW is the screen width under which the left column shrinks to its names.
+const narrowW = 100
 
 type tuiStyles struct {
 	base         lipgloss.Style
@@ -166,7 +170,7 @@ func overlayCenter(frame, box string, width, height int) string {
 
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
-	nameW := 4 // the floor keeps the badge and status readable for short names
+	nameW := 1
 	for _, t := range m.targets {
 		w := displayWidth(t.spec.Name)
 		if t.spec.Schema != "" {
@@ -175,7 +179,14 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 		}
 		nameW = max(nameW, w)
 	}
-	leftW = nameW + statusW + 5
+	leftW = nameW + statusW + 4
+	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
+	// the version; a narrow one shrinks to the names, down to 16.
+	if m.width < narrowW {
+		leftW = max(16, leftW)
+	} else {
+		leftW = max(24, leftW)
+	}
 	if limit := max(8, m.width/2); leftW > limit {
 		leftW = limit
 	}
@@ -186,15 +197,19 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 }
 
 // nameWidth is the name cell's width for a given left column width.
-func nameWidth(leftW int) int { return max(0, leftW-statusW-5) }
+func nameWidth(leftW int) int { return max(0, leftW-statusW-4) }
 
-// badge is the name column's trailing cell: a marker for hidden output, else
-// a plain separator, so the status column never shifts.
-func badge(unseen bool) string {
-	if unseen {
-		return "✱"
+// marker is the two cells after a name: `*` when its columns await ctrl+s, `✱`
+// when its output is hidden. Both cells stay blank otherwise, so the status never shifts.
+func marker(dirty, unseen bool) string {
+	d, u := " ", " "
+	if dirty {
+		d = "*"
 	}
-	return " "
+	if unseen {
+		u = "✱"
+	}
+	return d + u
 }
 
 // listLen counts the list's screen lines: schema headers and targets.
@@ -235,14 +250,18 @@ func (m *tuiModel) inDrawer(y int) (drawerRow, bool) {
 // help cue, hint styled and left aligned, with plain padding out to the
 // divider column. A column too narrow for the cue keeps the bare version.
 func (m *tuiModel) versionCell(leftW int) string {
-	cue := 0
-	if leftW >= 8 {
-		cue = 4 // " · ?" always fits: the version text truncates to make room
+	cue := ""
+	switch {
+	case leftW >= 16:
+		cue = " · ? help"
+	case leftW >= 8:
+		cue = " · ?"
 	}
-	text := truncate(m.versionText(), leftW-cue)
-	if cue > 0 {
-		text += " · ?"
+	version := m.versionText()
+	if displayWidth(version)+displayWidth(cue) > leftW {
+		version = strings.TrimPrefix(version, "rerun · ") // a narrow column keeps the version, not the name
 	}
+	text := strings.TrimRight(ellipsize(version, leftW-displayWidth(cue)), " ") + cue
 	return m.styles.hint.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
 }
 
@@ -305,26 +324,6 @@ func opText(op byte) string {
 	return string(op)
 }
 
-// relToWatch trims a changed path to the target's watch root, so the tree reads
-// `cmd/rerun/tui.go` and not `./cmd/rerun/tui.go`. A path no root contains, as
-// a glob root can leave, keeps its own form.
-func relToWatch(roots []string, path string) string {
-	if len(roots) == 0 {
-		roots = []string{"./"}
-	}
-	for _, root := range roots {
-		if strings.ContainsAny(root, "*?[") {
-			continue // a glob root is expanded by the watcher, not here
-		}
-		rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-			continue
-		}
-		return rel
-	}
-	return filepath.Clean(path)
-}
-
 // leftLine draws one screen line of the left column: the version line owns the
 // last row, the fs drawer the rows above it, and the target list the rest.
 func (m *tuiModel) leftLine(y, leftW int) string {
@@ -362,6 +361,9 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 		return m.styles.divider.Render(label + strings.Repeat("─", max(0, leftW-displayWidth(label))))
 
 	case drawerBatch:
+		if row.cursor && m.drawerFocus {
+			base = m.styles.cursor
+		}
 		return batchLine(row, leftW, base)
 
 	case drawerDir:
@@ -378,27 +380,43 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 	return strings.Repeat(" ", leftW)
 }
 
-// batchLine draws a feed batch as `15:04:05  path +N  → targets`. The path keeps
-// its room; the targets truncate with an ellipsis to fit what is left.
+// batchLine draws a feed batch as `  5s  path +N  → targets`. The arrow is reserved
+// first; the path takes the rest and cuts from its left, so the file name survives.
 func batchLine(row drawerRow, leftW int, base lipgloss.Style) string {
-	stamp := row.at.Format("15:04:05")
-	avail := leftW - displayWidth(stamp) - 2
+	age := strings.Repeat(" ", max(0, feedAgeW-displayWidth(row.age))) + row.age
 	path := row.label
 	if row.extra > 0 {
 		path += fmt.Sprintf(" +%d", row.extra)
 	}
-	arrow := ""
-	if len(row.targets) > 0 {
-		arrow = "  → " + strings.Join(row.targets, ", ")
-	}
-	path = ellipsize(path, avail)
-	arrow = ellipsize(arrow, avail-displayWidth(path))
+	room := leftW - feedAgeW - 2
+	arrow := targetsArrow(row.targets, room, displayWidth(path))
 	return renderSegs([]seg{
-		{text: stamp, faint: true},
+		{text: age, faint: true},
 		{text: "  "},
-		{text: path},
+		{text: ellipsizeLeft(path, room-displayWidth(arrow))},
 		{text: arrow, color: colorGray},
 	}, base, leftW)
+}
+
+// targetsArrow is the batch's `→ targets` cell. It names every target when the path
+// keeps minPath cells beside it, else the first target, else how many.
+func targetsArrow(targets []string, room, pathW int) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	full := "  → " + strings.Join(targets, ", ")
+	first := "  → " + targets[0]
+	count := fmt.Sprintf("  → %d targets", len(targets))
+	budget := room - min(pathW, 12)
+	switch {
+	case displayWidth(full) <= budget:
+		return full
+	case budget >= displayWidth(first)+2: // room for the first name and a cut mark
+		return ellipsize(full, budget)
+	case displayWidth(first) <= room:
+		return first
+	}
+	return truncate(count, room)
 }
 
 // ellipsize cuts s to w cells, ending a cut string with an ellipsis.
@@ -412,17 +430,20 @@ func ellipsize(s string, w int) string {
 	return truncate(s, w-1) + "…"
 }
 
+// ellipsizeLeft cuts s to w cells from its left, with an ellipsis at the cut, so a
+// path keeps its end.
+func ellipsizeLeft(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if displayWidth(s) <= w {
+		return s
+	}
+	return "…" + ansi.TruncateLeft(s, displayWidth(s)-(w-1), "")
+}
+
 func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
-
-	btn := m.button(r.target)
-	btnColor := ""
-	switch btn {
-	case "M":
-		btnColor = colorGray
-	case "S":
-		btnColor = colorSolo
-	}
 
 	name := nameWidth(leftW)
 	var segs []seg
@@ -433,11 +454,9 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: dirtyName(t.spec.Name, name, m.targetDirty(t)), link: t.spec.URL},
-		seg{text: badge(t.unseen)},
+		seg{text: padRight(t.spec.Name, name), link: t.spec.URL},
+		seg{text: marker(m.targetDirty(t), t.unseen)},
 		seg{text: padRight(m.status(t), statusW), color: statusColor(t)},
-		seg{text: " "},
-		seg{text: btn, color: btnColor},
 	)
 	style := m.rowStyle(row, r)
 	if t.flashing(m.now) {
@@ -460,6 +479,8 @@ func opColor(op string) string {
 
 func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 	switch {
+	case row == m.cursor && m.drawerFocus:
+		return m.styles.muted // the drawer owns the cursor while it has focus
 	case row == m.cursor:
 		return m.styles.cursor
 	case row == m.hover:
@@ -590,7 +611,8 @@ func (m *tuiModel) rightLines(w int) []string {
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip))) + m.copySeq
 		case m.noticeLive():
 			// A notice outranks the marker: a hidden error reads as no error.
-			out[last] = m.bottomLine(w, m.notice, chip)
+			// The notice names the solo or mute itself, so the state chip waits.
+			out[last] = m.bottomLine(w, m.notice, "")
 		case m.dirty():
 			out[last] = m.bottomLine(w, unsavedNotice, chip)
 		case markerShown:
@@ -719,10 +741,13 @@ func fileCount(n int) string {
 func (m *tuiModel) titleLine(w int) string {
 	m.layout.chips = m.layout.chips[:0]
 	segs := m.chipSegs()
-	if m.cursorTarget() >= 0 {
-		t := m.targets[m.cursorTarget()]
+	if i := m.cursorTarget(); i >= 0 {
+		t := m.targets[i]
 		if t.state == stateExited {
 			segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
+		}
+		if word := m.streamWord(i); word != "" {
+			segs = append(segs, seg{text: word + " · "})
 		}
 		segs = append(segs, seg{text: fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)})
 		if t.spec.URL != "" {
@@ -808,54 +833,71 @@ func (m *tuiModel) allMuted() bool {
 	return len(m.targets) > 0
 }
 
-// helpKeys is the help overlay's content, in display order.
+// helpShortKeys is the help overlay's first view: the keys used most.
+var helpShortKeys = [][2]string{
+	{"j/k ↑/↓", "move between rows (in the pane, move its cursor)"},
+	{"space", "start or stop the row"},
+	{"r", "reboot the row"},
+	{"s enter", "solo a target, or select a schema's targets"},
+	{"esc", "clear the search, the filter, or the solo"},
+	{"tab", "focus the fs drawer"},
+	{"enter a f", "pane: expand the line; a adds its key, f filters its value"},
+	{"c", "toggle the columns table"},
+	{"v", "filter the pane (a leading . runs yq)"},
+	{"ctrl+s", "save unsaved columns to rerun.yml"},
+	{"q", "quit (asks first)"},
+}
+
+// helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows; ↑/↓ move the pane cursor when focused"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (schema row: its targets)"},
 	{"r", "reboot (grace applies; schema row: its selected targets)"},
-	{"t", "toggle the fs drawer (the change feed)"},
+	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
-	{"m", "mute the target's stream (M; schema row: its targets)"},
-	{"s enter", "solo a target, or select a schema's targets (S; again or esc to clear)"},
+	{"m", "mute the target's stream (schema row: its targets)"},
+	{"s enter", "solo a target, or select a schema's targets (again or esc clears)"},
 	{"esc", "clear search, then filter, then solo or schema"},
-	{"o", "open the target's url"},
-	{"G", "resume the live tail"},
-	{"p", "browse the scrollback (again/G to live)"},
+	{"o G", "open the target's url / resume the live tail"},
+	{"p", "browse the scrollback (again or G goes live)"},
 	{"/", "search the pane (n/N next/prev, esc clears)"},
 	{"v", "filter (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},
-	{"?", "close this help"},
-	{"q ^C", "q/^C confirm quit · enter/^C again quits · esc cancels"},
+	{"backspace ×", "pane: remove the last chip; click a chip's or column's × to remove it"},
+	{"ctrl+s", "save unsaved columns to rerun.yml"},
+	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }
 
+// helpMouse is the help overlay's mouse notes and legend, shown under the full view.
+var helpMouse = []string{
+	"click a row solos it; double-click starts or stops it",
+	"click a schema selects its targets; click a batch lists its files",
+	"drag copies a range; shift-drag uses the terminal's selection",
+	"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen",
+}
+
+// helpView draws the help overlay: the short key list, or the full one when helpAll is set.
 func (m *tuiModel) helpView() string {
 	var b strings.Builder
-	b.WriteString(m.styles.title.Render("rerun") + "\n\n")
-	for _, kv := range helpKeys {
-		b.WriteString(m.styles.key.Render(padRight(kv[0], 10)) + " " + kv[1] + "\n")
+	b.WriteString(m.styles.title.Render("rerun keys") + "\n")
+	keys, footer := helpShortKeys, "? or m: all keys · esc closes"
+	if m.helpAll {
+		keys, footer = helpKeys, "esc closes"
 	}
-	b.WriteString("\n")
-	for _, line := range []string{
-		"mouse: click a row to solo it or a schema to select its targets (again to clear), click a",
-		"drawer batch to list its files, double-click to stop/start like space,",
-		"click a row's button cell to mute.",
-		"click a pane line to copy it; drag copies a range and pauses the tail",
-		"(p, G, or ↓ N new resume). shift-drag uses the terminal selection.",
-		"space starts/stops — it does not page; pgup/pgdn/ctrl-u/d page.",
-		"the pane's top line is the cursor row's uptime, files, and cmd.",
-		"the fs drawer at the bottom of the left column is a feed of the change",
-		"batches of the last minute, each naming the targets it restarted; t",
-		"toggles it, and it never takes more than half the column.",
-		"a filter starting with . runs a yq expression per JSON line.",
-		"saving rerun.yml reloads it: the banner names what changed.",
-		"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen  ⟳ starting/backoff",
-	} {
-		b.WriteString(m.styles.hint.Render(line) + "\n")
+	for _, kv := range keys {
+		b.WriteString(m.styles.key.Render(padRight(kv[0], 12)) + " " + kv[1] + "\n")
 	}
+	if m.helpAll {
+		b.WriteString("\n")
+		for _, line := range helpMouse {
+			b.WriteString(m.styles.hint.Render(line) + "\n")
+		}
+	}
+	b.WriteString("\n" + m.styles.hint.Render(footer))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		m.styles.box.Render(strings.TrimRight(b.String(), "\n")))
+		m.styles.box.Render(b.String()))
 }

@@ -60,7 +60,7 @@ and runs the named targets only.
 
 On a terminal, target mode opens the TUI: a row per target on the left, the
 merged stream on the right. Piped or non-TTY output stays plain prefixed text.
-Press `?` inside it for the full key list.
+Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `s` or `enter` solo a target's stream or select a schema's targets (`esc` or a
@@ -69,8 +69,8 @@ targets. `o` open the url, `G` live output. The right pane is always the merged 
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to solo it,
-double-click to stop/start like `space`, the button cell to mute, shift-click
-to solo, and a click on a schema header to select its targets.
+double-click to stop/start like `space`, shift-click to solo, and a click on a
+schema header to select its targets. `m` mutes; the footer notice names it.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
@@ -84,7 +84,7 @@ schema, else the soloed target), and a click on a scalar adds a `.path == value`
 (ANDed with `v`; `×` or `backspace` removes it). With the pane focused and the cursor on
 an expanded key or scalar row, `a` adds the key and `f` adds the value chip, as the
 clicks do. A table header column name is inert; only the `×` after it removes that
-column. A schema or target whose columns are unsaved shows a `*` after its name. Picks are
+column. A schema or target whose columns are unsaved shows a `*` in its marker column, two cells after its name; a `✱` there marks hidden output. Picks are
 unsaved until `ctrl+s` writes them with the rerun.yml column writer; the footer shows
 `unsaved columns · ctrl+s save`, and the quit modal says so too. A target with a schema
 and no columns of its own writes its schema. A `columns:` list that a YAML alias uses elsewhere
@@ -93,8 +93,10 @@ and line endings, and follow a symlink to the file it names. `cmd+s` works only 
 forwards it.
 
 The fs drawer under the list is a change feed: one line per batch of changes
-(events within 150ms of each other), with the first changed file, `+N` for the
-rest, and the targets the batch restarted. `tab` focuses it, `j/k` move, `enter`
+(events within 150ms of each other), with the batch age, the first changed file, `+N` for the
+rest, and the targets the batch restarted. A created directory shows a trailing `/` and heads
+the files reported under it; a narrow column cuts the path from its left. The pane's top line
+names a soloed or muted row (`solo`, `muted`). `tab` focuses it, `j/k` move, `enter`
 lists a batch's files, `esc` closes. A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.
 

@@ -167,8 +167,9 @@ type tuiModel struct {
 
 	targets []*tuiTarget
 
-	cursor int // highlighted list row, an index into listRows
-	help   bool
+	cursor  int // highlighted list row, an index into listRows
+	help    bool
+	helpAll bool // the help overlay shows every key, not the short list
 	// confirmQuit is the `q` modal: the frame keeps running behind it, and
 	// only enter quits.
 	confirmQuit bool
@@ -395,18 +396,18 @@ func (m *tuiModel) streamsTo(i int) bool {
 	return true
 }
 
-// button is the row's stream button: blank, M, or S.
-func (m *tuiModel) button(i int) string {
+// streamWord names how a target's stream is held: `solo` for the pane's only
+// stream, `muted` for a muted one. Solo hides every other row's mute state.
+func (m *tuiModel) streamWord(i int) string {
 	switch {
 	case m.solo == i:
-		return "S"
+		return "solo"
 	case m.solo >= 0:
-		// Solo hides every other row's mute state, which is kept inside.
-		return " "
+		return ""
 	case m.targets[i].muted:
-		return "M"
+		return "muted"
 	}
-	return " "
+	return ""
 }
 
 func (m *tuiModel) toggleMute(i int) {
@@ -419,14 +420,22 @@ func (m *tuiModel) toggleMute(i int) {
 	m.mergedDirty = true
 	m.vpDirty = true
 	m.recomputeSearch(false)
+	if t.muted {
+		m.showNotice("muted "+t.spec.Name, false)
+	} else {
+		m.showNotice("unmuted "+t.spec.Name, false)
+	}
 }
 
 func (m *tuiModel) toggleSolo(i int) {
+	name := m.targets[i].spec.Name
 	if m.solo == i {
 		m.clearScope()
+		m.showNotice("unsolo "+name, false)
 		return
 	}
 	m.selectScope(i, "")
+	m.showNotice("solo "+name, false)
 }
 
 // refreshUnseen drops the badge from every row whose stream is in the pane
@@ -1020,20 +1029,17 @@ func (m *tuiModel) rebuildMerged() {
 	m.dispDirty = true
 }
 
-// uptime renders a running target's age: 3s, 0m48s, 1m15s, 2h30m, 4d03h.
+// uptime renders a running target's age as a clock: 0:07, 2:03, 1:02:03, then 4d03h.
 func uptime(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
+	secs := int(d / time.Second)
 	switch {
-	case d < 10*time.Second:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	case d < time.Minute:
-		return fmt.Sprintf("0m%02ds", int(d.Seconds()))
 	case d < time.Hour:
-		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+		return fmt.Sprintf("%d:%02d", secs/60, secs%60)
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+		return fmt.Sprintf("%d:%02d:%02d", secs/3600, secs/60%60, secs%60)
 	}
 	return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
 }

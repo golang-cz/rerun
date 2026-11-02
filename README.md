@@ -22,7 +22,7 @@ Naming targets picks what starts, not what is listed: the TUI still shows
 every rerun.yml target. The named ones come up running; the rest start off
 and `space` starts one by hand.
 
-Target mode on a terminal opens a TUI: one row per target, `?` lists the keys.
+Target mode on a terminal opens a TUI: one row per target, `?` lists the keys, and a second `?` lists them all.
 Piped or non-TTY output stays plain prefixed lines.
 
 Left column: one row per target; right pane: one merged log; `?` lists keys.
@@ -50,27 +50,34 @@ with `v`; click a chip's `×`, or press `backspace` with the pane focused, to re
 Click the `×` after a column name in the table header to remove that column; a click on
 the name does nothing. Column picks are unsaved until `ctrl+s` writes them to rerun.yml;
 the footer reads `unsaved columns · ctrl+s save` until then, and a schema or target with
-unsaved columns gets a `*` after its name. A `columns:` list that a YAML alias uses elsewhere is
+unsaved columns gets a `*` in its marker column, two cells after its name. A `columns:` list that a YAML alias uses elsewhere is
 not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
-Mouse: click a row to solo it, double-click to stop/start like `space`, the
-button cell to mute, a batch in the fs drawer to list its files,
-shift-click to solo, and a click on a schema header to select its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
+Mouse: click a row to solo it, double-click to stop/start like `space`, a batch
+in the fs drawer to list its files, shift-click to solo, and a click on a schema
+header to select its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
 Targets with a `schema:` are listed under a `▾ name` header that counts
 its running members; targets without one follow. The right pane is always the
 merged stream; soloing narrows it to one target, and selecting a schema to its
 members, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
-column. The pane's top line shows the cursor row's uptime, how many files its
-last change batch held, and its command, with its url linked. The fs drawer
+column. The pane's top line shows the cursor row's state, uptime, how many files its
+last change batch held, and its command, with its url linked. It names a soloed or
+muted row in words (`solo` or `muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
+Each row keeps two marker cells after its name: `*` for unsaved columns and `✱` for
+hidden output. Muting or soloing a target posts a footer notice (`muted api`, `solo api`).
+The bottom-left footer reads `? help`. The fs drawer
 at the bottom of the left column is a feed of recent change batches, newest
 first. A batch is every change within 150ms of its first event, so one save
-across several targets is one line: `15:04:05  path +N  → targets`. The path is
-the first changed file relative to the rerun.yml dir, `+N` counts the rest, and
+across several targets is one line: `5s  path +N  → targets`, with the batch's age
+right-aligned. The path is the first changed file relative to the rerun.yml dir, cut
+from its left when the column is narrow so the file name survives. A created directory
+keeps a trailing `/` and heads the files reported under it. `+N` counts the rest, and
 the arrow names the targets it restarted (`config` for a rerun.yml reload). The
 feed keeps batches for a minute and dims the newest when all have aged out.
-`tab` focuses the drawer: `j/k` move through the batches, `enter` (or a click)
+`tab` focuses the drawer; its cursor starts on the newest batch each time it gains focus,
+and the list cursor dims while the drawer has it. `j/k` move through the batches, `enter` (or a click)
 lists a batch's files with `+`/`~`/`−` glyphs, `esc` closes the list. A target
 whose row a batch restarted lights up for a second. `t` toggles the drawer,
 which grows on demand and never takes more than seven lines.

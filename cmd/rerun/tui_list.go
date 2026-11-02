@@ -228,17 +228,11 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 			running++
 		}
 	}
-	btn := ""
-	if m.schemaSel == r.schema {
-		btn = "S"
-	}
 	segs := []seg{
 		{text: "▾ "},
-		{text: dirtyName(r.schema, nameWidth(leftW), m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
-		{text: badge(m.unseenIn(r.members))},
+		{text: padRight(r.schema, nameWidth(leftW))},
+		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0, m.unseenIn(r.members))},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
-		{text: " "},
-		{text: btn, color: colorSolo},
 	}
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }

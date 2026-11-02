@@ -234,9 +234,15 @@ func TestDirtyMarkerOnSchemaAndTargetRows(t *testing.T) {
 	m := newTestModel(t, schemaTarget("payments-api", "db"), schemaTarget("payments-web", "db"), target("standalone-worker"))
 	m.setEdit(colNode{schema: true, name: "db"}, []Column{{Name: "level", Expr: ".level"}})
 	screen := ansi.Strip(m.View())
-	for _, want := range []string{"db*", "payments-api*", "payments-web*"} {
-		if !strings.Contains(screen, want) {
-			t.Fatalf("screen lacks %q:\n%s", want, screen)
+	for _, name := range []string{"db", "payments-api", "payments-web"} {
+		row := ""
+		for _, line := range strings.Split(screen, "\n") {
+			if strings.Contains(line, name) {
+				row = line
+			}
+		}
+		if !strings.Contains(row, "*") || strings.Contains(row, name+"*") {
+			t.Fatalf("row for %q lacks a marker beside, not on, its name: %q", name, row)
 		}
 	}
 }

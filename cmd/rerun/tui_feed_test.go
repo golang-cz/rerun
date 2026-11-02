@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
@@ -157,7 +158,7 @@ func TestFeedExpiresAfterAMinuteAndKeepsTheLatestDimmed(t *testing.T) {
 	}
 }
 
-// A line reads time, the first file with +N for the rest, and the targets it restarted.
+// A line reads the batch age, the first file with +N for the rest, and the targets it restarted.
 func TestFeedLineNamesFileCountAndTargets(t *testing.T) {
 	m := newTestModel(t, target("omsx-api"), target("backoffice"))
 	m.now = spawnClock
@@ -172,12 +173,12 @@ func TestFeedLineNamesFileCountAndTargets(t *testing.T) {
 	if want := "fs · last 1m"; !strings.HasPrefix(got[0], want) {
 		t.Fatalf("header = %q, want the %q title", got[0], want)
 	}
-	if want := "14:32:07  apps/api/rpc/users.go +2  → omsx-api, backoffice"; got[1] != want {
+	if want := " 0s  apps/api/rpc/users.go +2  → omsx-api, backoffice"; got[1] != want {
 		t.Fatalf("line = %q, want %q", got[1], want)
 	}
 }
 
-// A narrow column cuts the targets with an ellipsis and keeps the path whole.
+// A narrow column cuts the target list with an ellipsis and keeps the first name.
 func TestFeedLineTruncatesTargetsWithAnEllipsis(t *testing.T) {
 	m := newTestModel(t, target("omsx-api"), target("backoffice"), target("worker-one"), target("auth-api"))
 	m.now = spawnClock
@@ -186,7 +187,7 @@ func TestFeedLineTruncatesTargetsWithAnEllipsis(t *testing.T) {
 	}
 
 	got := drawerAt(m, 30)
-	if want := "14:32:07  a.go  → omsx-api, b…"; got[1] != want {
+	if want := " 0s  a.go  → omsx-api, backof…"; got[1] != want {
 		t.Fatalf("line = %q, want %q", got[1], want)
 	}
 	if line := m.leftLine(m.height-2-len(m.layout.drawer)+1, 30); displayWidth(line) != 30 {
@@ -425,5 +426,88 @@ func TestVersionLineOwnsTheBottomRowUnderTheDrawer(t *testing.T) {
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {
 		t.Fatalf("the version row resolved to row %d, want none", got)
+	}
+}
+
+// A long path cuts from its left, so the file name and its +N survive a narrow column.
+func TestFeedPathCutsFromTheLeftKeepingTheFileName(t *testing.T) {
+	m := newTestModel(t, target("omsx-api"))
+	m.now = spawnClock
+	changeAt(m, "omsx-api", spawnClock, map[string]fsnotify.Op{
+		"apps/api/rpc/handlers/users.go": fsnotify.Write,
+		"apps/api/x.go":                  fsnotify.Write,
+	})
+
+	line := drawerAt(m, 32)[1]
+	if !strings.HasPrefix(line, " 0s  …") || !strings.HasSuffix(line, "users.go +1  → omsx-api") {
+		t.Fatalf("line = %q, want the path cut from its left with the file name kept", line)
+	}
+}
+
+// A created directory names itself with a trailing slash and heads the files under it.
+func TestFeedCreatedDirectoryHeadsItsFiles(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{
+		"pkg/api":      fsnotify.Create,
+		"pkg/api/a.go": fsnotify.Create,
+		"pkg/api/b.go": fsnotify.Write,
+	})
+
+	if got := drawerOf(m)[1]; got != " 0s  pkg/api/ +2  → web" {
+		t.Fatalf("batch line = %q, want the directory with a trailing slash", got)
+	}
+	press(m, "tab", "enter")
+	want := []string{"pkg/api/", "  + a.go", "  ~ b.go"}
+	if got := drawerOf(m)[1:]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("file list = %q, want %q", got, want)
+	}
+}
+
+// Tab gives the drawer the cursor: its batch row lights up and the list cursor dims.
+func TestDrawerFocusHighlightsItsCursorAndDimsTheList(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(0)
+	defer lipgloss.SetColorProfile(prev)
+
+	m := newTestModel(t, target("web"), target("api"))
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.now = spawnClock.Add(2 * restartFlash) // past the restart flash, which reverses the row
+	m.cursor = 0
+	m.View()
+	leftW, _ := m.layoutWidths()
+	const cursorBg = "\x1b[48;5;237m"
+	if !strings.Contains(m.leftLine(0, leftW), cursorBg) {
+		t.Fatal("the list cursor is not highlighted before the drawer takes focus")
+	}
+
+	press(m, "tab")
+	m.View()
+	batchY := m.height - 2 - len(m.layout.drawer) + 1
+	if !strings.Contains(m.leftLine(batchY, leftW), cursorBg) {
+		t.Fatal("the drawer's cursor batch is not highlighted while the drawer has focus")
+	}
+	if strings.Contains(m.leftLine(0, leftW), cursorBg) {
+		t.Fatal("the list cursor is still highlighted while the drawer has focus")
+	}
+}
+
+// Each focus of the drawer starts its cursor on the newest batch.
+func TestDrawerCursorResetsToNewestOnFocus(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	later := spawnClock.Add(2 * time.Second)
+	changeAt(m, "web", later, map[string]fsnotify.Op{"b.go": fsnotify.Write})
+	newest := m.feed[len(m.feed)-1].id
+
+	press(m, "tab", "j")
+	if m.feedCursor == newest {
+		t.Fatal("j did not move the drawer cursor off the newest batch")
+	}
+	press(m, "esc", "tab")
+	if m.feedCursor != newest {
+		t.Fatalf("drawer cursor = %d after refocus, want the newest batch %d", m.feedCursor, newest)
 	}
 }

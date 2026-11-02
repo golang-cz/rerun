@@ -96,7 +96,18 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
-		case "q", "?", "esc", "enter", " ":
+		case "q":
+			// Quit asks from the frame, so the help overlay closes into the confirm.
+			m.help = false
+			m.confirmQuit = true
+		case "?":
+			if m.helpAll {
+				m.help = false
+			}
+			m.helpAll = true
+		case "m":
+			m.helpAll = true
+		case "esc", "enter", " ":
 			m.help = false
 		}
 		return m, nil
@@ -123,6 +134,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		m.help = true
+		m.helpAll = false
 
 	case "/":
 		m.openInput(inputSearch)
@@ -559,8 +571,6 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.Shift:
 		m.selectRow(r)
-	case msg.X == m.layout.leftW-1:
-		m.muteRow(r)
 	default:
 		m.cursor = row
 		// The second click of a pair starts or stops the row, keeping the selection.

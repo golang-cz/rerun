@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/golang-cz/rerun"
 )
@@ -23,7 +26,7 @@ const configJoin = 2 * time.Second
 // feedCap bounds the stored batches; the window drops them sooner.
 const feedCap = 100
 
-// feedRows caps the drawer's body; a longer feed scrolls.
+// feedRows caps the drawer's body at six rows, so the drawer is seven lines with its header.
 const feedRows = 6
 
 // restartFlash is how long a restarted target's row stays highlighted.
@@ -35,12 +38,17 @@ const configTarget = "config"
 // feedHeader is the drawer's title line while the feed shows.
 const feedHeader = "fs · last 1m"
 
-// feedBatch is one burst of changes: its files merged by path, and every target
-// the burst restarted. at is the first event's time, the join key.
+// feedAgeW is the width of a batch's right-aligned age column.
+const feedAgeW = 3
+
+// feedBatch is one burst of changes: its files merged by path, the paths that are
+// directories created in it, and every target the burst restarted. at is the first
+// event's time, the join key.
 type feedBatch struct {
 	id      int
 	at      time.Time
 	files   map[string]byte
+	dirs    map[string]bool
 	targets []string
 }
 
@@ -48,12 +56,13 @@ type drawerKind int
 
 const (
 	drawerSep   drawerKind = iota // the header line
-	drawerBatch                   // one batch: `15:04:05  path +N  → targets`
-	drawerDir                     // a directory header over 2+ files in the file list
+	drawerBatch                   // one batch: `  5s  path +N  → targets`
+	drawerDir                     // a directory header over the files under it
 	drawerFile                    // one file in the file list
 )
 
-// drawerRow is one drawn line of the fs drawer. id names the batch it belongs to.
+// drawerRow is one drawn line of the fs drawer. id names the batch it belongs to;
+// cursor marks the batch the drawer's cursor is on.
 type drawerRow struct {
 	kind    drawerKind
 	id      int
@@ -61,9 +70,10 @@ type drawerRow struct {
 	extra   int
 	indent  int
 	glyph   string
-	at      time.Time
+	age     string
 	targets []string
 	dim     bool
+	cursor  bool
 }
 
 // recordFeed folds one change batch into the feed and returns the batch's id, or 0
@@ -75,15 +85,53 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time) int {
 	}
 	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin {
 		m.feedSeq++
-		m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{}})
+		m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{}, dirs: map[string]bool{}})
 	}
 	b := &m.feed[len(m.feed)-1]
 	for path := range cs.Files {
 		key := m.feedPath(path)
 		b.files[key] = mergeOp(b.files[key], opGlyph(cs.Ops[path]))
+		if cs.Ops[path].Has(fsnotify.Create) && isDirPath(path) {
+			b.dirs[key] = true
+		}
+	}
+	// A watcher may report a created directory's files without the directory itself.
+	ancestors := map[string]bool{}
+	for other := range b.files {
+		for dir := other; ; {
+			i := strings.LastIndex(dir, "/")
+			if i < 0 {
+				break
+			}
+			dir = dir[:i]
+			ancestors[dir] = true
+		}
+	}
+	for key, op := range b.files {
+		if op == '+' && ancestors[key] {
+			b.dirs[key] = true
+		}
 	}
 	m.trimFeed()
 	return b.id
+}
+
+// isDirPath reports whether path names a directory on disk right now.
+func isDirPath(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// feedAge is how long ago a batch started, as the drawer shows it: 5s, 42s, 1m, 2h.
+func feedAge(d time.Duration) string {
+	secs := int(max(d, 0) / time.Second)
+	switch {
+	case secs < 60:
+		return fmt.Sprintf("%ds", secs)
+	case secs < 3600:
+		return fmt.Sprintf("%dm", secs/60)
+	}
+	return fmt.Sprintf("%dh", secs/3600)
 }
 
 // feedRestart names the target in its change's batch once the spawn lands.
@@ -116,7 +164,7 @@ func (m *tuiModel) recordConfigFeed(at time.Time) {
 		return
 	}
 	m.feedSeq++
-	m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{key: '~'}, targets: []string{configTarget}})
+	m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{key: '~'}, dirs: map[string]bool{}, targets: []string{configTarget}})
 	m.trimFeed()
 }
 
@@ -199,8 +247,15 @@ func (m *tuiModel) openFeed(id int) {
 	m.feedTop = 0
 }
 
-// setDrawerFocus moves the arrow keys between the target list and the drawer.
+// setDrawerFocus moves the arrow keys between the target list and the drawer. The
+// drawer's cursor starts on the newest batch each time it gains focus.
 func (m *tuiModel) setDrawerFocus(on bool) {
+	if on && !m.drawerFocus {
+		m.feedTop = 0
+		if n := len(m.feed); n > 0 {
+			m.feedCursor = m.feed[n-1].id
+		}
+	}
 	m.drawerFocus = on
 	if on {
 		m.paneFocus = false
@@ -269,7 +324,7 @@ func (m *tuiModel) drawerRows() []drawerRow {
 	if len(batches) == 0 {
 		return nil
 	}
-	lines := feedBatchRows(batches, dim)
+	lines := feedBatchRows(batches, dim, m.feedCursor, m.now)
 	m.fitFeed(len(lines), body, m.feedCursorIndex(batches))
 	return drawerWindow(drawerRow{kind: drawerSep, label: feedHeader}, lines, m.feedTop, body)
 }
@@ -293,7 +348,7 @@ func drawerWindow(header drawerRow, lines []drawerRow, top, body int) []drawerRo
 	return append([]drawerRow{header}, lines[top:end]...)
 }
 
-func feedBatchRows(batches []feedBatch, dim bool) []drawerRow {
+func feedBatchRows(batches []feedBatch, dim bool, cursor int, now time.Time) []drawerRow {
 	rows := make([]drawerRow, 0, len(batches))
 	for _, b := range batches {
 		rows = append(rows, drawerRow{
@@ -301,52 +356,104 @@ func feedBatchRows(batches []feedBatch, dim bool) []drawerRow {
 			id:      b.id,
 			label:   feedFirstFile(b),
 			extra:   len(b.files) - 1,
-			at:      b.at,
+			age:     feedAge(now.Sub(b.at)),
 			targets: b.targets,
 			dim:     dim,
+			cursor:  b.id == cursor,
 		})
 	}
 	return rows
 }
 
 // feedFirstFile is the batch's first path in sort order, the one its line names.
+// A created directory keeps its trailing slash.
 func feedFirstFile(b feedBatch) string {
 	paths := make([]string, 0, len(b.files))
 	for p := range b.files {
 		paths = append(paths, p)
 	}
-	return slices.Min(paths)
+	first := slices.Min(paths)
+	if b.dirs[first] {
+		return first + "/"
+	}
+	return first
 }
 
-// feedFileRows lists a batch's files grouped by directory. A directory holding one
-// file prints that file's full path; 2+ files get a header and indented names.
+// feedFileRows lists a batch's files grouped by directory. A created directory
+// heads the files reported under it; other directories group their files, one
+// file printing its full path and 2+ files getting a header and indented names.
 func feedFileRows(b feedBatch) []drawerRow {
-	byDir := map[string][]string{}
+	type group struct {
+		key  string
+		rows []drawerRow
+	}
+	var groups []group
+	owned := map[string][]string{} // created directory -> the files reported under it
+	var loose []string
 	for p := range b.files {
+		if d := ownerDir(b, p); d != "" {
+			owned[d] = append(owned[d], p)
+		} else {
+			loose = append(loose, p)
+		}
+	}
+	for d, paths := range owned {
+		sort.Strings(paths)
+		rows := []drawerRow{{kind: drawerDir, id: b.id, label: d + "/"}}
+		for _, p := range paths {
+			rows = append(rows, feedFileRow(b, p, strings.TrimPrefix(p, d+"/")+suffixDir(b, p), 2))
+		}
+		groups = append(groups, group{key: d, rows: rows})
+	}
+
+	byDir := map[string][]string{}
+	for _, p := range loose {
+		if _, heads := owned[p]; heads {
+			continue // the created directory's own group lists it
+		}
 		dir, _ := feedSplit(p)
 		byDir[dir] = append(byDir[dir], p)
 	}
-	dirs := make([]string, 0, len(byDir))
-	for dir := range byDir {
-		dirs = append(dirs, dir)
-	}
-	sort.Strings(dirs)
-
-	var rows []drawerRow
-	for _, dir := range dirs {
-		paths := byDir[dir]
+	for dir, paths := range byDir {
 		sort.Strings(paths)
+		var rows []drawerRow
 		if len(paths) == 1 {
-			rows = append(rows, feedFileRow(b, paths[0], paths[0], 0))
-			continue
+			rows = append(rows, feedFileRow(b, paths[0], paths[0]+suffixDir(b, paths[0]), 0))
+		} else {
+			rows = append(rows, drawerRow{kind: drawerDir, id: b.id, label: feedDirLabel(dir)})
+			for _, p := range paths {
+				_, name := feedSplit(p)
+				rows = append(rows, feedFileRow(b, p, name+suffixDir(b, p), 2))
+			}
 		}
-		rows = append(rows, drawerRow{kind: drawerDir, id: b.id, label: feedDirLabel(dir)})
-		for _, p := range paths {
-			_, name := feedSplit(p)
-			rows = append(rows, feedFileRow(b, p, name, 2))
+		groups = append(groups, group{key: dir, rows: rows})
+	}
+
+	slices.SortFunc(groups, func(x, y group) int { return strings.Compare(x.key, y.key) })
+	var out []drawerRow
+	for _, g := range groups {
+		out = append(out, g.rows...)
+	}
+	return out
+}
+
+// ownerDir is the longest created directory in the batch that holds p, or "".
+func ownerDir(b feedBatch, p string) string {
+	best := ""
+	for d := range b.dirs {
+		if strings.HasPrefix(p, d+"/") && len(d) > len(best) && b.files[d] == '+' {
+			best = d
 		}
 	}
-	return rows
+	return best
+}
+
+// suffixDir is a trailing slash for a created directory, else nothing.
+func suffixDir(b feedBatch, p string) string {
+	if b.dirs[p] {
+		return "/"
+	}
+	return ""
 }
 
 func feedFileRow(b feedBatch, path, label string, indent int) drawerRow {

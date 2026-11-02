@@ -509,6 +509,7 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 	}
 
 	m.toggleMute(0)
+	fadeNotice(m)
 	m.View()
 	if got := bottomPaneLine(m); !strings.Contains(got, "1/1") {
 		t.Fatalf("after muting web the counter = %q, want 1/1", got)

@@ -233,17 +233,6 @@ func (m *tuiModel) saveColumns() {
 	m.showNotice("saved columns to rerun.yml", false)
 }
 
-// dirtyName pads name to w cells with a `*` right after it when dirty; a long name gives up its last cell.
-func dirtyName(name string, w int, dirty bool) string {
-	switch {
-	case !dirty || w < 1:
-		return padRight(name, w)
-	case displayWidth(name)+1 <= w:
-		return padRight(name+"*", w)
-	}
-	return padRight(name, w-1) + "*"
-}
-
 // targetDirty reports whether a target's own or inherited columns await ctrl+s.
 func (m *tuiModel) targetDirty(t *tuiTarget) bool {
 	if m.editIndex(colNode{name: t.spec.Name}) >= 0 {
