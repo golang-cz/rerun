@@ -183,7 +183,7 @@ func (m *tuiModel) tableWidths() []int {
 	start := max(0, len(m.visibleCells)-tableWidthRows)
 	var widths []int
 	for _, c := range m.headerColumns() {
-		widths = append(widths, min(displayWidth(c.Name), budget))
+		widths = append(widths, min(displayWidth(c.Name)+columnMarkW, budget))
 	}
 	for i := start; i < len(m.visibleCells); i++ {
 		c := m.visibleCells[i]

@@ -55,51 +55,168 @@ func (m *tuiModel) addDisp(r dispRow) {
 	m.dispText = append(m.dispText, r.text)
 }
 
-// toggleExpand opens or closes a JSON line's pretty-printed block. The state is
-// keyed by the line's sequence number, so it survives later lines.
+// toggleExpand opens or closes a JSON line's block, keyed by its sequence number; opening pauses the tail.
 func (m *tuiModel) toggleExpand(raw int) {
 	if !m.visibleObj[raw] {
 		return
 	}
 	seq := m.visibleSeq[raw]
-	if m.expanded[seq] {
-		delete(m.expanded, seq)
-	} else {
+	opening := !m.expanded[seq]
+	if opening {
+		m.pauseTail()
 		m.expanded[seq] = true
+		if !m.hintedExpand {
+			m.hintedExpand = true
+			m.showHint("click a key (a) to add a column · click a value (f) to filter")
+		}
+	} else {
+		delete(m.expanded, seq)
 	}
 	m.dispDirty = true
 	m.vpDirty = true
+	m.ensurePane()
+	m.setPaneCursor(m.lineRow(raw))
+	m.revealCur, m.revealTop = true, opening
 }
 
-// bottomRow is the bottom-most visible content row, the one enter acts on.
-func (m *tuiModel) bottomRow() (int, bool) {
+// paneCursorRow is the display row under the cursor, the newest row while the tail follows.
+func (m *tuiModel) paneCursorRow() int {
 	n := m.paneLen()
 	if n == 0 {
-		return 0, false
+		return 0
 	}
-	last := m.vp.YOffset + m.vp.Height - 1
-	if !m.follow && m.pending > 0 {
-		last-- // the `↓ N new` marker owns this row
+	if m.follow {
+		return n - 1
 	}
-	last = min(last, n-1)
-	return last, last >= 0
+	if m.paneDirect() {
+		return min(max(m.paneCurRaw, 0), n-1)
+	}
+	for row, r := range m.disp {
+		if r.raw == m.paneCurRaw && r.sub == m.paneCurSub {
+			return row
+		}
+	}
+	return m.lineRow(m.paneCurRaw)
 }
 
-// expandCursor is enter on a focused pane: it toggles the bottom-most line.
-func (m *tuiModel) expandCursor() {
-	row, ok := m.bottomRow()
-	if !ok {
+// setPaneCursor moves the cursor to display row row.
+func (m *tuiModel) setPaneCursor(row int) {
+	r := m.rowInfo(row)
+	m.paneCurRaw, m.paneCurSub = r.raw, r.sub
+}
+
+// lineRow is the display row of raw's line, or the next shown line when a filter hides it.
+func (m *tuiModel) lineRow(raw int) int {
+	if m.paneDirect() {
+		return raw
+	}
+	for row, r := range m.disp {
+		if r.sub < 0 && r.raw >= raw {
+			return row
+		}
+	}
+	return max(0, len(m.disp)-1)
+}
+
+// paneRows is the content rows the viewport shows, less the marker row.
+func (m *tuiModel) paneRows() int {
+	h := m.vp.Height
+	if !m.follow && m.pending > 0 {
+		h--
+	}
+	return max(h, 1)
+}
+
+// moveCursorRow moves the cursor by delta rows, pausing the tail as a scroll does.
+func (m *tuiModel) moveCursorRow(delta int) {
+	n := m.paneLen()
+	if n == 0 {
 		return
 	}
-	raw := m.rowInfo(row).raw
+	row := m.paneCursorRow()
+	next := min(max(row+delta, 0), n-1)
+	if next == row {
+		return
+	}
+	m.pauseTail()
+	m.setPaneCursor(next)
+	m.revealCur, m.revealTop = true, false
+}
+
+// placeCursor scrolls to a moved cursor, else keeps a paused cursor inside the viewport.
+func (m *tuiModel) placeCursor() {
+	n := m.paneLen()
+	if n == 0 {
+		return
+	}
+	if m.follow {
+		m.revealCur, m.revealTop = false, false
+		m.setPaneCursor(n - 1)
+		return
+	}
+	row := m.paneCursorRow()
+	h := m.paneRows()
+	if m.revealCur {
+		switch {
+		case m.revealTop:
+			m.vp.SetYOffset(row)
+		case row < m.vp.YOffset:
+			m.vp.SetYOffset(row)
+		case row >= m.vp.YOffset+h:
+			m.vp.SetYOffset(row - h + 1)
+		}
+		m.revealCur, m.revealTop = false, false
+	}
+	switch {
+	case row < m.vp.YOffset:
+		m.setPaneCursor(min(m.vp.YOffset, n-1))
+	case row >= m.vp.YOffset+h:
+		m.setPaneCursor(min(m.vp.YOffset+h-1, n-1))
+	}
+}
+
+func (m *tuiModel) toggleCursorExpand() {
+	if m.paneLen() == 0 {
+		return
+	}
+	raw := m.rowInfo(m.paneCursorRow()).raw
 	if !m.visibleObj[raw] {
-		m.showHint("the bottom line is not a JSON object")
+		m.showHint("the cursor line is not a JSON object")
 		return
 	}
 	m.toggleExpand(raw)
 }
 
+// cursorField is the expansion row under the cursor, or nil on a shown line.
+func (m *tuiModel) cursorField() *jsonField {
+	if m.paneLen() == 0 {
+		return nil
+	}
+	return m.rowInfo(m.paneCursorRow()).field
+}
+
+// pickCursorKey adds the cursor's key as a column, the same pick as a click on it.
+func (m *tuiModel) pickCursorKey() {
+	f := m.cursorField()
+	if f == nil || f.key == "" {
+		m.showHint("move the cursor onto a key in an expanded line")
+		return
+	}
+	m.pickKey(f)
+}
+
+// pickCursorValue adds the cursor's scalar as a chip, the same pick as a click on it.
+func (m *tuiModel) pickCursorValue() {
+	f := m.cursorField()
+	if f == nil || f.lit == "" {
+		m.showHint("move the cursor onto a scalar value in an expanded line")
+		return
+	}
+	m.pickValue(f)
+}
+
 // markLines draws the (+) or (−) cell at the pane's right edge on each JSON line.
+// The line's content gives way to the cell with an ellipsis, never under it.
 func (m *tuiModel) markLines(lines []string) []string {
 	w := m.vp.Width
 	if w < markW {
@@ -116,7 +233,8 @@ func (m *tuiModel) markLines(lines []string) []string {
 		if r.open {
 			glyph = "(−)"
 		}
-		out[row] = padRight(lines[row], w-markW) + " " + glyph
+		content := padRight(ellipsize(lines[row], w-markW), w-markW)
+		out[row] = content + " " + glyph
 	}
 	return out
 }
@@ -153,8 +271,7 @@ func (m *tuiModel) inPaneHeader(x, y int) bool {
 	return x > m.layout.leftW && x < m.width && y >= 0 && y < m.titleHeight()
 }
 
-// clickHeader acts on a header press at pane cell px: a chip's × removes that
-// chip, a column name removes that column.
+// clickHeader acts on a header press at pane cell px: a chip's or a column's × removes it.
 func (m *tuiModel) clickHeader(px, y int) {
 	if m.titleRows() == 1 && y == 0 {
 		for _, h := range m.layout.chips {

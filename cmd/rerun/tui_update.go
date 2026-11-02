@@ -84,13 +84,13 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any key ends a frozen selection; copy feedback survives its 3s window.
 	m.clearSelection()
-	m.dismissErrorNotice()
 
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
 	// into the query instead of running their commands.
 	if m.inputMode != inputNone {
 		return m.handleInputKey(msg)
 	}
+	m.dismissErrorNotice()
 
 	if m.help {
 		switch msg.String() {
@@ -161,7 +161,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up":
 		switch {
 		case m.paneFocus:
-			m.scrollUp(1)
+			m.moveCursorRow(-1)
 		case m.drawerFocus:
 			m.moveDrawer(-1)
 		default:
@@ -171,7 +171,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down":
 		switch {
 		case m.paneFocus:
-			m.scrollDown(1)
+			m.moveCursorRow(1)
 		case m.drawerFocus:
 			m.moveDrawer(1)
 		default:
@@ -241,11 +241,21 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.drawerFocus:
 			m.openCursorBatch()
 		case m.paneFocus:
-			m.expandCursor()
+			m.toggleCursorExpand()
 		default:
 			if r, ok := m.cursorRow(); ok {
 				m.selectRow(r)
 			}
+		}
+
+	case "a":
+		if m.paneFocus {
+			m.pickCursorKey()
+		}
+
+	case "f":
+		if m.paneFocus {
+			m.pickCursorValue()
 		}
 
 	case "backspace":
@@ -423,8 +433,7 @@ func (m *tuiModel) toggleTarget(i int) {
 // toggleFreeze stops the pane where it is, or resumes the live tail.
 func (m *tuiModel) toggleFreeze() {
 	if m.follow {
-		m.follow = false
-		m.pending = 0
+		m.pauseTail()
 		return
 	}
 	m.vp.GotoBottom()
@@ -442,9 +451,17 @@ func (m *tuiModel) scrollUp(n int) {
 		return
 	}
 	if m.follow {
-		m.follow = false
-		m.pending = 0
+		m.pauseTail()
 	}
+}
+
+// pauseTail freezes the pane on its rows, with the cursor left on the newest line.
+func (m *tuiModel) pauseTail() {
+	if m.follow && m.paneLen() > 0 {
+		m.setPaneCursor(m.paneLen() - 1)
+	}
+	m.follow = false
+	m.pending = 0
 }
 
 // scrollDown resumes following once the pane is back at the bottom.
@@ -613,8 +630,7 @@ func (m *tuiModel) dragSelection(y int) {
 	// The drag, not the press, freezes the tail: only a real selection gesture
 	// stops the stream.
 	if m.follow {
-		m.follow = false
-		m.pending = 0
+		m.pauseTail()
 	}
 	if idx := m.paneRowAt(y); idx >= 0 {
 		m.selEnd = idx

@@ -39,6 +39,7 @@ type tuiStyles struct {
 	hint         lipgloss.Style
 	box          lipgloss.Style
 	key          lipgloss.Style
+	paneCursor   lipgloss.Style
 }
 
 func newTUIStyles() tuiStyles {
@@ -56,6 +57,7 @@ func newTUIStyles() tuiStyles {
 		hint:         lipgloss.NewStyle().Faint(true),
 		box:          lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
 		key:          lipgloss.NewStyle().Bold(true),
+		paneCursor:   lipgloss.NewStyle().Reverse(true),
 	}
 }
 
@@ -133,8 +135,11 @@ func (m *tuiModel) confirmQuitView() string {
 	quit := lipgloss.NewStyle().Background(lipgloss.Color("1")).Foreground(lipgloss.Color("15")).Bold(true).Render("[ Quit ]")
 	cancel := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("[ Cancel ]")
 	body := m.styles.title.Render("Quit rerun?") + "\n" +
-		m.styles.hint.Render("Every target is terminated and every watcher stops.") + "\n\n" +
-		quit + "  " + cancel + "\n\n" +
+		m.styles.hint.Render("Every target is terminated and every watcher stops.") + "\n"
+	if m.dirty() {
+		body += m.styles.title.Render("unsaved columns — ctrl+s to save") + "\n"
+	}
+	body += "\n" + quit + "  " + cancel + "\n\n" +
 		m.styles.hint.Render("enter quits · esc cancels · ctrl+c again quits")
 	// Width fits the body line on one row; 44 would wrap and split the sentence.
 	return m.styles.box.Padding(1, 2).Width(56).Render(body)
@@ -428,7 +433,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(t.spec.Name, name), link: t.spec.URL},
+		seg{text: dirtyName(t.spec.Name, name, m.targetDirty(t)), link: t.spec.URL},
 		seg{text: badge(t.unseen)},
 		seg{text: padRight(m.status(t), statusW), color: statusColor(t)},
 		seg{text: " "},
@@ -543,6 +548,10 @@ func (m *tuiModel) rightLines(w int) []string {
 
 	out := strings.Split(m.vp.View(), "\n")
 
+	if idx := m.paneCursorRow() - m.vp.YOffset; m.paneFocus && m.paneLen() > 0 && idx >= 0 && idx < len(out) {
+		out[idx] = m.styles.paneCursor.Render(padRight(out[idx], w))
+	}
+
 	// Selection is line-granular and styled before the bottom line's own
 	// replacement, so the marker and hint never read as selected.
 	if lo, hi, ok := m.selectionRange(); ok {
@@ -564,13 +573,10 @@ func (m *tuiModel) rightLines(w int) []string {
 		}
 		markerShown := !m.follow && m.pending > 0
 		if markerShown {
-			marker := fmt.Sprintf("↓ %d new", m.pending)
+			// Keep the click target live even when an overlaid line hides the marker.
 			m.layout.marker = rect{x: m.layout.leftW + 1, y: headH + m.vp.Height - 1, w: w, h: 1}
-			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		}
-		// One line, eight claimants, in precedence order: an open bar, the copy
-		// hint, a notice, the new-lines marker (already drawn), the committed
-		// search counter, the filter count, the m/s hint, then the unsaved columns.
+		// The bottom row is one line, so this switch is its precedence order.
 		switch {
 		case m.inputMode == inputSearch:
 			out[last] = m.bottomLine(w, m.searchStatus(true), "")
@@ -585,16 +591,17 @@ func (m *tuiModel) rightLines(w int) []string {
 		case m.noticeLive():
 			// A notice outranks the marker: a hidden error reads as no error.
 			out[last] = m.bottomLine(w, m.notice, chip)
+		case m.dirty():
+			out[last] = m.bottomLine(w, unsavedNotice, chip)
 		case markerShown:
-			// The marker owns the line and was drawn above.
+			marker := fmt.Sprintf("↓ %d new", m.pending)
+			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		case m.search != "":
 			out[last] = m.bottomLine(w, m.searchLine(), chip)
 		case m.filter != "":
 			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
 			out[last] = m.bottomLine(w, m.hint, chip)
-		case m.dirty():
-			out[last] = m.bottomLine(w, unsavedNotice, chip)
 		case !m.follow:
 			// A frozen pane with nothing else to say still names the state.
 			out[last] = m.bottomLine(w, "", chip)
@@ -728,41 +735,40 @@ func (m *tuiModel) titleLine(w int) string {
 // syncContent rebuilds the viewport only when its content changed, and keeps
 // it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
-	if !m.vpDirty {
-		if m.follow {
-			m.vp.GotoBottom()
+	if m.vpDirty {
+		lines := m.tableLines(m.paneLines())
+		m.paneCol = m.clampPaneCol(lines)
+		content := strings.Join(m.markLines(m.panLines(lines)), "\n")
+		if len(lines) == 0 {
+			content = m.styles.hint.Render(m.emptyHint())
 		}
-		return
+		m.vp.SetContent(content)
+		// SetContent only pulls YOffset back from past-the-end; a shrink that still
+		// leaves it below the last row needs an explicit clamp, or the frozen pane
+		// renders blank rows under the content.
+		m.vp.SetYOffset(m.vp.YOffset)
+		m.vpDirty = false
 	}
-
-	lines := m.tableLines(m.paneLines())
-	m.paneCol = m.clampPaneCol(lines)
-	content := strings.Join(m.markLines(m.panLines(lines)), "\n")
-	if len(lines) == 0 {
-		content = m.styles.hint.Render(m.emptyHint())
-	}
-	m.vp.SetContent(content)
-	// SetContent only pulls YOffset back from past-the-end; a shrink that still
-	// leaves it below the last row needs an explicit clamp, or the frozen pane
-	// renders blank rows under the content.
-	m.vp.SetYOffset(m.vp.YOffset)
-	m.vpDirty = false
 	if m.follow {
 		m.vp.GotoBottom()
 	}
+	m.placeCursor()
 }
 
-// clampPaneCol keeps the horizontal window inside the widest line, so panning
-// right on narrow content parks at column 0.
+// clampPaneCol keeps the window where each line still ends inside it, a (+) cell taking markW cells.
 func (m *tuiModel) clampPaneCol(lines []string) int {
 	if m.paneCol <= 0 {
 		return 0
 	}
-	widest := 0
-	for _, line := range lines {
-		widest = max(widest, displayWidth(line))
+	reach := 0
+	for row, line := range lines {
+		avail := m.vp.Width
+		if r := m.rowInfo(row); r.sub < 0 && r.obj && avail >= markW {
+			avail -= markW
+		}
+		reach = max(reach, displayWidth(line)-avail)
 	}
-	return min(m.paneCol, max(0, widest-m.vp.Width))
+	return min(m.paneCol, max(0, reach))
 }
 
 // panLines slices each pane line to the horizontal window paneCol opens.
@@ -804,7 +810,7 @@ func (m *tuiModel) allMuted() bool {
 
 // helpKeys is the help overlay's content, in display order.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows; ↑/↓ scroll the pane when focused"},
+	{"↑/↓ j/k", "move between rows; ↑/↓ move the pane cursor when focused"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (schema row: its targets)"},
@@ -821,6 +827,7 @@ var helpKeys = [][2]string{
 	{"v", "filter (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
+	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},
 	{"?", "close this help"},
 	{"q ^C", "q/^C confirm quit · enter/^C again quits · esc cancels"},
 }

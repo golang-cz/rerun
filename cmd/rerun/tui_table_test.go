@@ -30,11 +30,11 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 		t.Fatal("a target with columns did not start in table mode")
 	}
 	lines := paneOf(m)[m.titleHeight():]
-	if got := dropMarker(lines[0]); got != "web  GET     200" {
+	if got := dropMarker(lines[0]); got != "web  GET       200" {
 		t.Fatalf("row 0 = %q, want the padded table row", got)
 	}
-	if got := dropMarker(lines[1]); got != "web  DELETE  500" {
-		t.Fatalf("row 1 = %q, want the wider method column", got)
+	if got := dropMarker(lines[1]); got != "web  DELETE    500" {
+		t.Fatalf("row 1 = %q, want the column padded to its × header", got)
 	}
 
 	press(m, "c")

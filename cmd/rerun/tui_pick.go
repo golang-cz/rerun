@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
@@ -13,6 +14,12 @@ const selectHint = "select a schema or target to add columns"
 
 // unsavedNotice is the footer while column picks are waiting for ctrl+s.
 const unsavedNotice = "unsaved columns · ctrl+s save"
+
+// columnMarkW is the " ×" a column header puts after each name.
+const columnMarkW = 2
+
+// savedNoticeHold is how long the saved notice holds against a config reload notice.
+const savedNoticeHold = 2 * time.Second
 
 // pickChip is a value filter clicked into the pane: its yq expression and the
 // compiled program.
@@ -179,7 +186,6 @@ func (m *tuiModel) pickValue(f *jsonField) {
 	m.chipsChanged()
 }
 
-// removeChip drops the chip at idx.
 func (m *tuiModel) removeChip(idx int) {
 	if idx < 0 || idx >= len(m.chips) {
 		return
@@ -197,8 +203,7 @@ func (m *tuiModel) chipsChanged() {
 
 func (m *tuiModel) dirty() bool { return len(m.edits) > 0 }
 
-// saveColumns writes every pending node with setColumns. A node that fails
-// stays pending, and the nodes before it stay written.
+// saveColumns writes every pending node with setColumns. A failing node stays pending; the rest still save.
 func (m *tuiModel) saveColumns() {
 	if !m.dirty() {
 		m.showHint("no unsaved columns")
@@ -209,14 +214,42 @@ func (m *tuiModel) saveColumns() {
 		m.showNotice("rerun: no rerun.yml to save columns to", true)
 		return
 	}
-	for m.dirty() {
-		if err := writeColumns(path, m.edits[0]); err != nil {
-			m.showNotice(fmt.Sprintf("rerun: save columns: %v", err), true)
-			return
+	var failed []colEdit
+	var firstErr error
+	for _, e := range m.edits {
+		if err := writeColumns(path, e); err != nil {
+			failed = append(failed, e)
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
-		m.edits = m.edits[1:]
 	}
+	m.edits = failed
+	if firstErr != nil {
+		m.showNotice(fmt.Sprintf("rerun: save columns: %v", firstErr), true)
+		return
+	}
+	m.keepNoticeUntil = m.now.Add(savedNoticeHold)
 	m.showNotice("saved columns to rerun.yml", false)
+}
+
+// dirtyName pads name to w cells with a `*` right after it when dirty; a long name gives up its last cell.
+func dirtyName(name string, w int, dirty bool) string {
+	switch {
+	case !dirty || w < 1:
+		return padRight(name, w)
+	case displayWidth(name)+1 <= w:
+		return padRight(name+"*", w)
+	}
+	return padRight(name, w-1) + "*"
+}
+
+// targetDirty reports whether a target's own or inherited columns await ctrl+s.
+func (m *tuiModel) targetDirty(t *tuiTarget) bool {
+	if m.editIndex(colNode{name: t.spec.Name}) >= 0 {
+		return true
+	}
+	return t.spec.Schema != "" && !t.spec.ownColumns && m.editIndex(colNode{schema: true, name: t.spec.Schema}) >= 0
 }
 
 // writeColumns writes one node's columns as `name {.expr}` entries.
@@ -254,16 +287,19 @@ func (m *tuiModel) tableHeaderOn() bool {
 	return m.tableOn() && len(m.headerColumns()) > 0
 }
 
-// columnHeader is the table's column names, aligned over the cells below, and
-// it records each name's span for header clicks.
+// columnHeader draws each column name with its × and records the × cells for header clicks.
 func (m *tuiModel) columnHeader(w int) string {
 	cols := m.headerColumns()
 	names := make([]string, len(cols))
 	for i, c := range cols {
-		names[i] = c.Name
+		names[i] = c.Name + " ×"
 	}
 	row, spans := tableRow(strings.Repeat(" ", m.prefixW)+"  ", names, m.tableWidths(), m.paneWidth())
-	m.layout.heads = spans
+	m.layout.heads = m.layout.heads[:0]
+	for i, s := range spans {
+		x := s.x0 + displayWidth(cols[i].Name) + 1
+		m.layout.heads = append(m.layout.heads, cellSpan{x0: x, x1: x + 1, col: s.col})
+	}
 	return m.styles.title.Render(padRight(sliceCells(row, m.paneCol, m.paneCol+w), w))
 }
 

@@ -18,6 +18,14 @@ type jsonField struct {
 	lit        string
 }
 
+// Expansion cues: keys underlined, scalars tinted, so a click target reads without relying on color.
+const (
+	sgrKeyOn  = "\x1b[4m"
+	sgrKeyOff = "\x1b[24m"
+	sgrValOn  = "\x1b[36m"
+	sgrValOff = "\x1b[39m"
+)
+
 // identKey is a key yq reads as `.key` without quoting.
 var identKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -67,7 +75,7 @@ func (w *jsonWalker) value(depth int, path, key, head string) error {
 	if !isDelim {
 		lit := yqLiteral(tok)
 		valStart := start + displayWidth(head)
-		w.emit(lead+head+lit, &jsonField{
+		w.emit(lead+head+sgrValOn+lit+sgrValOff, &jsonField{
 			keyX: keyX, valX: [2]int{valStart, valStart + displayWidth(lit)},
 			path: path, key: key, lit: lit,
 		})
@@ -91,7 +99,7 @@ func (w *jsonWalker) value(depth int, path, key, head string) error {
 				return err
 			}
 			k, _ := kt.(string)
-			if err := w.value(depth+1, yqKeyPath(path, k), k, jsonQuote(k)+": "); err != nil {
+			if err := w.value(depth+1, yqKeyPath(path, k), k, sgrKeyOn+jsonQuote(k)+sgrKeyOff+": "); err != nil {
 				return err
 			}
 		} else if err := w.value(depth+1, path+"["+strconv.Itoa(i)+"]", "", ""); err != nil {

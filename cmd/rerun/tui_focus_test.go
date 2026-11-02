@@ -77,31 +77,40 @@ func TestLeftArrowUnfocusesAfterColumnZero(t *testing.T) {
 	}
 }
 
-func TestFocusedArrowsScrollWithoutMovingCursor(t *testing.T) {
+// Focused up/down move the pane cursor, not the list cursor. Moving it pauses the tail; G resumes.
+func TestFocusedArrowsMoveThePaneCursor(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
 	m.View()
 
 	press(m, "right")
-	at := m.vp.YOffset
-	if at == 0 {
-		t.Fatal("content is not taller than the pane; test cannot scroll")
+	newest := m.paneCursorRow()
+	if newest == 0 {
+		t.Fatal("content is not taller than the pane; test cannot move the cursor")
 	}
 
 	press(m, "up")
 	if m.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", m.cursor)
+		t.Fatalf("list cursor = %d, want 0", m.cursor)
 	}
 	if m.follow {
-		t.Fatal("scrolling up did not freeze the tail")
+		t.Fatal("moving the cursor up did not pause the tail")
 	}
-	if m.vp.YOffset != at-1 {
-		t.Fatalf("YOffset = %d, want %d", m.vp.YOffset, at-1)
+	if got := m.paneCursorRow(); got != newest-1 {
+		t.Fatalf("pane cursor = %d, want %d", got, newest-1)
 	}
 
 	press(m, "down")
-	if m.vp.YOffset != at || !m.follow {
-		t.Fatalf("scrolling back: YOffset = %d follow = %v, want %d true", m.vp.YOffset, m.follow, at)
+	if got := m.paneCursorRow(); got != newest {
+		t.Fatalf("pane cursor after down = %d, want %d", got, newest)
+	}
+	if m.follow {
+		t.Fatal("moving the cursor down resumed the tail; only G resumes it")
+	}
+
+	press(m, "G")
+	if !m.follow {
+		t.Fatal("G did not resume the tail")
 	}
 }
 

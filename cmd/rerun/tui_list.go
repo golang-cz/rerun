@@ -234,7 +234,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	}
 	segs := []seg{
 		{text: "▾ "},
-		{text: padRight(r.schema, nameWidth(leftW))},
+		{text: dirtyName(r.schema, nameWidth(leftW), m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: badge(m.unseenIn(r.members))},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
 		{text: " "},

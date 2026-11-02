@@ -28,7 +28,7 @@ Piped or non-TTY output stays plain prefixed lines.
 Left column: one row per target; right pane: one merged log; `?` lists keys.
 
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
-columns (`↑/↓` scroll it when focused, `home`/`end` jump to its top-left or
+columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
 toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream, `s` or `enter`
 solo a target or select a schema's targets (`esc` clears). On a schema header,
@@ -39,14 +39,18 @@ scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or press
-`enter` with the pane focused (it acts on the bottom-most line), to show the pretty-printed
-object; `(−)` collapses it. In an expanded block, click a key to add it as a column of the
+`enter` with the pane focused (it acts on the cursor line, which starts on the newest
+line), to show the pretty-printed object; `(−)` collapses it. Moving the cursor off the
+newest line pauses the tail. Expanded keys are underlined and values tinted. With the
+cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `.path == value`
+chip. In an expanded block, click a key to add it as a column of the
 selection: the selected schema, else the soloed target, else a hint says to select one.
 Click a scalar value to add a `.path == value` chip to the pane header. Chips AND together
 with `v`; click a chip's `×`, or press `backspace` with the pane focused, to remove one.
-Click a column name in the table header to remove that column. Column picks are unsaved
-until `ctrl+s` writes them to rerun.yml; the footer reads `unsaved columns · ctrl+s save`
-until then. Chips and expansions last for the session only. `cmd+s` works only where the
+Click the `×` after a column name in the table header to remove that column; a click on
+the name does nothing. Column picks are unsaved until `ctrl+s` writes them to rerun.yml;
+the footer reads `unsaved columns · ctrl+s save` until then, and a schema or target with
+unsaved columns gets a `*` after its name. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
 Mouse: click a row to solo it, double-click to stop/start like `space`, the
 button cell to mute, a batch in the fs drawer to list its files,

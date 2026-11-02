@@ -73,14 +73,22 @@ double-click to stop/start like `space`, the button cell to mute, shift-click
 to solo, and a click on a schema header to select its targets.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
-it, or `enter` with the pane focused (the bottom-most line), expands the pretty-printed
-object; `(−)` collapses it. In an expanded block, a click on a key adds it as a column of
-the selection (a selected schema, else the soloed target), and a click on a scalar adds a
-`.path == value` chip (ANDed with `v`; `×` or `backspace` removes it). A click on a table
-header column name removes that column. Picks are unsaved until `ctrl+s` writes them with
-the rerun.yml column writer; the footer shows `unsaved columns · ctrl+s save`. A target
-with a schema and no columns of its own writes its schema. `cmd+s` works only where the
-terminal forwards it.
+it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
+it. The pane cursor (a reverse-video line) starts on the newest line; `↑/↓` move it when
+the pane is focused, and moving it off the live tail pauses the tail (`G` resumes).
+`enter` acts on the cursor line, and a non-JSON line gets a hint instead. Opening a block
+pauses the tail and keeps the block in view. Expanded keys are underlined and scalar
+values tinted. The first expansion of a session shows the click hint.
+In an expanded block, a click on a key adds it as a column of the selection (a selected
+schema, else the soloed target), and a click on a scalar adds a `.path == value` chip
+(ANDed with `v`; `×` or `backspace` removes it). With the pane focused and the cursor on
+an expanded key or scalar row, `a` adds the key and `f` adds the value chip, as the
+clicks do. A table header column name is inert; only the `×` after it removes that
+column. A schema or target whose columns are unsaved shows a `*` after its name. Picks are
+unsaved until `ctrl+s` writes them with the rerun.yml column writer; the footer shows
+`unsaved columns · ctrl+s save`, and the quit modal says so too. A target with a schema
+and no columns of its own writes its schema. `cmd+s` works only where the terminal
+forwards it.
 
 The fs drawer under the list is a change feed: one line per batch of changes
 (events within 150ms of each other), with the first changed file, `+N` for the

@@ -210,15 +210,15 @@ func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 	}
 }
 
-// Clicking a column name in the table header removes that column and marks the session dirty.
+// Clicking a column's × in the table header removes that column and marks the session dirty.
 func TestHeaderClickRemovesAColumn(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
 	m.View()
 	press(m, "s")
 
-	x, y := findInPane(t, m, "method")
-	m.handleMouse(mouse(x+1, y, false))
+	x, y := findInPane(t, m, "method ×")
+	m.handleMouse(mouse(x+len("method "), y, false))
 
 	if got := m.headerColumns(); len(got) != 1 || got[0].Name != "status" {
 		t.Fatalf("columns = %+v, want only status", got)

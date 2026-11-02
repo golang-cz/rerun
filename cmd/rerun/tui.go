@@ -145,7 +145,7 @@ type tuiTarget struct {
 	// flashUntil ends the row highlight a restart leaves behind.
 	flashUntil time.Time
 
-	// restartBatch is the feed batch a change restarted the target for, until its spawn lands.
+	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
 	restartBatch int
 
 	// colSpec is the spec the cached column expressions were parsed from, so
@@ -183,9 +183,7 @@ type tuiModel struct {
 	// expansion.
 	drawerOpen bool
 
-	// feed is the drawer's change batches, oldest first. feedOpen names the batch
-	// whose file list is open (0 for none), feedCursor the batch j/k select, and
-	// feedTop the first body line the drawer shows.
+	// feed is the drawer's change batches, oldest first; feedOpen lists one batch's files (0 for none).
 	feed        []feedBatch
 	feedSeq     int
 	feedCursor  int
@@ -202,6 +200,14 @@ type tuiModel struct {
 
 	follow  bool
 	pending int
+	// paneCurRaw is the cursor's raw line, paneCurSub its expansion row (-1 for the line).
+	paneCurRaw, paneCurSub int
+	// revealCur scrolls the pane to the cursor next frame, revealTop to its top.
+	revealCur, revealTop bool
+	// hintedExpand is set once the first expansion's footer hint has shown.
+	hintedExpand bool
+	// keepNoticeUntil holds the saved-columns notice against a config reload notice.
+	keepNoticeUntil time.Time
 
 	// copySeq is the last copy's OSC 52 sequence and copyHint its message.
 	// Both render only while m.now is before copyUntil, which is kept apart
@@ -333,6 +339,7 @@ func newTUI(targets []Target) *tuiModel {
 		lastClick:  -1,
 		hover:      -1,
 		searchRow:  -1,
+		paneCurSub: -1,
 		styles:     newTUIStyles(),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
 		visibleRaw:   []string{},
@@ -574,7 +581,10 @@ func (m *tuiModel) applyEvent(ev event) {
 			m.rebuildRows(ev.cfg)
 		}
 		m.recordConfigFeed(eventTime(ev, m.now))
-		m.showNotice(ev.line, false)
+		// Our own save triggers this reload; its banner would replace the save notice at once.
+		if !m.now.Before(m.keepNoticeUntil) {
+			m.showNotice(ev.line, false)
+		}
 		return
 
 	case evNotice:
@@ -1140,7 +1150,7 @@ func padRight(s string, w int) string {
 }
 
 // sliceCells cuts s to display cells [from, to): the pane's horizontal window.
-// Zero-width runes (escape sequences) ride along, the way truncate keeps them.
+// Escape sequences have no width and are kept whole, so a cut never splits one.
 func sliceCells(s string, from, to int) string {
 	if from < 0 {
 		from = 0
@@ -1148,39 +1158,13 @@ func sliceCells(s string, from, to int) string {
 	if to <= from {
 		return ""
 	}
-	var b strings.Builder
-	cells := 0
-	for _, r := range s {
-		rw := displayWidth(string(r))
-		if rw > 0 && cells+rw <= from {
-			cells += rw
-			continue
-		}
-		if rw > 0 && cells+rw > to {
-			break
-		}
-		b.WriteRune(r)
-		cells += rw
-	}
-	return b.String()
+	return ansi.Cut(s, from, to)
 }
 
+// truncate cuts s to at most w display cells, keeping escape sequences whole.
 func truncate(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if displayWidth(s) <= w {
-		return s
-	}
-	var b strings.Builder
-	cells := 0
-	for _, r := range s {
-		rw := displayWidth(string(r))
-		if cells+rw > w {
-			break
-		}
-		b.WriteRune(r)
-		cells += rw
-	}
-	return b.String()
+	return ansi.Truncate(s, w, "")
 }
