@@ -2,10 +2,12 @@ package rerun
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,9 +27,14 @@ type Watcher struct {
 	ignore       map[string]struct{}
 	ignoreDirs   map[string]struct{}
 	ignoreFiles  map[string]struct{}
-	gitignores   map[string]*gitignoreFile      // dir -> its .gitignore, when one exists
-	checked      map[string]struct{}            // dirs already looked up in gitignores, hit or miss
-	repoRoots    map[string]string              // dir -> enclosing git root, "" when none
+	gitignores   map[string]*gitignoreFile   // dir -> its .gitignore, when one exists
+	checked      map[string]struct{}         // dirs already looked up in gitignores, hit or miss
+	repoRoots    map[string]string           // dir -> enclosing git root, "" when none
+	excludes     map[string][]*gitignoreFile // repo root -> info/exclude then the global excludes file
+	dirIgnored   map[string]bool             // dir -> whether git ignores it, so events skip the ancestor walk
+	stamps       map[string]ruleStamp        // every rule file read (or found missing) -> what it looked like then
+	stampsAt     time.Time
+	rulesMu      sync.Mutex                     // the rule caches belong to the event goroutine; this only fences tests that probe gitignored directly
 	pinned       map[string]struct{}            // explicit on: roots, never ignored themselves
 	fileOnlyDirs map[string]map[string]struct{} // dir -> single-file roots watched through it
 	fullyWatched map[string]struct{}            // dirs watched by the directory walk
@@ -63,6 +70,9 @@ func NewWatcher() (*Watcher, error) {
 		gitignores:       make(map[string]*gitignoreFile),
 		checked:          make(map[string]struct{}),
 		repoRoots:        make(map[string]string),
+		excludes:         make(map[string][]*gitignoreFile),
+		dirIgnored:       make(map[string]bool),
+		stamps:           make(map[string]ruleStamp),
 		pinned:           make(map[string]struct{}),
 		fileOnlyDirs:     make(map[string]map[string]struct{}),
 		fullyWatched:     make(map[string]struct{}),
@@ -127,7 +137,7 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 			if w.closed() {
 				break
 			}
-			w.walkRoot(root)
+			w.walkRoot(root, nil)
 		}
 
 		changes = make(chan ChangeSet, 1)
@@ -184,13 +194,52 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							continue
 						}
 
+						// A rule edit must reach the very next event's decision.
+						if filepath.Base(event.Name) == ".gitignore" {
+							w.rulesMu.Lock()
+							w.stampsAt = time.Time{}
+							w.rulesMu.Unlock()
+						}
+
 						// NOTE: ignoreDirs is already ignored because it's never added to the watcher.
-						if _, ok := w.ignoreFiles[event.Name]; ok {
+						if _, ok := w.ignoreFiles[event.Name]; ok || w.excepted(event.Name) {
+							continue
+						}
+						// A removed ignored dir can no longer be told apart by stat.
+						if _, ok := w.ignoreDirs[event.Name]; ok {
 							continue
 						}
 
-						if len(w.gitignores) > 0 && w.gitignored(event.Name, eventIsDir(event.Name)) {
+						isDir := event.Op&(fsnotify.Create|fsnotify.Write) != 0 && eventIsDir(event.Name)
+						if w.gitignored(event.Name, isDir) {
+							if isDir {
+								w.ignoreDirs[event.Name] = struct{}{}
+							}
 							continue
+						}
+
+						if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+							w.forgetDir(event.Name)
+						}
+
+						// A dir made after startup is invisible to fsnotify until
+						// added, and files created in it before then raise no event.
+						if event.Op&fsnotify.Create != 0 && isDir {
+							w.forgetDir(event.Name)
+							seen := 0
+							w.walkRoot(event.Name, func(file string) bool {
+								if seen == newDirFileCap {
+									return false
+								}
+								seen++
+								change.Files[file] = struct{}{}
+								change.Ops[file] |= fsnotify.Create
+								return true
+							})
+							if seen == newDirFileCap {
+								change.Files[event.Name] = struct{}{}
+								change.Ops[event.Name] |= fsnotify.Create
+							}
 						}
 
 						if timeoutC == nil {
@@ -241,8 +290,13 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 	return changes
 }
 
+// newDirFileCap keeps a huge tree dropped into a watched dir from stalling event draining.
+const newDirFileCap = 5000
+
 // walkRoot watches root and everything below it that no ignore rule excludes.
-func (w *Watcher) walkRoot(root string) {
+// found receives each kept file; after it returns false only watches are added.
+func (w *Watcher) walkRoot(root string, found func(file string) bool) {
+	capped := false
 	filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -252,26 +306,22 @@ func (w *Watcher) walkRoot(root string) {
 		}
 
 		if !info.IsDir() {
+			if capped {
+				return nil
+			}
 
-			// Files
-			// Check if file path matches any ignore pattern
-			for ignorePath := range w.ignore {
-				if path == ignorePath || strings.HasPrefix(path, ignorePath+string(os.PathSeparator)) {
-					// Check for exact match or if the file is in an ignored directory
-					w.ignoreFiles[path] = struct{}{}
-					return nil
-				} else if strings.Contains(ignorePath, "*") {
-					// Check for glob pattern match of filename
-					if matchGlobPattern(ignorePath, path) {
-						w.ignoreFiles[path] = struct{}{}
-						return nil
-					}
-				}
+			if w.excepted(path) {
+				w.ignoreFiles[path] = struct{}{}
+				return nil
 			}
 
 			if w.gitignored(path, false) {
 				w.ignoreFiles[path] = struct{}{}
 				return nil
+			}
+
+			if found != nil && !found(path) {
+				capped = true
 			}
 
 			// Watch the parent: an atomic save renames over the file and orphans a watch on its inode.
@@ -306,11 +356,55 @@ func (w *Watcher) walkRoot(root string) {
 		}
 
 		// A .gitignore covers a directory's contents, never the directory itself.
+		w.rulesMu.Lock()
 		w.loadGitignore(filepath.Clean(path))
 		w.fullyWatched[filepath.Clean(path)] = struct{}{}
+		w.rulesMu.Unlock()
 		w.watcher.Add(path)
 		return nil
 	})
+}
+
+func (w *Watcher) excepted(path string) bool {
+	for ignorePath := range w.ignore {
+		if path == ignorePath || strings.HasPrefix(path, ignorePath+string(os.PathSeparator)) {
+			return true
+		}
+		if strings.Contains(ignorePath, "*") && matchGlobPattern(ignorePath, path) {
+			return true
+		}
+	}
+	return false
+}
+
+// forgetDir keeps a removed dir's cache entries from leaking into its recreation.
+func (w *Watcher) forgetDir(dir string) {
+	w.rulesMu.Lock()
+	defer w.rulesMu.Unlock()
+	clean := filepath.Clean(dir)
+	// Most events are plain files; the O(1) miss spares them the prefix scans.
+	if _, ok := w.fullyWatched[clean]; !ok {
+		return
+	}
+	below := clean + string(os.PathSeparator)
+	under := func(p string) bool { return p == clean || strings.HasPrefix(p, below) }
+	for _, m := range []map[string]struct{}{w.fullyWatched, w.ignoreFiles, w.checked} {
+		for p := range m {
+			if under(p) {
+				delete(m, p)
+			}
+		}
+	}
+	for p := range w.gitignores {
+		if under(p) {
+			delete(w.gitignores, p)
+		}
+	}
+	for p := range w.dirIgnored {
+		if under(p) {
+			delete(w.dirIgnored, p)
+		}
+	}
 }
 
 // addFileOnly watches file's parent dir and keeps only events for file.
@@ -374,9 +468,54 @@ func (w *Watcher) loadGitignore(dir string) {
 		return
 	}
 	w.checked[dir] = struct{}{}
+	w.stamp(filepath.Join(dir, ".gitignore"))
 	if g := readGitignore(dir); g != nil {
 		w.gitignores[dir] = g
 	}
+}
+
+// ruleStamp is what a rule file looked like when the watcher read it.
+type ruleStamp struct {
+	mod    time.Time
+	size   int64
+	exists bool
+}
+
+func statRule(path string) ruleStamp {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ruleStamp{}
+	}
+	return ruleStamp{mod: info.ModTime(), size: info.Size(), exists: true}
+}
+
+func (w *Watcher) stamp(path string) {
+	w.stamps[path] = statRule(path)
+}
+
+// refreshRules polls rule files because those outside the watched tree raise no event.
+func (w *Watcher) refreshRules() {
+	now := time.Now()
+	if now.Sub(w.stampsAt) < time.Second {
+		return
+	}
+	w.stampsAt = now
+	changed := false
+	for path, was := range w.stamps {
+		if statRule(path) != was {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return
+	}
+	clear(w.gitignores)
+	clear(w.checked)
+	clear(w.dirIgnored)
+	clear(w.excludes)
+	clear(w.ignoreFiles)
+	clear(w.stamps)
 }
 
 // repoRoot returns dir's enclosing git root, cached so events skip the disk walk.
@@ -389,14 +528,43 @@ func (w *Watcher) repoRoot(dir string) string {
 	return root
 }
 
-// gitignored reports whether path is ignored, walking its .gitignore chain
-// deepest first: the closest file with a matching pattern decides.
+// gitignored mirrors git: an ignored ancestor dir excludes everything below it, negations or not.
 func (w *Watcher) gitignored(path string, isDir bool) bool {
+	if !w.respectGitignore {
+		return false
+	}
+	w.rulesMu.Lock()
+	defer w.rulesMu.Unlock()
+	w.refreshRules()
 	clean := filepath.Clean(path)
 	if _, ok := w.pinned[clean]; ok {
 		return false
 	}
+	if w.ancestorDirIgnored(filepath.Dir(clean)) {
+		return true
+	}
+	return w.ruleIgnored(clean, isDir)
+}
 
+// ancestorDirIgnored stops at a pinned root, which the user named and so is watched whatever sits above it.
+func (w *Watcher) ancestorDirIgnored(dir string) bool {
+	stop := w.repoRoot(dir)
+	if stop == "" || dir == stop {
+		return false
+	}
+	if _, ok := w.pinned[dir]; ok {
+		return false
+	}
+	if ignored, ok := w.dirIgnored[dir]; ok {
+		return ignored
+	}
+	ignored := w.ancestorDirIgnored(filepath.Dir(dir)) || w.ruleIgnored(dir, true)
+	w.dirIgnored[dir] = ignored
+	return ignored
+}
+
+// ruleIgnored follows git's precedence: .gitignore deepest first, then info/exclude, then the global file.
+func (w *Watcher) ruleIgnored(clean string, isDir bool) bool {
 	// Git scopes .gitignore files to their repo, so nothing above it counts.
 	stop := w.repoRoot(filepath.Dir(clean))
 	for dir := filepath.Dir(clean); ; {
@@ -413,7 +581,7 @@ func (w *Watcher) gitignored(path string, isDir bool) bool {
 			}
 		}
 		if dir == stop {
-			return false
+			break
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -421,6 +589,69 @@ func (w *Watcher) gitignored(path string, isDir bool) bool {
 		}
 		dir = parent
 	}
+	if stop == "" {
+		return false
+	}
+	for _, g := range w.repoExcludes(stop) {
+		if rel, err := filepath.Rel(stop, clean); err == nil {
+			if ignored, matched := g.match(rel, isDir); matched {
+				return ignored
+			}
+		}
+	}
+	return false
+}
+
+func (w *Watcher) repoExcludes(root string) []*gitignoreFile {
+	if files, ok := w.excludes[root]; ok {
+		return files
+	}
+	var files []*gitignoreFile
+	for _, path := range excludeFiles(root) {
+		w.stamp(path)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		files = append(files, &gitignoreFile{base: root, gi: gitignore.New(bytes.NewReader(data), root, nil)})
+	}
+	w.excludes[root] = files
+	return files
+}
+
+// excludeFiles falls back to git's default paths when the git binary is unavailable.
+func excludeFiles(root string) []string {
+	info := filepath.Join(root, ".git", "info", "exclude")
+	if out, err := gitOutput(root, "rev-parse", "--git-path", "info/exclude"); err == nil && out != "" {
+		info = out
+		if !filepath.IsAbs(info) {
+			info = filepath.Join(root, info)
+		}
+	}
+
+	global := ""
+	if out, err := gitOutput(root, "config", "--get", "core.excludesFile"); err == nil {
+		global = out
+	}
+	home, _ := os.UserHomeDir()
+	switch {
+	case global == "~" || strings.HasPrefix(global, "~/"):
+		global = filepath.Join(home, strings.TrimPrefix(global, "~"))
+	case global != "":
+	case os.Getenv("XDG_CONFIG_HOME") != "":
+		global = filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "git", "ignore")
+	case home != "":
+		global = filepath.Join(home, ".config", "git", "ignore")
+	}
+	return []string{info, global}
+}
+
+// gitOutput is time-boxed so a hung git can never stall the event loop.
+func gitOutput(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	return strings.TrimSpace(string(out)), err
 }
 
 // ancestorIgnored reports whether a .gitignore above a pinned root ignores it.
