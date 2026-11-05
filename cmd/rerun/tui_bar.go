@@ -239,6 +239,12 @@ func (m *tuiModel) listFocused() bool {
 // escList backs the scope out one level; filters and chips are never touched.
 func (m *tuiModel) escList() {
 	r, ok := m.cursorRow()
+	if ok && r.build {
+		m.cursor = m.targetRowIndex(r.target)
+		pr, _ := m.cursorRow()
+		m.applyRowScope(pr)
+		return
+	}
 	if !ok || r.header || !m.hasGroups() {
 		m.clearScope()
 		return

@@ -26,6 +26,8 @@ var buildCancelWait = 3 * time.Second
 
 type buildJob struct {
 	files     map[string]struct{}
+	started   time.Time
+	ended     atomic.Int64 // unix nanos at exit, set before done is sent
 	cmd       rerun.Command
 	done      chan buildResult
 	cancelled atomic.Bool
@@ -44,25 +46,47 @@ type tailBuffer struct {
 	n       int
 	lines   []string
 	partial string
+	// onLine sees each line as it completes, under mu, so the lines keep their order across writers.
+	onLine func(string)
 }
 
 func (b *tailBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	text := b.partial + string(p)
-	parts := strings.Split(text, "\n")
+	parts := strings.Split(b.partial+string(p), "\n")
 	b.partial = parts[len(parts)-1]
 	for _, l := range parts[:len(parts)-1] {
-		b.lines = append(b.lines, strings.TrimSuffix(l, "\r"))
+		b.add(strings.TrimSuffix(l, "\r"))
 	}
 	if len(b.partial) > tailPartialCap {
-		b.lines = append(b.lines, b.partial[:tailPartialCap])
+		b.add(b.partial[:tailPartialCap])
 		b.partial = ""
 	}
+	b.trim()
+	return len(p), nil
+}
+
+func (b *tailBuffer) flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.partial != "" {
+		b.add(b.partial)
+		b.partial = ""
+	}
+	b.trim()
+}
+
+func (b *tailBuffer) add(line string) {
+	b.lines = append(b.lines, line)
+	if b.onLine != nil {
+		b.onLine(line)
+	}
+}
+
+func (b *tailBuffer) trim() {
 	if over := len(b.lines) - b.n; over > 0 {
 		b.lines = slices.Clone(b.lines[over:])
 	}
-	return len(p), nil
 }
 
 func (b *tailBuffer) tail() []string {
@@ -107,10 +131,13 @@ func (r *targetRunner) startBuild(ctx context.Context, files map[string]struct{}
 	}
 
 	sorted := sortedFiles(union)
-	r.sink.emit(event{kind: evBuildStarted, target: r.target.Name, files: sorted, at: time.Now()})
 
 	started := time.Now()
-	buf := &tailBuffer{n: buildTailLines}
+	r.sink.emit(event{kind: evBuildStarted, target: r.target.Name, files: sorted, at: started})
+
+	buf := &tailBuffer{n: buildTailLines, onLine: func(line string) {
+		r.sink.emit(event{kind: evBuildOutput, target: r.target.Name, line: line, buildAt: started})
+	}}
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: sorted, err: err})
@@ -124,9 +151,11 @@ func (r *targetRunner) startBuild(ctx context.Context, files map[string]struct{}
 		return
 	}
 
-	job := &buildJob{files: union, cmd: cmd, done: make(chan buildResult, 1)}
+	job := &buildJob{files: union, started: started, cmd: cmd, done: make(chan buildResult, 1)}
 	go func() {
 		_ = cmd.WaitExit(context.Background())
+		job.ended.Store(time.Now().UnixNano())
+		buf.flush()
 		code, werr := cmd.ExitState()
 		res := buildResult{dur: time.Since(started), lines: buf.tail()}
 		switch {
@@ -177,6 +206,7 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 	if job == nil || errors.Is(res.err, errBuildCancelled) {
 		return
 	}
+	r.lastBuildStart, r.lastBuildEnd = job.started, time.Unix(0, job.ended.Load())
 	files := sortedFiles(job.files)
 	if res.err != nil {
 		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, lines: res.lines, err: res.err})
@@ -197,9 +227,6 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 	if ctx.Err() != nil || r.retired() {
 		r.meta = startMeta{}
 		return
-	}
-	if len(job.files) > 0 {
-		r.detectLoop(rerun.ChangeSet{Files: job.files})
 	}
 	r.spawn(ctx)
 }

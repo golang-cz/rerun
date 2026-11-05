@@ -16,6 +16,8 @@ type listRow struct {
 	target  int   // a target row's index into m.targets; -1 on a header
 	members []int // a header's member indices, which are contiguous
 	indent  bool
+	// build is the build row under target's row, shown while it builds or after a failure.
+	build bool
 }
 
 // groupTargets makes each schema's members contiguous and puts ungrouped targets last.
@@ -69,7 +71,7 @@ func (m *tuiModel) listRows() []listRow {
 	var rows []listRow
 	for i := 0; i < len(m.targets); {
 		if !grouped {
-			rows = append(rows, listRow{target: i})
+			rows = m.appendTargetRows(rows, listRow{target: i})
 			i++
 			continue
 		}
@@ -77,11 +79,49 @@ func (m *tuiModel) listRows() []listRow {
 		members := m.schemaMembers(key)
 		rows = append(rows, listRow{header: true, schema: key, target: -1, members: members})
 		for _, j := range members {
-			rows = append(rows, listRow{schema: key, target: j, indent: true})
+			rows = m.appendTargetRows(rows, listRow{schema: key, target: j, indent: true})
 		}
 		i += len(members)
 	}
 	return rows
+}
+
+func (m *tuiModel) appendTargetRows(rows []listRow, r listRow) []listRow {
+	rows = append(rows, r)
+	if m.targets[r.target].buildRowShown() {
+		rows = append(rows, listRow{schema: r.schema, target: r.target, indent: r.indent, build: true})
+	}
+	return rows
+}
+
+func (t *tuiTarget) buildRowShown() bool { return t.building || t.buildFailed }
+
+func (m *tuiModel) targetRowIndex(i int) int {
+	for idx, r := range m.listRows() {
+		if !r.header && !r.build && r.target == i {
+			return idx
+		}
+	}
+	return -1
+}
+
+// Every build flag change goes through here, so the cursor keeps its row as rows come and go.
+func (m *tuiModel) setBuildState(i int, building, failed bool) {
+	key, onBuild := "", false
+	if r, ok := m.cursorRow(); ok {
+		key, onBuild = m.rowKey(r), r.build && r.target == i
+	}
+	t := m.targets[i]
+	t.building, t.buildFailed = building, failed
+	for idx, r := range m.listRows() {
+		if m.rowKey(r) == key {
+			m.cursor = idx
+			return
+		}
+	}
+	if onBuild {
+		m.cursor = m.targetRowIndex(i)
+	}
 }
 
 // schemaMembers is the target indices a group key names, in list order.
@@ -131,6 +171,9 @@ func (m *tuiModel) rowKey(r listRow) string {
 	if r.header {
 		return "schema:" + r.schema
 	}
+	if r.build {
+		return "build:" + m.targets[r.target].spec.Name
+	}
 	return "target:" + m.targets[r.target].spec.Name
 }
 
@@ -170,24 +213,34 @@ func (m *tuiModel) liveSelect() {
 	}
 }
 
-// applyRowScope scopes the pane to a header's group, or to a target alone.
+// applyRowScope scopes the pane to a header's group, to a target alone, or to a target's build log.
 func (m *tuiModel) applyRowScope(r listRow) {
 	if r.header {
-		if m.solo >= 0 || m.schemaSel != r.schema {
+		if m.solo >= 0 || m.schemaSel != r.schema || m.buildView >= 0 {
 			m.applyScope(-1, r.schema)
 		}
 		return
 	}
-	if m.solo != r.target || m.schemaSel != "" {
+	if r.build {
+		if m.solo != r.target || m.schemaSel != "" || m.buildView != r.target {
+			m.setScope(r.target, "", r.target)
+		}
+		return
+	}
+	if m.solo != r.target || m.schemaSel != "" || m.buildView >= 0 {
 		m.applyScope(r.target, "")
 	}
 }
 
 // applyScope sets the pane's selection: one target, one schema, or neither.
 // Moving the cursor must never unmute, so mutes are left alone.
-func (m *tuiModel) applyScope(solo int, schema string) {
+func (m *tuiModel) applyScope(solo int, schema string) { m.setScope(solo, schema, -1) }
+
+// setScope is applyScope plus a build log: build is a target whose build lines alone show, or -1.
+func (m *tuiModel) setScope(solo int, schema string, build int) {
 	m.solo = solo
 	m.schemaSel = schema
+	m.buildView = build
 	m.tableFlip = false
 	m.refreshUnseen()
 	m.group.setSoloGuard(solo >= 0 || schema != "")
@@ -198,7 +251,7 @@ func (m *tuiModel) applyScope(solo int, schema string) {
 
 // clearScope drops the solo or schema selection and restores the pane's lines.
 func (m *tuiModel) clearScope() {
-	if m.solo < 0 && m.schemaSel == "" {
+	if m.solo < 0 && m.schemaSel == "" && m.buildView < 0 {
 		return
 	}
 	m.applyScope(-1, "")

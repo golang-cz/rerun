@@ -33,6 +33,7 @@ const (
 	evBuildOK                         // a build passed; the swap to a new run follows
 	evHealth                          // the health probe changed state
 	evBuildCancelled                  // a build was dropped and no new build follows
+	evBuildOutput                     // one line of a build's own output, streamed as it arrives
 )
 
 // event is everything a target runner reports. The front-ends render it: the
@@ -73,6 +74,8 @@ type event struct {
 	restart bool
 	// lines is the tail of a failed build's output, at most buildTailLines.
 	lines []string
+	// buildAt is the start of the build an evBuildOutput line came from.
+	buildAt time.Time
 	// health is the new state behind evHealth.
 	health healthState
 	// runAt is the start time of the run an evHealth belongs to, matching that run's evStarted.at.
@@ -155,7 +158,7 @@ func (s *plainSink) render(ev event) string {
 		return fmt.Sprintf("rerun: %s%v\n", s.label(ev.target), ev.err)
 
 	case evLoop:
-		return fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except\n", ev.target, loopCycles, ev.line)
+		return fmt.Sprintf("rerun: loop suspected — %s paused after %d× re-triggered by %s; add it to except, or change another file to resume\n", ev.target, loopCycles, ev.line)
 
 	case evBuildStarted:
 		return fmt.Sprintf("[%s] building (%s)\n", ev.target, fileCount(len(ev.files)))

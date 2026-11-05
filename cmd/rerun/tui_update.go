@@ -592,7 +592,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.liveSelect()
 	// The second click of a pair starts or stops the row, keeping the selection.
 	double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
-	if double {
+	if double && !r.build {
 		m.toggleRow(r)
 		m.lastClick = -1 // a fast third click must not read as another double
 	} else {

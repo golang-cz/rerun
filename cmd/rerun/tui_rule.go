@@ -100,7 +100,8 @@ func shortDur(d time.Duration) string {
 
 // buildFailedRule says whether the old run survived the failed build.
 func buildFailedRule(t *tuiTarget, ev event) sepLine {
-	parts := []string{fmt.Sprintf("✗ %s build failed", t.spec.Name)}
+	// The hint sits near the title, so it survives a pane too narrow for the whole rule.
+	parts := []string{fmt.Sprintf("✗ %s build failed", t.spec.Name), "select ⚙ build for output"}
 	if f := filesSummary(ev.files); f != "" {
 		parts = append(parts, f)
 	}
@@ -110,6 +111,21 @@ func buildFailedRule(t *tuiTarget, ev event) sepLine {
 		parts = append(parts, "nothing running")
 	}
 	return sepLine{label: strings.Join(parts, " · "), tone: toneFail}
+}
+
+func buildStartRule(name string, at time.Time, files []string) sepLine {
+	label := fmt.Sprintf("⚙ %s build started %s", name, at.Format("15:04:05"))
+	if f := filesSummary(files); f != "" {
+		label += " · " + f
+	}
+	return sepLine{label: label}
+}
+
+func buildEndRule(name string, ok bool, dur time.Duration) sepLine {
+	if ok {
+		return sepLine{label: fmt.Sprintf("✓ %s build ok · %s", name, shortDur(dur)), tone: toneOK}
+	}
+	return sepLine{label: fmt.Sprintf("✗ %s build failed · %s", name, shortDur(dur)), tone: toneFail}
 }
 
 // followTail pins the pane to the tail, or holds a restart rule at the top until output fills below it.

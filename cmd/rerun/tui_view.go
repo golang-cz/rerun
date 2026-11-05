@@ -388,6 +388,9 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	if r.header {
 		return m.schemaLine(m.layout.offset+y, r, leftW)
 	}
+	if r.build {
+		return m.buildLine(m.layout.offset+y, r, leftW)
+	}
 	return m.targetLine(m.layout.offset+y, r, leftW)
 }
 
@@ -506,6 +509,28 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		style = style.Reverse(true)
 	}
 	return renderSegs(segs, style, leftW)
+}
+
+func (m *tuiModel) buildLine(row int, r listRow, leftW int) string {
+	t := m.targets[r.target]
+	name := nameWidth(leftW)
+	var segs []seg
+	if r.indent {
+		segs = append(segs, seg{text: "  "})
+		name = max(0, name-2)
+	}
+	glyph, color, status := "⚙", colorYellow, shortDur(max(0, m.now.Sub(t.buildStart)))
+	if t.buildFailed {
+		glyph, color, status = "✗", colorRed, ""
+	}
+	segs = append(segs,
+		seg{text: "└ "},
+		seg{text: glyph + " ", color: color},
+		seg{text: padRight("build", max(0, name-2))},
+		seg{text: "  "},
+		seg{text: padRight(status, statusW), color: color},
+	)
+	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }
 
 // opColor ties a feed file glyph to the row palette: a created file is
@@ -770,7 +795,11 @@ func (m *tuiModel) copyHintActive() bool {
 // glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
 	var segs []seg
-	if i := m.cursorTarget(); i >= 0 {
+	if r, ok := m.cursorRow(); ok && r.build {
+		segs = append(segs, seg{text: m.buildTitle(m.targets[r.target])})
+	} else if i := m.cursorTarget(); i >= 0 && i == m.buildView {
+		segs = append(segs, seg{text: m.buildLogTitle(m.targets[i])})
+	} else if i >= 0 {
 		t := m.targets[i]
 		if t.state == stateExited {
 			segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
@@ -784,6 +813,31 @@ func (m *tuiModel) titleLine(w int) string {
 		}
 	}
 	return renderSegs(segs, m.titleStyle(), w)
+}
+
+func (m *tuiModel) buildTitle(t *tuiTarget) string {
+	state := "✗ failed"
+	if t.building {
+		state = "⚙ " + shortDur(max(0, m.now.Sub(t.buildStart)))
+	}
+	if t.spec.Build == "" {
+		return fmt.Sprintf("%s build · %s", t.spec.Name, state)
+	}
+	return fmt.Sprintf("%s build · %s · %s", t.spec.Name, state, t.spec.Build)
+}
+
+// buildLogTitle names the build log the pane still shows after the cursor's row left it.
+func (m *tuiModel) buildLogTitle(t *tuiTarget) string {
+	state := "done"
+	switch {
+	case t.building:
+		state = "building"
+	case t.buildFailed:
+		state = "failed"
+	case t.buildCancelled:
+		state = "cancelled"
+	}
+	return fmt.Sprintf("%s · build log (%s)", t.spec.Name, state)
 }
 
 // titleStyle is bold only while the pane owns the keys.
@@ -857,6 +911,9 @@ func (m *tuiModel) emptyHint() string {
 		}
 		return "no lines match the filters · backspace removes the last"
 	}
+	if m.buildView >= 0 {
+		return m.targets[m.buildView].spec.Name + " build: no output yet"
+	}
 	if m.solo >= 0 {
 		t := m.targets[m.solo]
 		if t.building {
@@ -899,7 +956,7 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
+	{"↑/↓ j/k", "move between rows, selecting each; └ build shows its log; enter focuses the pane"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (group row: its targets)"},

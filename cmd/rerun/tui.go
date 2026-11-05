@@ -18,6 +18,9 @@ import (
 // swaps this for golang-cz/ringbuf.
 const lineCap = 10_000
 
+// buildLogCap bounds one target's build output, so a noisy build cannot evict service lines.
+const buildLogCap = 2000
+
 // maxEventBatch is how many runner events one Update takes in at a time, so a
 // chatty target cannot force a redraw per line.
 const maxEventBatch = 256
@@ -153,8 +156,11 @@ type tuiTarget struct {
 	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
 	restartBatch int
 	// building and buildStart track a build in flight, which the status column counts.
-	building   bool
-	buildStart time.Time
+	building    bool
+	buildStart  time.Time
+	buildFailed bool
+	// buildCancelled marks the build log of a build that was dropped, not finished.
+	buildCancelled bool
 	// health is the live run's probe state; lastRule is the restart rule it may still complete.
 	health   healthState
 	lastRule *restartRule
@@ -290,6 +296,10 @@ type tuiModel struct {
 
 	// pinSeq is the restart rule the pane holds at its top, 0 for none.
 	pinSeq int
+	// buildView is the target whose build log the pane shows alone, or -1 for none.
+	buildView int
+	// buildLog is each target's build output by name, capped apart from merged so builds never evict service lines.
+	buildLog map[string][]mergedLine
 
 	// inputMode is the bar's open input and input its text; an open input owns every key.
 	inputMode int
@@ -354,6 +364,8 @@ func newTUI(targets []Target) *tuiModel {
 		version:    version,
 		buildTime:  buildTime,
 		solo:       -1,
+		buildView:  -1,
+		buildLog:   map[string][]mergedLine{},
 		follow:     true,
 		drawerOpen: true,
 		now:        time.Now(),
@@ -472,10 +484,17 @@ func (m *tuiModel) showHint(text string) {
 	m.hintUntil = m.now.Add(hintDuration)
 }
 
+// cancelBuild drops a running build's flags; a build log left over from it reads cancelled.
+func (m *tuiModel) cancelBuild(i int) {
+	t := m.targets[i]
+	t.buildCancelled = t.building
+	m.setBuildState(i, false, false)
+}
+
 func (m *tuiModel) stopTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
-	t.building = false
+	m.cancelBuild(i)
 	t.state = stateStopped
 	t.exitLabel = ""
 	t.runner.control(ctrlStop)
@@ -484,7 +503,7 @@ func (m *tuiModel) stopTarget(i int) {
 func (m *tuiModel) startTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
-	t.building = false
+	m.cancelBuild(i)
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.runner.control(ctrlStart)
@@ -493,7 +512,7 @@ func (m *tuiModel) startTarget(i int) {
 func (m *tuiModel) rebootTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
-	t.building = false
+	m.cancelBuild(i)
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.exitLabel = ""
@@ -544,27 +563,57 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) {
 	if len(m.cellBySeq) > 2*lineCap {
 		m.pruneCells()
 	}
-	if m.streamsTo(i) {
-		m.visible = appendCapped(m.visible, m.prefixed(ml))
-		m.visibleRaw = appendCapped(m.visibleRaw, line)
-		m.visibleIdx = appendCapped(m.visibleIdx, i)
-		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
-		m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
-		m.visibleObj = appendCapped(m.visibleObj, ml.obj)
-		m.visibleSep = appendCapped(m.visibleSep, sep)
-		m.dispDirty = true
-		if m.filterActive() {
-			m.paneSelDirty = true
-		}
+	if m.shows(i) {
+		m.showLine(ml)
 		if !m.follow {
 			m.pending++ // only lines the pane actually holds
 		}
 	} else {
-		// Output the pane is not showing: muted, or hidden by another solo.
+		// Output the pane is not showing: muted, hidden by another solo, or a build log is scoped.
 		t.unseen = true
 		m.mergedDirty = true
 	}
 	m.vpDirty = true
+}
+
+func (m *tuiModel) addBuildLine(i int, line string) {
+	m.addBuildRow(i, line, sepLine{})
+}
+
+func (m *tuiModel) addBuildRule(i int, s sepLine) {
+	m.addBuildRow(i, s.raw(), s)
+}
+
+func (m *tuiModel) addBuildRow(i int, line string, sep sepLine) {
+	name := m.targets[i].spec.Name
+	m.nextSeq++
+	ml := mergedLine{target: i, name: name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
+	m.buildLog[name] = appendLimit(m.buildLog[name], ml, buildLogCap)
+	if m.buildView == i {
+		m.showLine(ml)
+		if !m.follow {
+			m.pending++
+		}
+	}
+	m.vpDirty = true
+}
+
+func (m *tuiModel) shows(i int) bool {
+	return m.buildView < 0 && m.streamsTo(i)
+}
+
+func (m *tuiModel) showLine(ml mergedLine) {
+	m.visible = appendCapped(m.visible, m.prefixed(ml))
+	m.visibleRaw = appendCapped(m.visibleRaw, ml.text)
+	m.visibleIdx = appendCapped(m.visibleIdx, ml.target)
+	m.visibleCells = appendCapped(m.visibleCells, cellCache{})
+	m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
+	m.visibleObj = appendCapped(m.visibleObj, ml.obj)
+	m.visibleSep = appendCapped(m.visibleSep, ml.sep)
+	m.dispDirty = true
+	if m.filterActive() {
+		m.paneSelDirty = true
+	}
 }
 
 // showNotice puts rerun's own message on the bottom line; newest wins.
@@ -604,9 +653,11 @@ func (m *tuiModel) paneWidth() int {
 
 // appendCapped keeps the newest cap lines. The slice is re-sliced rather than
 // shifted, so a line costs amortized O(1) and the backing array stays bounded.
-func appendCapped[T any](lines []T, line T) []T {
-	if len(lines) >= lineCap {
-		lines = lines[len(lines)-lineCap+1:]
+func appendCapped[T any](lines []T, line T) []T { return appendLimit(lines, line, lineCap) }
+
+func appendLimit[T any](lines []T, line T, limit int) []T {
+	if len(lines) >= limit {
+		lines = lines[len(lines)-limit+1:]
 	}
 	return append(lines, line)
 }
@@ -683,25 +734,41 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.backoffUntil = m.now.Add(ev.delay)
 
 	case evBuildStarted:
-		t.building = true
 		t.buildStart = eventTime(ev, m.now)
+		t.buildCancelled = false
+		m.setBuildState(i, true, false)
+		m.addBuildRule(i, buildStartRule(t.spec.Name, t.buildStart, ev.files))
+		// The new build's rule pins to the top, with the earlier builds kept above it.
+		if m.follow && m.buildView == i {
+			m.pinSeq = m.nextSeq
+		}
 
-	case evBuildOK, evBuildCancelled:
-		t.building = false
+	case evBuildOutput:
+		// A line from a build that a newer one has replaced belongs to no shown build.
+		if ev.buildAt.Equal(t.buildStart) {
+			m.addBuildLine(i, printable(ev.line, false))
+		}
+
+	case evBuildOK:
+		t.buildCancelled = false
+		m.setBuildState(i, false, false)
+		m.addBuildRule(i, buildEndRule(t.spec.Name, true, ev.dur))
+
+	case evBuildCancelled:
+		m.cancelBuild(i)
 
 	case evBuildFailed:
-		t.building = false
+		// The output was streamed as evBuildOutput; the service keeps only the failure rule.
+		m.setBuildState(i, false, true)
 		t.restartBatch = 0
 		m.addRule(i, buildFailedRule(t, ev))
+		m.addBuildRule(i, buildEndRule(t.spec.Name, false, ev.dur))
 		if !(t.runStarted && t.state.up()) {
 			t.state = stateExited
 			t.exitCode = -1
 			t.exitLabel = "build failed"
 			t.lastRule = nil
 			t.unseen = true
-		}
-		for _, l := range ev.lines {
-			m.addLine(i, printable(l, false))
 		}
 
 	case evHealth:
@@ -778,7 +845,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
-		m.showNotice(fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except", t.spec.Name, loopCycles, ev.line), true)
+		m.showNotice(fmt.Sprintf("rerun: loop suspected — %s paused after %d× re-triggered by %s; add it to except, or change another file to resume", t.spec.Name, loopCycles, ev.line), true)
 
 	case evCleared:
 		// The TUI owns the screen; the clear bytes belong to the plain path.
@@ -790,6 +857,10 @@ func (m *tuiModel) applyEvent(ev event) {
 // appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
 	old := m.targets
+	buildName := ""
+	if m.buildView >= 0 && m.buildView < len(old) {
+		buildName = old[m.buildView].spec.Name
+	}
 	byName := make(map[string]*tuiTarget, len(old))
 	for _, t := range old {
 		byName[t.spec.Name] = t
@@ -846,6 +917,15 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
 		m.solo = j
+	}
+	m.buildView = -1
+	if j, ok := index[buildName]; ok && buildName != "" {
+		m.buildView = j
+	}
+	for name := range m.buildLog {
+		if _, ok := index[name]; !ok {
+			delete(m.buildLog, name)
+		}
 	}
 	m.schemaSel = ""
 	if schema != "" && m.hasGroups() && len(m.schemaMembers(schema)) > 0 {
@@ -1128,17 +1208,17 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleSeq = m.visibleSeq[:0]
 	m.visibleObj = m.visibleObj[:0]
 	m.visibleSep = m.visibleSep[:0]
-	for _, line := range m.merged {
-		if !m.streamsTo(line.target) {
-			continue
+	if m.buildView >= 0 {
+		for _, line := range m.buildLog[m.targets[m.buildView].spec.Name] {
+			line.target = m.buildView
+			m.showLine(line)
 		}
-		m.visible = appendCapped(m.visible, m.prefixed(line))
-		m.visibleRaw = appendCapped(m.visibleRaw, line.text)
-		m.visibleIdx = appendCapped(m.visibleIdx, line.target)
-		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
-		m.visibleSeq = appendCapped(m.visibleSeq, line.seq)
-		m.visibleObj = appendCapped(m.visibleObj, line.obj)
-		m.visibleSep = appendCapped(m.visibleSep, line.sep)
+	} else {
+		for _, line := range m.merged {
+			if m.streamsTo(line.target) {
+				m.showLine(line)
+			}
+		}
 	}
 	m.mergedDirty = false
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
@@ -1148,9 +1228,17 @@ func (m *tuiModel) rebuildMerged() {
 // Drops entries for lines that scrolled out, so streaming cannot grow the map.
 func (m *tuiModel) pruneCells() {
 	live := make(map[int]*cellEntry, len(m.merged))
-	for _, line := range m.merged {
+	keep := func(line mergedLine) {
 		if e, ok := m.cellBySeq[line.seq]; ok {
 			live[line.seq] = e
+		}
+	}
+	for _, line := range m.merged {
+		keep(line)
+	}
+	for _, lines := range m.buildLog {
+		for _, line := range lines {
+			keep(line)
 		}
 	}
 	m.cellBySeq = live

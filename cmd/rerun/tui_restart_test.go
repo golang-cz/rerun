@@ -125,7 +125,7 @@ func TestFirstStartRuleNamesItsBuild(t *testing.T) {
 	}
 }
 
-func TestBuildFailedRuleThenOutputLines(t *testing.T) {
+func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 	cases := []struct {
 		name  string
 		state procState
@@ -143,10 +143,10 @@ func TestBuildFailedRuleThenOutputLines(t *testing.T) {
 				lines: []string{"boom \x1b[31mred", "second"}}})
 			m.View()
 
-			want := "✗ api build failed · a.go +1 · " + c.tail
+			want := "✗ api build failed · select ⚙ build for output · a.go +1 · " + c.tail
 			raw := rawPane(m)
-			if len(raw) != 3 || raw[0] != want || raw[1] != "boom [31mred" || raw[2] != "second" {
-				t.Fatalf("pane = %q, want the rule %q then the stripped build lines", raw, want)
+			if len(raw) != 1 || raw[0] != want {
+				t.Fatalf("pane = %q, want only the rule %q", raw, want)
 			}
 		})
 	}

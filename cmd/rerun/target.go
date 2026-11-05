@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -30,11 +31,16 @@ var (
 	// backoffDelays is the wait before the 3rd, 4th, ... restart in a window.
 	backoffDelays = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second}
 
-	// loopCycles is how many consecutive short runs must share a trigger file
-	// before rerun calls it a self-write loop.
-	loopCycles = 4
-	// loopRunWindow is the run length under which a restart counts as short.
-	loopRunWindow = 30 * time.Second
+	// loopCycles is how many consecutive self-written re-triggers must share a
+	// file before rerun calls it a loop and pauses the target.
+	loopCycles = 6
+	// loopSkew is how close to a build or run boundary a file's mtime must sit to
+	// count as that process's own write; a human cannot save this fast.
+	loopSkew = 150 * time.Millisecond
+	// loopQuiet is the gap without a held change that ends a pause, and
+	// loopMaxPause the longest a pause lasts, so a save is never held for good.
+	loopQuiet    = 5 * time.Second
+	loopMaxPause = 30 * time.Second
 )
 
 // errStartAborted reports a start cancelled before it spawned, which is not a
@@ -415,11 +421,13 @@ type targetRunner struct {
 	lastRun    time.Duration
 	restarts   []time.Time
 
-	// fastCycles holds the sorted trigger files of the recent short runs,
-	// oldest first, and loopWarned the (target, path) pairs already reported.
-	// Run goroutine only.
-	fastCycles [][]string
-	loopWarned map[string]struct{}
+	// fastCycles holds the self-written files of the recent re-triggers, oldest
+	// first; loopPaused is the set that tripped the breaker. The build times
+	// anchor the mtime test. Run goroutine only.
+	fastCycles                   [][]string
+	loopPaused                   map[string]struct{}
+	loopPausedAt, loopHeldAt     time.Time
+	lastBuildStart, lastBuildEnd time.Time
 
 	mu        sync.Mutex
 	cmd       rerun.Command
@@ -679,6 +687,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 	case ctrlStart:
 		atomic.StoreInt32(&r.stopped, 0)
 		r.forgetCrashLoop()
+		r.clearLoop()
 		if cmd := r.currentCmd(); cmd != nil && !cmd.Exited() {
 			return
 		}
@@ -690,12 +699,14 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 	case ctrlReboot:
 		atomic.StoreInt32(&r.stopped, 0)
 		r.forgetCrashLoop()
+		r.clearLoop()
 		r.restart(ctx)
 
 	case ctrlSpec:
 		// A burst of queued reloads collapses into one bounce: only the newest
 		// spec needs its own restart.
 		r.drainSpecs()
+		r.clearLoop()
 		// A target the user stopped only takes the new spec: a config edit
 		// never surprises a stopped target into running, and a manual target
 		// only ever starts on r. An onchange target waits for its
@@ -758,6 +769,11 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		return
 	}
 
+	if r.loopHeld(changeSet) {
+		r.reportChange(changeSet, false)
+		return
+	}
+
 	if r.target.Build != "" {
 		r.reportChange(changeSet, true)
 		r.startBuild(ctx, changeSet.Files)
@@ -774,44 +790,55 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 	}
 
 	r.reportChange(changeSet, true)
-	r.detectLoop(changeSet)
 	r.spawn(ctx)
 }
 
-// detectLoop reports the trigger files that every one of the last loopCycles
-// short runs touched, which is the signature of a target rewriting its own
-// watched tree. It emits an evLoop once per (target, path) per session.
-func (r *targetRunner) detectLoop(changeSet rerun.ChangeSet) {
-	for _, path := range r.trackFastCycle(changeSet) {
-		if _, warned := r.loopWarned[path]; warned {
-			continue
+// Holding the change keeps the last good process up instead of feeding the loop.
+func (r *targetRunner) loopHeld(changeSet rerun.ChangeSet) bool {
+	if r.loopPaused != nil {
+		now := time.Now()
+		expired := now.Sub(r.loopHeldAt) >= loopQuiet || now.Sub(r.loopPausedAt) >= loopMaxPause
+		inSet := true
+		for f := range changeSet.Files {
+			if _, ok := r.loopPaused[f]; !ok {
+				inSet = false
+				break
+			}
 		}
-		if r.loopWarned == nil {
-			r.loopWarned = make(map[string]struct{})
+		if !inSet || expired {
+			r.clearLoop()
+		} else {
+			r.loopHeldAt = now
+			r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(sortedFiles(changeSet.Files), ", ")})
+			return true
 		}
-		r.loopWarned[path] = struct{}{}
-		r.sink.emit(event{kind: evLoop, target: r.target.Name, line: path})
 	}
+
+	paths := r.trackFastCycle(changeSet)
+	if len(paths) == 0 {
+		return false
+	}
+	r.loopPaused = make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		r.loopPaused[p] = struct{}{}
+	}
+	r.loopPausedAt, r.loopHeldAt = time.Now(), time.Now()
+	r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(paths, ", ")})
+	return true
 }
 
-// trackFastCycle records one restart's trigger files and returns the files
-// shared by the last loopCycles runs. A run that outlived loopRunWindow, or a
-// cycle before any start, resets the window.
-func (r *targetRunner) trackFastCycle(changeSet rerun.ChangeSet) []string {
-	r.mu.Lock()
-	last := r.lastStart
-	r.mu.Unlock()
+func (r *targetRunner) clearLoop() {
+	r.loopPaused = nil
+	r.fastCycles = r.fastCycles[:0]
+}
 
-	if last.IsZero() || time.Since(last) >= loopRunWindow {
+// A cycle without a self-written file resets the streak, so one human save breaks it.
+func (r *targetRunner) trackFastCycle(changeSet rerun.ChangeSet) []string {
+	paths := r.selfWritten(changeSet)
+	if len(paths) == 0 {
 		r.fastCycles = r.fastCycles[:0]
 		return nil
 	}
-
-	paths := make([]string, 0, len(changeSet.Files))
-	for path := range changeSet.Files {
-		paths = append(paths, path)
-	}
-	slices.Sort(paths)
 	r.fastCycles = append(r.fastCycles, paths)
 	if len(r.fastCycles) > loopCycles {
 		r.fastCycles = r.fastCycles[len(r.fastCycles)-loopCycles:]
@@ -834,6 +861,58 @@ func (r *targetRunner) trackFastCycle(changeSet rerun.ChangeSet) []string {
 		}
 	}
 	return shared
+}
+
+// selfWritten lists the changed files whose mtime hugs a boundary of this
+// target's own build or run. fsnotify names no writer, so timing is the only tell.
+func (r *targetRunner) selfWritten(changeSet rerun.ChangeSet) []string {
+	r.mu.Lock()
+	starts := []time.Time{r.lastStart, r.lastBuildStart}
+	r.mu.Unlock()
+	ends := []time.Time{r.lastBuildEnd}
+	if r.build != nil {
+		starts = append(starts, r.build.started)
+		if ns := r.build.ended.Load(); ns != 0 {
+			ends = append(ends, time.Unix(0, ns))
+		}
+	}
+
+	const maxStats = 64
+	var out []string
+	for i, path := range sortedFiles(changeSet.Files) {
+		if i == maxStats {
+			break
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		m := info.ModTime()
+		if nearAfter(m, starts) || nearBefore(m, ends) {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+// The small lead absorbs the gap between fork and the start timestamp.
+func nearAfter(m time.Time, starts []time.Time) bool {
+	for _, b := range starts {
+		if d := m.Sub(b); !b.IsZero() && d >= -50*time.Millisecond && d < loopSkew {
+			return true
+		}
+	}
+	return false
+}
+
+// Builds write their output last, just before they exit.
+func nearBefore(m time.Time, ends []time.Time) bool {
+	for _, b := range ends {
+		if d := m.Sub(b); !b.IsZero() && d > -loopSkew && d <= 50*time.Millisecond {
+			return true
+		}
+	}
+	return false
 }
 
 // reportChange tells the front-end which files changed, and whether a spawn
