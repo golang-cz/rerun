@@ -11,8 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// setColumns writes cols to `schemas.<schema>.columns` when schema is set, else
-// to `<target>.columns`. Only the edited key's lines change; the rest of the file
+// setColumns writes cols to `groups.<schema>.columns` (or `schemas`, whichever
+// the file uses) when schema is set, else to `<target>.columns`. Only the edited key's lines change; the rest of the file
 // keeps its bytes. A symlink is followed, so the file it names is the one written.
 func setColumns(path, schema, target string, cols []string) error {
 	for _, raw := range cols {
@@ -46,7 +46,7 @@ func setColumns(path, schema, target string, cols []string) error {
 
 	ed := newLineEdit(string(data))
 	if schema != "" {
-		err = ed.setSchemaColumns(root, schema, cols)
+		err = ed.setSchemaColumns(root, groupBlockOf(root), schema, cols)
 	} else {
 		err = ed.setTargetColumns(root, target, cols)
 	}
@@ -122,21 +122,35 @@ func (ed *lineEdit) setTargetColumns(root *yaml.Node, target string, cols []stri
 	return ed.setColumnsIn(root, kn, vn, target, cols)
 }
 
-// setSchemaColumns writes the columns of the schema named schema, creating the
-// `schemas` block or the schema entry when either is missing.
-func (ed *lineEdit) setSchemaColumns(root *yaml.Node, schema string, cols []string) error {
-	sk, sv := entry(root, schemasKey)
+// groupBlockOf is the top-level spelling the file already uses. A file with
+// neither gets the primary `groups`.
+func groupBlockOf(root *yaml.Node) groupBlock {
+	if k, _ := entry(root, groupsBlock.block); k == nil {
+		if k, _ := entry(root, schemasBlock.block); k != nil {
+			return schemasBlock
+		}
+	}
+	return groupsBlock
+}
+
+// setSchemaColumns writes the columns of the group named schema under the block
+// kw, creating the block or the group entry when either is missing.
+func (ed *lineEdit) setSchemaColumns(root *yaml.Node, kw groupBlock, schema string, cols []string) error {
+	sk, sv := entry(root, kw.block)
 	if sk == nil {
 		return ed.appendTo(root, 0, []string{
-			schemasKey + ":",
+			kw.block + ":",
 			pad(ed.unit) + yamlKey(schema) + ":",
 			pad(2*ed.unit) + columnsLine(cols),
 		})
 	}
 	switch {
 	case sv.Kind == yaml.AliasNode:
-		return fmt.Errorf("%s is an alias, edit it by hand", schemasKey)
+		return fmt.Errorf("%s is an alias, edit it by hand", kw.block)
 	case isEmpty(sv):
+		if err := ed.openFlowEmpty(root, sk, sv); err != nil {
+			return err
+		}
 		ci := sk.Column - 1 + ed.unit
 		ed.insertAfter(sk.Line-1, []string{
 			pad(ci) + yamlKey(schema) + ":",
@@ -144,7 +158,7 @@ func (ed *lineEdit) setSchemaColumns(root *yaml.Node, schema string, cols []stri
 		})
 		return nil
 	case sv.Kind != yaml.MappingNode:
-		return fmt.Errorf("%s: expected a mapping of schema names", schemasKey)
+		return fmt.Errorf("%s: expected a mapping of %s names", kw.block, kw.field)
 	}
 	kn, vn := entry(sv, schema)
 	if kn == nil {
@@ -164,6 +178,9 @@ func (ed *lineEdit) setColumnsIn(root, kn, vn *yaml.Node, name string, cols []st
 	case vn.Kind == yaml.AliasNode:
 		return fmt.Errorf("%s is an alias, edit it by hand", name)
 	case isEmpty(vn):
+		if err := ed.openFlowEmpty(root, kn, vn); err != nil {
+			return err
+		}
 		ed.insertAfter(kn.Line-1, []string{pad(kn.Column-1+ed.unit) + columnsLine(cols)})
 		return nil
 	case vn.Kind != yaml.MappingNode:
@@ -178,6 +195,22 @@ func (ed *lineEdit) setColumnsIn(root, kn, vn *yaml.Node, name string, cols []st
 		return ed.appendTo(vn, ci, []string{pad(ci) + columnsLine(cols)})
 	}
 	return ed.replaceColumns(root, ck, cv, name, cols)
+}
+
+// openFlowEmpty rewrites `key: {}` as a block key, so children can go under it.
+func (ed *lineEdit) openFlowEmpty(root, kn, vn *yaml.Node) error {
+	if vn.Kind != yaml.MappingNode || vn.Style&yaml.FlowStyle == 0 {
+		return nil
+	}
+	if vn.Anchor != "" && aliased(root, vn) {
+		return anchorError{fmt.Sprintf("%s is a YAML anchor; edit rerun.yml by hand", kn.Value)}
+	}
+	line := pad(kn.Column-1) + yamlKey(kn.Value) + ":"
+	if comment := firstNonEmpty(kn.LineComment, vn.LineComment); comment != "" {
+		line += " " + comment
+	}
+	ed.replace(kn.Line-1, kn.Line-1, []string{line})
+	return nil
 }
 
 // replaceColumns rewrites the lines of an existing columns key. An anchored list

@@ -57,7 +57,7 @@ Mouse: click a row to solo it, double-click to stop/start like `space`, a batch
 in the fs drawer to list its files, shift-click to solo, and a click on a schema
 header to select its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
-Targets with a `schema:` are listed under a `▾ name` header that counts
+Targets with a `group:` are listed under a `▾ name` header that counts
 its running members; targets without one follow. The right pane is always the
 merged stream; soloing narrows it to one target, and selecting a schema to its
 members, keeping the name prefixes. Each
@@ -145,7 +145,7 @@ Each top-level key is one target. Fields:
 | `cmd` | shell command to run, required |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
-| `schema` | name of a `schemas:` entry to take columns from; the target's own `columns` win |
+| `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
@@ -153,24 +153,25 @@ Each top-level key is one target. Fields:
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |
 
-#### Schemas
+#### Groups
 
 Targets that log the same JSON shape can share columns. Define them once under
-the reserved top-level `schemas:` key, then point each target at one with
-`schema:`:
+the reserved top-level `groups:` key, then point each target at one with
+`group:`:
 
 ```yaml
-schemas:
+groups:
   backend:
     columns: ["level {.level}", "msg {.msg}", "status {.status}"]
 
 omsx-api:
-  schema: backend
+  group: backend
   cmd: make -C apps/api run
 ```
 
-A target's own `columns` wins over its schema's. A `schema:` that names no
-schema is a config error. Quote each column entry: a `{` inside a plain entry
+A target's own `columns` wins over its group's. A `group:` that names no
+group is a config error. A group may be empty (`webapps: {}`). `schemas:` and
+`schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
 #### Reloading

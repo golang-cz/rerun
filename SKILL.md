@@ -138,9 +138,10 @@ start, unnamed ones stay off (still listed, still startable with `space`).
 Unknown fields, duplicate fields, and non-string values are errors.
 
 Targets that log the same JSON shape can share columns: define them once under
-the reserved top-level `schemas:` key (`schemas: {backend: {columns: ["level {.level}"]}}`)
-and set `schema: backend` on each target. A target's own `columns` wins over its
-schema's, and a `schema:` naming no schema is an error. Quote each column entry,
+the reserved top-level `groups:` key (`groups: {backend: {columns: ["level {.level}"]}}`)
+and set `group: backend` on each target. A target's own `columns` wins over its
+group's, and a `group:` naming no group is an error. A group may be empty (`webapps: {}`).
+The older `schemas:`/`schema:` spelling still works; use one spelling per file. Quote each column entry,
 since a `{` inside a plain `[...]` entry is a YAML error.
 
 ## Flags

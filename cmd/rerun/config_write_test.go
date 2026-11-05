@@ -97,7 +97,7 @@ func TestSetColumnsCreatesMissingSchemasBlock(t *testing.T) {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\n  cmd: echo hi\nschemas:\n  backend:\n    columns: ['level {.level}']\n"
+	want := "api:\n  cmd: echo hi\ngroups:\n  backend:\n    columns: ['level {.level}']\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
@@ -291,5 +291,50 @@ func TestSetColumnsLongListStaysOnOneLine(t *testing.T) {
 	lines := strings.Split(strings.TrimSuffix(readConfigText(t, path), "\n"), "\n")
 	if len(lines) != 3 || !strings.HasPrefix(lines[2], "  columns: [") || !strings.HasSuffix(lines[2], "]") {
 		t.Fatalf("expected one columns line, got %q", lines)
+	}
+}
+
+func TestSetColumnsGroupsBlockKeepsItsSpelling(t *testing.T) {
+	path := writeConfigFixture(t, "groups:\n  backend:\n    columns: [level]\n\napi:\n  group: backend\n  cmd: echo hi\n")
+
+	if err := setColumns(path, "backend", "", []string{"status {.status}"}); err != nil {
+		t.Fatalf("setColumns: %v", err)
+	}
+
+	want := "groups:\n  backend:\n    columns: ['status {.status}']\n\napi:\n  group: backend\n  cmd: echo hi\n"
+	if got := readConfigText(t, path); got != want {
+		t.Errorf("file =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestSetColumnsFillsFlowEmptyGroup(t *testing.T) {
+	path := writeConfigFixture(t, "groups:\n  webapps: {}\n\napi:\n  group: webapps\n  cmd: echo hi\n")
+
+	if err := setColumns(path, "webapps", "", []string{"level {.level}"}); err != nil {
+		t.Fatalf("setColumns: %v", err)
+	}
+
+	want := "groups:\n  webapps:\n    columns: ['level {.level}']\n\napi:\n  group: webapps\n  cmd: echo hi\n"
+	if got := readConfigText(t, path); got != want {
+		t.Errorf("file =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := ParseConfig(path); err != nil {
+		t.Errorf("ParseConfig after save: %v", err)
+	}
+}
+
+func TestSetColumnsFillsFlowEmptyGroupsBlock(t *testing.T) {
+	path := writeConfigFixture(t, "groups: {}\napi:\n  cmd: echo hi\n")
+
+	if err := setColumns(path, "backend", "", []string{"level {.level}"}); err != nil {
+		t.Fatalf("setColumns: %v", err)
+	}
+
+	want := "groups:\n  backend:\n    columns: ['level {.level}']\napi:\n  cmd: echo hi\n"
+	if got := readConfigText(t, path); got != want {
+		t.Errorf("file =\n%s\nwant\n%s", got, want)
+	}
+	if _, err := ParseConfig(path); err != nil {
+		t.Errorf("ParseConfig after save: %v", err)
 	}
 }

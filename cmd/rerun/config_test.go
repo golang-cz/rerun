@@ -132,7 +132,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, schema, open, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, group, open, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown schema",
@@ -140,9 +140,24 @@ func TestParseConfigErrors(t *testing.T) {
 			wantSub: []string{`target "api"`, `field "schema"`, `unknown schema "nope"`},
 		},
 		{
-			name:    "schema without columns",
-			content: "schemas:\n  backend: {}\n\napi:\n  cmd: echo hi\n",
-			wantSub: []string{`schema "backend"`, "columns is required"},
+			name:    "groups and schemas both set",
+			content: "groups:\n  backend: {}\nschemas:\n  backend: {}\n\napi:\n  cmd: echo hi\n",
+			wantSub: []string{`both "groups" and "schemas" are set; use one`},
+		},
+		{
+			name:    "group and schema both set on a target",
+			content: "groups:\n  backend: {}\n\napi:\n  group: backend\n  schema: backend\n  cmd: echo hi\n",
+			wantSub: []string{`target "api"`, `both "group" and "schema" are set; use one`},
+		},
+		{
+			name:    "unknown group",
+			content: "groups:\n  backend: {}\n\napi:\n  group: nope\n  cmd: echo hi\n",
+			wantSub: []string{`target "api"`, `field "group"`, `unknown group "nope"`},
+		},
+		{
+			name:    "groups is not a mapping",
+			content: "groups: 5\napi:\n  cmd: echo hi\n",
+			wantSub: []string{"groups: expected a mapping of group names"},
 		},
 		{
 			name:    "unknown field inside a schema",
@@ -701,7 +716,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"cmd":      "echo hi",
 		"url":      "http://localhost:1",
 		"columns":  `["a {.b}"]`,
-		"schema":   "backend",
+		"group":    "backend",
 		"open":     "true",
 		"selected": "false",
 		"start":    "onchange",
@@ -721,8 +736,8 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 			line = "" // the base already writes cmd once
 		}
 		prefix := ""
-		if field == "schema" {
-			prefix = "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n"
+		if field == "group" {
+			prefix = "groups:\n  backend:\n    columns: [\"a {.b}\"]\n"
 		}
 		writeFile(t, path, prefix+"api:\n  cmd: echo hi\n"+line+"\n")
 
@@ -865,5 +880,47 @@ func TestParseConfigSchemasOnlyBlockIsNullSafe(t *testing.T) {
 	}
 	if got := cfg.Names(); !reflect.DeepEqual(got, []string{"api"}) {
 		t.Errorf("names = %v, want [api]", got)
+	}
+}
+
+func TestParseConfigGroupsKeyMatchesSchemas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "groups:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  group: backend\n  cmd: echo hi\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	api, _ := cfg.Find("api")
+	want := []Column{{Name: "level", Expr: ".level"}, {Name: "msg", Expr: ".msg"}}
+	if api.Schema != "backend" || !reflect.DeepEqual(api.Columns, want) {
+		t.Errorf("api group = %q columns = %+v, want backend and %+v", api.Schema, api.Columns, want)
+	}
+}
+
+// A group with no columns is valid in every spelling, like `columns: []`.
+func TestParseConfigEmptyGroupsAreValid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "groups:\n  webapps: {}\n  nulls:\n  lists:\n    columns: []\n\na:\n  group: webapps\n  cmd: echo a\n\nb:\n  group: nulls\n  cmd: echo b\n\nc:\n  group: lists\n  cmd: echo c\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		target, _ := cfg.Find(name)
+		if target.Schema == "" || len(target.Columns) != 0 {
+			t.Errorf("%s group = %q columns = %+v, want a group with no columns", name, target.Schema, target.Columns)
+		}
+	}
+}
+
+func TestParseConfigGroupKeyReadsSchemasBlock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "schemas:\n  backend: {}\n\napi:\n  group: backend\n  cmd: echo hi\n")
+
+	_, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
 	}
 }

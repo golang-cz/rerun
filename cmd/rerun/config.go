@@ -280,7 +280,7 @@ func ParseConfig(path string) (*Config, error) {
 			return nil, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
 		}
 		seen[name] = true
-		if name == schemasKey {
+		if name == groupsBlock.block || name == schemasBlock.block {
 			continue
 		}
 
@@ -297,44 +297,62 @@ func ParseConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// schemasKey is the reserved top-level key that holds named column schemas.
-const schemasKey = "schemas"
+// groupBlock is one spelling of the top-level group block and of the target key
+// that names a group. `groups`/`group` is primary; `schemas`/`schema` still parses.
+type groupBlock struct {
+	block string
+	field string
+}
 
-// schemaFields is the accepted keys inside a `schemas:` entry.
+var (
+	groupsBlock  = groupBlock{block: "groups", field: "group"}
+	schemasBlock = groupBlock{block: "schemas", field: "schema"}
+)
+
+// schemaFields is the accepted keys inside a group entry.
 var schemaFields = []string{"columns"}
 
-// parseSchemas reads the top-level `schemas:` block into name -> columns. A
-// null block is an empty one, and each schema must name its columns.
+// parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
+// columns. The two spellings cannot both appear. A null block is an empty one,
+// and a group with no columns, null or `{}`, is valid.
 func parseSchemas(src *configSource, root *yaml.Node) (map[string][]Column, error) {
 	schemas := make(map[string][]Column)
+	var kw groupBlock
 	found := false
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key := deref(root.Content[i])
-		if key.Kind != yaml.ScalarNode || key.Value != schemasKey {
+		if key.Kind != yaml.ScalarNode || (key.Value != groupsBlock.block && key.Value != schemasBlock.block) {
 			continue
 		}
 		if found {
-			return nil, src.at(key, len(schemasKey), fmt.Sprintf("duplicate top-level key %q", schemasKey))
+			if key.Value != kw.block {
+				return nil, src.at(key, len(key.Value), fmt.Sprintf("both %q and %q are set; use one", kw.block, key.Value))
+			}
+			return nil, src.at(key, len(key.Value), fmt.Sprintf("duplicate top-level key %q", key.Value))
 		}
 		found = true
+		kw = groupsBlock
+		if key.Value == schemasBlock.block {
+			kw = schemasBlock
+		}
 
 		block := deref(root.Content[i+1])
 		if block.Kind == yaml.ScalarNode && block.Tag == "!!null" {
 			continue
 		}
 		if block.Kind != yaml.MappingNode {
-			return nil, src.at(block, nodeSpan(block), fmt.Sprintf("%s: expected a mapping of schema names", schemasKey))
+			return nil, src.at(block, nodeSpan(block), fmt.Sprintf("%s: expected a mapping of %s names", kw.block, kw.field))
 		}
 		for j := 0; j+1 < len(block.Content); j += 2 {
 			nameNode, value := deref(block.Content[j]), deref(block.Content[j+1])
 			if nameNode.Kind != yaml.ScalarNode {
-				return nil, src.at(nameNode, 1, "schema names must be strings")
+				return nil, src.at(nameNode, 1, kw.field+" names must be strings")
 			}
 			name := nameNode.Value
 			if _, ok := schemas[name]; ok {
-				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate schema %q", name))
+				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate %s %q", kw.field, name))
 			}
-			cols, err := parseSchema(src, name, nameNode, value)
+			cols, err := parseSchema(src, kw, name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -344,9 +362,12 @@ func parseSchemas(src *configSource, root *yaml.Node) (map[string][]Column, erro
 	return schemas, nil
 }
 
-func parseSchema(src *configSource, name string, keyNode, node *yaml.Node) ([]Column, error) {
+func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node) ([]Column, error) {
 	node = deref(node)
-	owner := fmt.Sprintf("schema %q", name)
+	owner := fmt.Sprintf("%s %q", kw.field, name)
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		return nil, nil
+	}
 	if node.Kind != yaml.MappingNode {
 		return nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: expected a mapping of fields", owner))
 	}
@@ -376,16 +397,13 @@ func parseSchema(src *configSource, name string, keyNode, node *yaml.Node) ([]Co
 		}
 	}
 
-	if !seen["columns"] {
-		return nil, src.at(keyNode, len(name), fmt.Sprintf("%s: columns is required", owner))
-	}
 	return cols, nil
 }
 
 // targetFields is the accepted rerun.yml target keys, in the order the docs
-// list them. It mirrors the switch in parseTarget; TestTargetFieldsMatchParser
-// fails when the two drift apart.
-var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "schema", "open", "selected", "start", "delay", "cooldown", "grace"}
+// list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
+// fails when the two drift apart. `schema` parses too but is not listed.
+var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "group", "open", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string][]Column) (Target, error) {
 	node = deref(node)
@@ -404,6 +422,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: duplicate field %q", name, field))
 		}
 		seen[field] = true
+		if seen["group"] && seen["schema"] {
+			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"group\" and \"schema\" are set; use one", name))
+		}
 
 		switch field {
 		case "desc":
@@ -443,13 +464,13 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			target.Columns = cols
 			target.ownColumns = true
 
-		case "schema":
+		case "group", "schema":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
 			if _, ok := schemas[s]; !ok {
-				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: unknown schema %q", name, field, s))
+				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: unknown %s %q", name, field, field, s))
 			}
 			target.Schema = s
 
