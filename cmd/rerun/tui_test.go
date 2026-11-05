@@ -99,14 +99,6 @@ func buttons(m *tuiModel) []string {
 	return out
 }
 
-func segText(segs []seg) string {
-	var b strings.Builder
-	for _, s := range segs {
-		b.WriteString(s.text)
-	}
-	return b.String()
-}
-
 func TestUptimeFormat(t *testing.T) {
 	tests := []struct {
 		in   time.Duration

@@ -23,9 +23,6 @@ const (
 // `backoff 10s` (11 cells).
 const statusW = 11
 
-// markerW is the two cells between a name and its status: unsaved, then unseen.
-const markerW = 2
-
 // narrowW is the screen width under which the left column shrinks to its names.
 const narrowW = 100
 
