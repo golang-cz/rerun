@@ -63,14 +63,13 @@ merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
-`s` or `enter` solo a target's stream or select a schema's targets (`esc` or a
-second press clears). On a schema header, `space`, `r`, and `m` act on its
-targets. `o` open the url, `G` live output. The right pane is always the merged stream; soloing
+`enter` focuses the pane. The cursor row narrows the pane to its target or
+schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
+targets. `o` open the url, `G` live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. The pane's top line is
-the cursor row's command, with its url linked. Mouse: click a row to solo it,
-double-click to stop/start like `space`, shift-click to solo, and a click on a
-schema header to select its targets. `m` mutes; the footer notice names it.
+the cursor row's command, with its url linked. Mouse: click a row to show only its
+stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
@@ -80,7 +79,7 @@ the pane is focused, and moving it off the live tail pauses the tail (`G` resume
 pauses the tail and keeps the block in view. Expanded keys are underlined and scalar
 values tinted. The first expansion of a session shows the click hint.
 In an expanded block, a click on a key adds it as a column of the selection (a selected
-schema, else the soloed target), and a click on a scalar adds a `.path == value` chip
+schema, else the target the pane shows), and a click on a scalar adds a `.path == value` chip
 (ANDed with `v`; `×` or `backspace` removes it). With the pane focused and the cursor on
 an expanded key or scalar row, `a` adds the key and `f` adds the value chip, as the
 clicks do. A table header column name is inert; only the `×` after it removes that
@@ -96,13 +95,13 @@ The fs drawer under the list is a change feed: one line per batch of changes
 (events within 150ms of each other), with the batch age, the first changed file, `+N` for the
 rest, and the targets the batch restarted. A created directory shows a trailing `/` and heads
 the files reported under it; a narrow column cuts the path from its left. The pane's top line
-names a soloed or muted row (`solo`, `muted`). `tab` focuses it, `j/k` move, `enter`
+names a muted row (`muted`). `tab` focuses it, `j/k` move, `enter`
 lists a batch's files, `esc` closes. A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.
 
 ## Building rerun.yml
 
-Flat top-level map, one entry per target (Makefile-like). `cmd` is required;
+Flat top-level map, one entry per target (Makefile-like). `run` (older spelling: `cmd`) is required;
 everything else is optional. Durations are Go-style strings (`200ms`, `5s`).
 
 ```yaml
@@ -110,7 +109,9 @@ frontend:
   desc: Vite dev server          # shown in output listings
   on: web                       # string or list; gitignore-style globs
   except: [node_modules, dist]  # adds to .gitignore, which always applies
-  cmd: pnpm run dev              # run through sh -c; quotes, &&, pipes work
+  run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
+  build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
+  health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
   url: http://localhost:5173     # o opens it; the row links to it
   open: true                     # open the url once at startup
   delay: 200ms                  # batch file events before restarting

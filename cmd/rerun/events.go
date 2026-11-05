@@ -195,6 +195,9 @@ func fileCount(n int) string {
 	if n == 1 {
 		return "1 file"
 	}
+	if n == 0 {
+		return "no files"
+	}
 	return fmt.Sprintf("%d files", n)
 }
 

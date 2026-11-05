@@ -61,7 +61,7 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 
 	press(m, "ctrl+f")
 	typeString(m, "method")
-	m.commitInput()
+	press(m, "enter")
 	if len(m.searchMatches) != 1 {
 		t.Fatalf("search matched %v in table mode, want the raw JSON line", m.searchMatches)
 	}
@@ -69,15 +69,15 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 
 	press(m, "v")
 	typeString(m, ".request.method")
-	m.commitInput()
+	press(m, "enter")
 	if m.paneLen() != 1 {
 		t.Fatalf("filter kept %d rows, want the raw line to match", m.paneLen())
 	}
 	press(m, "esc")
 
-	x := paneX(m)
-	m.handleMouse(mouse(x, 1, false))
-	m.handleMouse(release(x, 1))
+	x, y := paneX(m), m.headerRows()
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x, y))
 	if got := decodeCopy(t, m.copySeq); got != jsonGet+"\n" {
 		t.Fatalf("copied %q, want the raw line", got)
 	}
@@ -178,7 +178,7 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	before := m.cellEvals
 
 	m.cursor = 1 // web
-	press(m, "s")
+	m.liveSelect()
 	m.View()
 	if got := m.cellEvals; got != before {
 		t.Fatalf("cellEvals = %d after a solo flip, want %d: cached cells were re-decoded", got, before)

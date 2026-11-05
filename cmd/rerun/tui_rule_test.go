@@ -18,7 +18,7 @@ func TestStartAndExitWriteRunRules(t *testing.T) {
 		{kind: evExited, target: "web", code: 0, at: start.Add(4200 * time.Millisecond)},
 	})
 
-	want := []string{"▶ web started 12:01:02", "listening", "■ web exited 0 · 4.2s"}
+	want := []string{"▶ web started 12:01:02", "listening", "✓ web exited 0 · 4.2s"}
 	var got []string
 	for i, line := range m.visibleRaw {
 		if m.visibleSep[i].isSep() || line == "listening" {
@@ -84,7 +84,7 @@ func TestRunRuleIsNotATableRow(t *testing.T) {
 
 func TestRunRuleRespectsTheScope(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	m.applyEvents([]event{{kind: evStarted, target: "web", at: time.Now()}})
 
 	for _, line := range m.visibleRaw {

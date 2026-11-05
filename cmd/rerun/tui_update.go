@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -143,6 +142,14 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// The bar owns its arrows, backspace and esc; any other key blurs it first.
+	if m.barFocus {
+		if m.handleBarNav(msg) {
+			return m, nil
+		}
+		m.blurBar()
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		m.confirmQuit = true
@@ -155,10 +162,20 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpAll = false
 
 	case "/", "v":
-		m.openInput(inputFilter)
+		m.openBar(inputFilter)
 
 	case "ctrl+f":
-		m.openInput(inputSearch)
+		m.openBar(inputSearch)
+
+	case "[", "shift+up":
+		if m.listFocused() {
+			m.jumpGroup(-1)
+		}
+
+	case "]", "shift+down":
+		if m.listFocused() {
+			m.jumpGroup(1)
+		}
 
 	case "c":
 		m.toggleTable()
@@ -180,12 +197,12 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case m.paneFocus:
 			m.paneFocus = false
-		case m.search != "":
-			m.clearSearch()
-		case m.filter != "":
-			m.clearFilter()
 		default:
-			m.clearScope()
+			before := m.scopeState()
+			m.escList()
+			if m.scopeState() == before && len(m.barChips()) > 0 {
+				m.showHint("filters stay · backspace removes the last · click × to remove")
+			}
 		}
 
 	case "up":
@@ -289,8 +306,8 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "backspace":
-		if m.paneFocus && len(m.chips) > 0 {
-			m.removeChip(len(m.chips) - 1)
+		if chips := m.barChips(); m.paneFocus && len(chips) > 0 {
+			m.removeBarChip(chips[len(chips)-1])
 		}
 
 	case "ctrl+s":
@@ -304,11 +321,6 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		if r, ok := m.cursorRow(); ok {
 			m.muteRow(r)
-		}
-
-	case "s":
-		if r, ok := m.cursorRow(); ok {
-			m.selectRow(r)
 		}
 
 	case "r":
@@ -341,21 +353,33 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleInputKey routes keys into the open bottom-line bar. Only Ctrl-C
-// escapes it; esc cancels the whole query, enter commits it.
+// handleInputKey routes keys into the bar's open input; only Ctrl-C escapes it.
 func (m *tuiModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		m.cancelInput()
+		m.leaveInput()
 	case "enter":
-		m.commitInput()
+		if m.inputMode == inputFilter && m.filterErr != "" {
+			return m, nil
+		}
+		m.leaveInput()
+	case "left":
+		// An empty input hands the arrows to the chips, so they can be picked.
+		if chips := m.barChips(); m.input == "" && len(chips) > 0 {
+			m.inputMode = inputNone
+			m.barSel = len(chips) - 1
+		}
 	case "backspace":
 		if m.input != "" {
 			r := []rune(m.input)
 			m.input = string(r[:len(r)-1])
 			m.inputChanged()
+			break
+		}
+		if chips := m.barChips(); len(chips) > 0 {
+			m.removeBarChip(chips[len(chips)-1])
 		}
 	default:
 		switch msg.Type {
@@ -370,82 +394,58 @@ func (m *tuiModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// openInput shows a bar, seeded with the query already in force so `/` and `v`
-// reopen for editing rather than starting over. The committed filter is
-// stashed so an edit can be cancelled without destroying it.
+// openInput shows the bar's input; find starts from its query, a text filter empty.
 func (m *tuiModel) openInput(mode int) {
 	m.inputMode = mode
+	m.filterErr = ""
+	m.draft = nil
 	if mode == inputFilter {
-		m.input = m.filter
-		m.filterStash = m.filter
+		m.input = ""
 		return
 	}
 	m.input = m.search
 }
 
-// inputChanged applies the in-progress text live to the pane. A yq expression
-// that does not parse is reported and suspends the filter instead of matching
-// nothing, so a typo does not blank the pane.
+// inputChanged previews the typed text live; a yq query that does not parse is left out.
 func (m *tuiModel) inputChanged() {
 	if m.inputMode == inputFilter {
-		m.filter = m.input
-		m.filterErr = filterParseError(m.filter)
-		m.paneSelDirty = true
-		m.vpDirty = true
-		m.recomputeSearch(true)
+		m.draft, m.filterErr = nil, ""
+		if m.input != "" {
+			keep, err := compileFilter(m.input)
+			if err != nil {
+				m.filterErr = err.Error()
+			} else {
+				m.draft = keep
+			}
+		}
+		m.chipsChanged()
 		return
 	}
 	m.search = m.input
 	m.recomputeSearch(true)
 }
 
-// filterParseError reports why a yq query does not compile, or "" when the
-// query is a plain substring or a valid expression.
-func filterParseError(query string) string {
-	if !strings.HasPrefix(query, ".") {
-		return ""
-	}
-	if _, err := yqParse(query); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-// commitInput closes the bar, keeping a non-empty query live. A filter with a
-// parse error keeps the bar open so the error stays visible.
-func (m *tuiModel) commitInput() {
-	mode := m.inputMode
-	if mode == inputFilter && m.filterErr != "" {
-		return
+// leaveInput turns the typed text into a chip and blurs the bar; empty adds nothing.
+func (m *tuiModel) leaveInput() {
+	if m.inputMode == inputFilter && m.draft != nil && !m.hasFilter(m.input) {
+		m.filters = append(m.filters, textFilter{query: m.input, keep: m.draft})
 	}
 	m.inputMode = inputNone
 	m.input = ""
-	if mode == inputFilter {
-		if m.filter == "" {
-			m.clearFilter()
+	m.draft = nil
+	m.filterErr = ""
+	m.blurBar()
+	m.chipsChanged()
+}
+
+// hasFilter reports whether a text filter with this query is already a chip.
+func (m *tuiModel) hasFilter(query string) bool {
+	for _, f := range m.filters {
+		if f.query == query {
+			return true
 		}
-		return
 	}
-	if m.search == "" {
-		m.clearSearch()
-	}
-}
-
-// cancelInput closes the bar. A filter edit reverts to the committed filter;
-// a search is dropped entirely.
-func (m *tuiModel) cancelInput() {
-	mode := m.inputMode
-	m.inputMode = inputNone
-	m.input = ""
-	if mode == inputFilter {
-		m.filter = m.filterStash
-		m.filterErr = ""
-		m.paneSelDirty = true
-		m.vpDirty = true
-		m.recomputeSearch(true)
-		return
-	}
-	m.clearSearch()
+	return false
 }
 
 func (m *tuiModel) moveCursor(delta int) {
@@ -587,23 +587,18 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	r, _ := m.listRowAt(row)
 
-	switch {
-	case msg.Shift:
-		m.selectRow(r)
-	default:
-		m.cursor = row
-		m.paneFocus = false
-		m.liveSelect()
-		// The second click of a pair starts or stops the row, keeping the selection.
-		double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
-		if double {
-			m.toggleRow(r)
-			m.lastClick = -1 // a fast third click must not read as another double
-		} else {
-			m.lastClick = row
-		}
-		m.lastClickAt = time.Now()
+	m.cursor = row
+	m.paneFocus = false
+	m.liveSelect()
+	// The second click of a pair starts or stops the row, keeping the selection.
+	double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
+	if double {
+		m.toggleRow(r)
+		m.lastClick = -1 // a fast third click must not read as another double
+	} else {
+		m.lastClick = row
 	}
+	m.lastClickAt = time.Now()
 	return m, nil
 }
 

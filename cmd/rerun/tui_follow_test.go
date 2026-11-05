@@ -64,7 +64,7 @@ func TestFollowPinsPaneToNewestLine(t *testing.T) {
 func TestFollowPinsSoloedPaneToNewestLine(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvents(streamEvents("web", "web", 40).events)
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 	fadeNotice(m)
 	m.View()
 

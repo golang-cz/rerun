@@ -47,7 +47,7 @@ type colEdit struct {
 // then the soloed target; a target with a schema and no columns of its own
 // writes its schema.
 func (m *tuiModel) pickNode() (colNode, bool) {
-	if m.schemaSel != "" {
+	if m.schemaSel != "" && m.schemaSel != ungrouped {
 		return colNode{schema: true, name: m.schemaSel}, true
 	}
 	if m.solo < 0 {
@@ -253,18 +253,18 @@ func writeColumns(path string, e colEdit) error {
 	return setColumns(path, "", e.node.name, cols)
 }
 
-// titleRows is 1 when the header carries a title or chips, else 0.
+// titleRows is 1 when the header carries a target's title, else 0.
 func (m *tuiModel) titleRows() int {
-	if m.cursorTarget() >= 0 || len(m.chips) > 0 {
+	if m.cursorTarget() >= 0 {
 		return 1
 	}
 	return 0
 }
 
-// headerRows is the pane's fixed header: the title row and the table's column
-// header. The viewport sits below it.
+// headerRows is the pane's fixed header: the filter bar, the title row, and the
+// table's column header. The viewport sits below it.
 func (m *tuiModel) headerRows() int {
-	n := m.titleRows()
+	n := m.barRows() + m.titleRows()
 	if m.tableHeaderOn() {
 		n++
 	}
@@ -300,17 +300,4 @@ func (m *tuiModel) columnHeader(w int) string {
 		m.layout.heads = append(m.layout.heads, cellSpan{x0: x, x1: x + 1, col: s.col})
 	}
 	return m.styles.title.Render(padRight(sliceCells(row, m.paneCol, m.paneCol+w), w))
-}
-
-// chipSegs is the header's chip row, recording each chip's × cell for clicks.
-func (m *tuiModel) chipSegs() []seg {
-	var segs []seg
-	x := 0
-	for i, c := range m.chips {
-		text := "[" + c.expr + " ×]"
-		m.layout.chips = append(m.layout.chips, chipHit{x: x + displayWidth("["+c.expr+" "), idx: i})
-		segs = append(segs, seg{text: text}, seg{text: " "})
-		x += displayWidth(text) + 1
-	}
-	return segs
 }

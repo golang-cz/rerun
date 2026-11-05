@@ -111,7 +111,7 @@ func TestKeyClickAddsColumnToSelectedSchema(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 	addLines(m, "api", jsonReq)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, `status: `)
@@ -137,7 +137,7 @@ func TestKeyClickAddsColumnToSoloedTarget(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, `level: `)
@@ -215,7 +215,7 @@ func TestHeaderClickRemovesAColumn(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 
 	x, y := findInPane(t, m, "method ×")
 	m.handleMouse(mouse(x+len("method "), y, false))
@@ -233,7 +233,7 @@ func TestErrorNoticeOutranksUnsavedFooter(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 	m.toggleExpand(0)
 	x, y := findInPane(t, m, `level: `)
 	m.handleMouse(mouse(x+1, y, false))
@@ -275,7 +275,7 @@ func TestSaveWritesSchemaAndSurvivesReload(t *testing.T) {
 	m.width, m.height = 100, 20
 	m.group.configPath = path
 
-	press(m, "s")
+	m.liveSelect()
 	addLines(m, "api", jsonReq)
 	m.View()
 	m.toggleExpand(0)

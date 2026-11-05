@@ -54,18 +54,19 @@ func TestSearchCounterIsIncremental(t *testing.T) {
 		t.Fatalf("inputMode = %d, want inputSearch", m.inputMode)
 	}
 	typeString(m, "line-1")
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/11 line-1") {
-		t.Fatalf("bottom line = %q, want 1/11 line-1", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "find line-1 · 1/11") {
+		t.Fatalf("bottom line = %q, want find line-1 · 1/11", got)
 	}
 
 	typeString(m, "9")
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/1 line-19") {
-		t.Fatalf("bottom line = %q, want 1/1 line-19", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "find line-19 · 1/1") {
+		t.Fatalf("bottom line = %q, want find line-19 · 1/1", got)
 	}
 
+	// The counter lands on the first hit in view, so only the total is fixed.
 	press(m, "backspace")
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/11 line-1") {
-		t.Fatalf("after backspace bottom line = %q, want 1/11 line-1", got)
+	if got := bottomPaneLine(m); !strings.HasPrefix(got, "find line-1 · ") || !strings.HasSuffix(got, "/11") {
+		t.Fatalf("after backspace bottom line = %q, want find line-1 · n/11", got)
 	}
 }
 
@@ -162,9 +163,8 @@ func TestSearchKeysInertWithoutQuery(t *testing.T) {
 	}
 }
 
-// esc while typing cancels everything; esc after commit clears; `/` reopens
-// with the committed query.
-func TestSearchEscCancelVsClear(t *testing.T) {
+// esc while typing keeps the find query as a chip; esc in the list never clears it.
+func TestSearchEscKeepsTheChip(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.View()
@@ -172,25 +172,23 @@ func TestSearchEscCancelVsClear(t *testing.T) {
 	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "esc")
-	if m.inputMode != inputNone || m.search != "" || len(m.searchMatches) != 0 {
-		t.Fatalf("esc while typing left state behind: mode=%d search=%q matches=%d",
-			m.inputMode, m.search, len(m.searchMatches))
+	if m.inputMode != inputNone || m.barFocus || m.search != "line" {
+		t.Fatalf("esc while typing: mode=%d bar=%v search=%q, want the query kept and the bar blurred",
+			m.inputMode, m.barFocus, m.search)
 	}
 
-	press(m, "ctrl+f")
-	typeString(m, "line")
-	press(m, "enter")
-	if m.search != "line" || m.inputMode != inputNone {
-		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
+	press(m, "esc")
+	if m.search != "line" {
+		t.Fatalf("esc in the list cleared search = %q", m.search)
 	}
 
 	press(m, "ctrl+f")
 	if m.input != "line" {
 		t.Fatalf("reopening seeded input = %q, want line", m.input)
 	}
-	press(m, "esc")
-	if m.search != "" {
-		t.Fatalf("esc after commit left search = %q", m.search)
+	press(m, "enter")
+	if m.search != "line" || m.inputMode != inputNone {
+		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
 	}
 }
 
@@ -214,8 +212,11 @@ func TestBottomLinePrecedence(t *testing.T) {
 	}
 
 	press(m, "ctrl+f")
-	if got := bottomPaneLine(m); !strings.Contains(got, "line") || strings.Contains(got, "new") {
-		t.Fatalf("the open bar did not outrank the marker: %q", got)
+	if got := paneOf(m)[0]; !strings.Contains(got, "find line") {
+		t.Fatalf("the open bar is not on the filter row: %q", got)
+	}
+	if got := bottomPaneLine(m); !strings.Contains(got, "↓ 3 new") {
+		t.Fatalf("the open bar displaced the marker: %q", got)
 	}
 	press(m, "enter")
 
@@ -254,11 +255,15 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	}
 
 	press(m, "esc")
-	if m.filter != "" || m.paneSelDirty {
-		t.Fatalf("esc left the filter: filter=%q dirty=%v", m.filter, m.paneSelDirty)
+	if !m.filterOn() {
+		t.Fatal("esc in the list cleared the filter")
+	}
+	press(m, "v", "backspace", "esc")
+	if m.filterOn() || m.paneSelDirty {
+		t.Fatalf("backspace on the empty input left the filter: filters=%d dirty=%v", len(m.filters), m.paneSelDirty)
 	}
 	if got := len(rawPane(m)); got != 5 {
-		t.Fatalf("esc restored %d rows, want 5", got)
+		t.Fatalf("removing the chip restored %d rows, want 5", got)
 	}
 }
 
@@ -272,7 +277,7 @@ func TestFilterZeroMatchHint(t *testing.T) {
 	press(m, "enter")
 	m.View()
 
-	if view := renderedBody(m); !strings.Contains(view, "no lines match the filter · esc clears") {
+	if view := renderedBody(m); !strings.Contains(view, "no lines match the filters") {
 		t.Fatalf("pane hint = %q, want the filter hint", view)
 	}
 	if view := renderedBody(m); strings.Contains(view, "no output yet") {
@@ -357,7 +362,7 @@ func TestSoloMuteRebuildsTheFilteredSubset(t *testing.T) {
 	}
 
 	m.toggleMute(0)
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 	m.View()
 	if got := rawPane(m); !equalStrings(got, []string{"keep-web"}) {
 		t.Fatalf("after soloing web the filtered pane = %q, want [keep-web]", got)
@@ -440,8 +445,8 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 	}
 }
 
-// esc after reopening a filter restores the committed query, not nothing.
-func TestFilterEscRestoresCommittedQuery(t *testing.T) {
+// esc after typing a second filter keeps it as a chip beside the first.
+func TestFilterEscKeepsTypedChip(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1")
 	m.View()
@@ -457,12 +462,12 @@ func TestFilterEscRestoresCommittedQuery(t *testing.T) {
 		t.Fatalf("the junk edit did not apply live:\n%s", body)
 	}
 	press(m, "esc")
-	if m.filter != "keep" {
-		t.Fatalf("esc left filter = %q, want the committed keep", m.filter)
+	if len(m.filters) != 2 || m.filters[0].query != "keep" || m.filters[1].query != "junk" {
+		t.Fatalf("esc left filters = %+v, want keep then junk", m.filters)
 	}
 	m.View()
-	if body := renderedBody(m); strings.Contains(body, "drop-0") {
-		t.Fatalf("the committed filter did not come back:\n%s", body)
+	if body := renderedBody(m); strings.Contains(body, "keep-0") {
+		t.Fatalf("the ANDed junk chip did not hide the keep lines:\n%s", body)
 	}
 }
 
@@ -489,7 +494,7 @@ func TestFilterShrinkClampsFrozenYOffset(t *testing.T) {
 	if want := len(rawPane(m)) - m.vp.Height; m.vp.YOffset != want {
 		t.Fatalf("YOffset = %d, want the clamped %d", m.vp.YOffset, want)
 	}
-	if body := renderedBody(m); !strings.Contains(body, "web  aa-6") {
+	if body := renderedBody(m); !strings.Contains(body, fmt.Sprintf("web  aa-%d", m.vp.YOffset)) {
 		t.Fatalf("the clamped body does not start at the first surviving row:\n%s", body)
 	}
 }
@@ -529,8 +534,8 @@ func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	if m.inputMode != inputFilter {
 		t.Fatalf("inputMode = %d, want the bar still open on a parse error", m.inputMode)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "yq:") {
-		t.Fatalf("bottom line = %q, want the yq error", got)
+	if got := paneOf(m)[0]; !strings.Contains(got, "yq:") {
+		t.Fatalf("bar line = %q, want the yq error", got)
 	}
 	if m.filterOn() {
 		t.Fatal("a parse error left the filter active")
@@ -545,8 +550,8 @@ func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	}
 
 	press(m, "esc")
-	if m.filter != "" || m.inputMode != inputNone {
-		t.Fatalf("esc left filter=%q mode=%d", m.filter, m.inputMode)
+	if len(m.filters) != 0 || m.inputMode != inputNone {
+		t.Fatalf("esc kept the invalid draft: filters=%d mode=%d", len(m.filters), m.inputMode)
 	}
 	if got := m.paneLen(); got != 3 {
 		t.Fatalf("after esc the pane kept %d rows, want 3", got)

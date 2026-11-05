@@ -13,6 +13,7 @@ import (
 // Herdr-style palette: the color leads, the glyph shape backs it up.
 const (
 	colorYellow = "3"
+	colorOrange = "208"
 	colorGreen  = "2"
 	colorRed    = "1"
 	colorGray   = "8"
@@ -41,6 +42,8 @@ type tuiStyles struct {
 	box          lipgloss.Style
 	key          lipgloss.Style
 	paneCursor   lipgloss.Style
+	chip         lipgloss.Style
+	chipFind     lipgloss.Style
 }
 
 func newTUIStyles() tuiStyles {
@@ -48,10 +51,10 @@ func newTUIStyles() tuiStyles {
 		base:         lipgloss.NewStyle(),
 		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		cursor:       lipgloss.NewStyle().Background(lipgloss.Color("237")),
-		hover:        lipgloss.NewStyle().Background(lipgloss.Color("235")),
+		cursor:       lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "252", Dark: "237"}),
+		hover:        lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "254", Dark: "235"}),
 		muted:        lipgloss.NewStyle().Faint(true),
-		solo:         lipgloss.NewStyle().Background(lipgloss.Color("234")),
+		solo:         lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "253", Dark: "234"}),
 		all:          lipgloss.NewStyle().Bold(true),
 		title:        lipgloss.NewStyle().Bold(true),
 		marker:       lipgloss.NewStyle().Reverse(true),
@@ -59,6 +62,8 @@ func newTUIStyles() tuiStyles {
 		box:          lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
 		key:          lipgloss.NewStyle().Bold(true),
 		paneCursor:   lipgloss.NewStyle().Reverse(true),
+		chip:         lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
+		chipFind:     lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Underline(true),
 	}
 }
 
@@ -84,7 +89,7 @@ type tuiLayout struct {
 	drawer []drawerRow
 	marker rect
 	// chips and heads are the header's clickable cells: chip × cells on the
-	// title row, and table column names on the column header row.
+	// filter bar, and table column names on the column header row.
 	chips []chipHit
 	heads []cellSpan
 }
@@ -213,6 +218,9 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 			nameW = max(nameW, displayWidth(t.spec.Schema))
 		}
 		nameW = max(nameW, w)
+	}
+	if m.hasGroups() {
+		nameW = max(nameW, displayWidth(groupLabel(ungrouped)))
 	}
 	leftW = nameW + statusW + 4
 	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
@@ -514,8 +522,8 @@ func opColor(op string) string {
 
 func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 	switch {
-	case row == m.cursor && m.drawerFocus:
-		return m.styles.muted // the drawer owns the cursor while it has focus
+	case row == m.cursor && (m.drawerFocus || m.paneFocus || m.barFocus):
+		return m.styles.muted // the cursor steps back while another region owns the keys
 	case row == m.cursor:
 		return m.styles.cursor
 	case row == m.hover:
@@ -533,6 +541,9 @@ func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 }
 
 func stateColor(t *tuiTarget) string {
+	if _, c := t.healthMark(); c != "" {
+		return c
+	}
 	switch t.state {
 	case stateRunning, stateStarting:
 		return colorYellow
@@ -547,6 +558,9 @@ func stateColor(t *tuiTarget) string {
 
 // statusColor keeps the uptime quiet and lets a red or green exit speak.
 func statusColor(t *tuiTarget) string {
+	if t.building {
+		return colorYellow
+	}
 	if t.state == stateExited {
 		return stateColor(t)
 	}
@@ -595,6 +609,9 @@ func (m *tuiModel) rightLines(w int) []string {
 	m.syncContent()
 
 	var header []string
+	if m.barRows() == 1 {
+		header = append(header, m.barLine(w))
+	}
 	if m.titleRows() == 1 {
 		header = append(header, m.titleLine(w))
 	}
@@ -634,19 +651,13 @@ func (m *tuiModel) rightLines(w int) []string {
 		}
 		// The bottom row is one line, so this switch is its precedence order.
 		switch {
-		case m.inputMode == inputSearch:
-			out[last] = m.bottomLine(w, m.searchStatus(true), "")
-		case m.inputMode == inputFilter && m.filterErr != "":
-			out[last] = m.bottomLine(w, "yq: "+m.filterErr, "")
-		case m.inputMode == inputFilter:
-			out[last] = m.bottomLine(w, m.filterStatus()+"  "+m.input, "")
 		case m.copyHintActive():
 			// The OSC 52 sequence rides the hint line, so the renderer writes it
 			// once and the terminal executes the copy.
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip))) + m.copySeq
 		case m.noticeLive():
 			// A notice outranks the marker: a hidden error reads as no error.
-			// The notice names the solo or mute itself, so the state chip waits.
+			// The notice names the mute itself, so the state chip waits.
 			out[last] = m.bottomLine(w, m.notice, "")
 		case m.dirty():
 			out[last] = m.bottomLine(w, unsavedNotice, chip)
@@ -655,7 +666,7 @@ func (m *tuiModel) rightLines(w int) []string {
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
 		case m.search != "":
 			out[last] = m.bottomLine(w, m.searchLine(), chip)
-		case m.filter != "":
+		case m.filterOn():
 			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
 			out[last] = m.bottomLine(w, m.hint, chip)
@@ -729,30 +740,23 @@ func (m *tuiModel) markerLine(w int, marker string, chip string) string {
 	return m.styles.marker.Render(truncate(marker, w-displayWidth(suffix))) + m.styles.hint.Render(suffix)
 }
 
-// stateChip is the bottom line's frozen/solo suffix. Solo alone does not claim
-// an idle line, so following output keeps its newest row visible.
+// stateChip is the bottom line's frozen suffix. Scope needs no chip: the list
+// selection already shows it.
 func (m *tuiModel) stateChip() string {
-	parts := make([]string, 0, 2)
-	if !m.follow {
-		parts = append(parts, "scrollback (p/G)")
+	if m.follow {
+		return ""
 	}
-	if m.solo >= 0 {
-		parts = append(parts, "solo "+m.targets[m.solo].spec.Name)
-	}
-	if m.schemaSel != "" {
-		parts = append(parts, "schema "+m.schemaSel)
-	}
-	return strings.Join(parts, " · ")
+	return "scrollback (p/G)"
 }
 
-// searchLine is the committed search counter.
+// searchLine is the find counter.
 func (m *tuiModel) searchLine() string {
-	return "find " + m.search + " · " + m.searchStatus(false) + " · esc"
+	return "find " + m.search + " · " + m.searchStatus()
 }
 
-// filterLine is the committed filter counter, query included.
+// filterLine is the filtered line count.
 func (m *tuiModel) filterLine() string {
-	return m.filter + " · " + m.filterStatus() + " · esc"
+	return m.filterStatus()
 }
 
 // copyHintActive reports whether the copy feedback still owns the bottom line.
@@ -760,15 +764,12 @@ func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
 }
 
-// fileCount renders `1 file` or `3 files`.
-// titleLine is the right pane's first row: the value filter chips, then, for a
-// target row, its state, how many files its last change batch held, and its
-// command. The state replaces the uptime whenever the row is not running; an
-// exited row leads with its exit glyph. The url follows, linked, when the target
-// has one.
+// titleLine is the right pane's title row for a target row: its state, how many
+// files its last change batch held, and its command. The state replaces the
+// uptime whenever the row is not running; an exited row leads with its exit
+// glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
-	m.layout.chips = m.layout.chips[:0]
-	segs := m.chipSegs()
+	var segs []seg
 	if i := m.cursorTarget(); i >= 0 {
 		t := m.targets[i]
 		if t.state == stateExited {
@@ -782,16 +783,29 @@ func (m *tuiModel) titleLine(w int) string {
 			segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
 		}
 	}
-	return renderSegs(segs, m.styles.title, w)
+	return renderSegs(segs, m.titleStyle(), w)
+}
+
+// titleStyle is bold only while the pane owns the keys.
+func (m *tuiModel) titleStyle() lipgloss.Style {
+	if m.paneFocus {
+		return m.styles.title
+	}
+	return m.styles.base
 }
 
 // syncContent rebuilds the viewport only when its content changed, and keeps
 // it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
+	// A scroll-up drops the pin, and the padding it needed must go with it.
+	if !m.follow && m.pinSeq != 0 {
+		m.pinSeq = 0
+		m.vpDirty = true
+	}
 	if m.vpDirty {
 		lines := m.sepLines(m.tableLines(m.paneLines()))
 		m.paneCol = m.clampPaneCol(lines)
-		content := strings.Join(m.markLines(m.panLines(lines)), "\n")
+		content := strings.Join(m.padForPin(m.markLines(m.panLines(lines))), "\n")
 		if len(lines) == 0 {
 			content = m.styles.hint.Render(m.emptyHint())
 		}
@@ -803,7 +817,7 @@ func (m *tuiModel) syncContent() {
 		m.vpDirty = false
 	}
 	if m.follow {
-		m.vp.GotoBottom()
+		m.followTail()
 	}
 	m.placeCursor()
 }
@@ -837,14 +851,21 @@ func (m *tuiModel) panLines(lines []string) []string {
 }
 
 func (m *tuiModel) emptyHint() string {
+	if m.filterActive() {
+		if m.solo >= 0 {
+			return fmt.Sprintf("no lines in %s match the filters · backspace removes the last", m.targets[m.solo].spec.Name)
+		}
+		return "no lines match the filters · backspace removes the last"
+	}
 	if m.solo >= 0 {
-		return "solo: " + m.targets[m.solo].spec.Name
+		t := m.targets[m.solo]
+		if t.building {
+			return t.spec.Name + ": building… output appears when the run starts"
+		}
+		return t.spec.Name + ": no output yet"
 	}
 	if m.schemaSel != "" {
-		return "schema: " + m.schemaSel
-	}
-	if m.filter != "" {
-		return "no lines match the filter · esc clears"
+		return "group: " + groupLabel(m.schemaSel)
 	}
 	if m.allMuted() {
 		return "every stream is muted — m unmutes the highlighted target"
@@ -866,12 +887,11 @@ var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row"},
 	{"r", "reboot the row"},
-	{"s", "solo a target, or select a schema's targets"},
-	{"esc", "clear the search, the filter, or the solo"},
+	{"esc", "back out: row to its group, group to all"},
 	{"tab", "focus the fs drawer"},
 	{"enter a f", "pane: expand the line; a adds its key, f filters its value"},
 	{"c", "toggle the columns table"},
-	{"/", "filter the pane (a leading . runs yq)"},
+	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q", "quit (asks first)"},
@@ -882,31 +902,31 @@ var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
-	{"space", "start / stop (schema row: its targets)"},
-	{"r", "reboot (grace applies; schema row: its selected targets)"},
+	{"space", "start / stop (group row: its targets)"},
+	{"r", "reboot (grace applies; group row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
-	{"m", "mute the target's stream (schema row: its targets)"},
-	{"s", "solo a target, or select a schema's targets (again or esc clears)"},
-	{"esc", "clear search, then filter, then solo or schema"},
+	{"m", "mute the target's stream (group row: its targets)"},
+	{"esc [ ]", "list: row to its group, group to all · [ ] ⇧↑⇧↓ jump groups"},
 	{"o G", "open the target's url / resume the live tail"},
 	{"p", "browse the scrollback (again or G goes live)"},
-	{"ctrl+f", "find in the pane (n/N next/prev, esc clears)"},
-	{"/ v", "filter the lines (esc clears; leading . is yq)"},
+	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
+	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},
-	{"backspace ×", "pane: remove the last chip; click a chip's or column's × to remove it"},
+	{"backspace ×", "pane: last chip · bar: ←/→ picks, backspace drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }
 
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
-	"click a row solos it; double-click starts or stops it",
-	"click a schema selects its targets; click a batch lists its files",
+	"click a row scopes to it; double-click starts or stops it",
+	"click a group scopes to its targets; click a batch lists its files",
 	"drag copies a range; shift-drag uses the terminal's selection",
-	"● run  ○ stopped  ✓ ok  ✗ exit  · off  ✱ unseen",
+	"⚙ building  ◐ starting  ● run  ▲ unhealthy  ■ failed",
+	"✓ ok  ✗ exit  ○ stopped  · off  ✱ unseen",
 }
 
 // helpView draws the help overlay: the short key list, or the full one when helpAll is set.

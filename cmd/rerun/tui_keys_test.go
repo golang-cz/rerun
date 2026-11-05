@@ -18,17 +18,6 @@ func TestMovingOntoAMutedTargetKeepsItMuted(t *testing.T) {
 	}
 }
 
-func TestExplicitSoloUnmutesTheTarget(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.toggleMute(1)
-	m.cursor = 1
-
-	press(m, "s")
-	if m.solo != 1 || m.targets[1].muted {
-		t.Fatalf("solo = %d muted = %v, want api soloed and unmuted", m.solo, m.targets[1].muted)
-	}
-}
-
 func TestSlashOpensTheLineFilter(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	press(m, "/")

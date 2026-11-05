@@ -80,17 +80,20 @@ func slowClick(m *tuiModel) {
 	m.lastClickAt = m.lastClickAt.Add(-doubleClickWindow)
 }
 
-// buttons is each row's stream state in row order: S solo, M muted, blank otherwise.
 // fadeNotice expires the info notice, so the bottom line shows the state chips.
 func fadeNotice(m *tuiModel) { m.noticeUntil = time.Time{} }
 
+// buttons is each row's stream state in row order: S scoped, M muted, blank otherwise.
+// A scope hides every other row's mute state.
 func buttons(m *tuiModel) []string {
 	out := make([]string, len(m.targets))
 	for i := range m.targets {
-		switch m.streamWord(i) {
-		case "solo":
+		switch {
+		case m.solo == i:
 			out[i] = "S"
-		case "muted":
+		case m.solo >= 0:
+			out[i] = " "
+		case m.targets[i].muted:
 			out[i] = "M"
 		default:
 			out[i] = " "
@@ -152,7 +155,7 @@ func TestStreamButtonSoloHidesOtherMuteStates(t *testing.T) {
 	m.toggleMute(0)
 
 	m.cursor = 1
-	press(m, "s")
+	m.liveSelect()
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
 		t.Fatalf("solo on row 2: buttons = %q, want other rows blank", got)
 	}
@@ -161,35 +164,15 @@ func TestStreamButtonSoloHidesOtherMuteStates(t *testing.T) {
 	}
 
 	// Clearing solo restores the hidden Ms.
-	press(m, "s")
+	press(m, "esc")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{"M", " ", " "}) {
 		t.Fatalf("after clearing solo: buttons = %q, want row 1 M again", got)
 	}
 }
 
-func TestStreamButtonSoloUnmutesAndIsExclusive(t *testing.T) {
-	m := newTestModel(t)
-	m.toggleMute(0)
-
-	m.cursor = 0
-	press(m, "s")
-	if got := buttons(m); !reflect.DeepEqual(got, []string{"S", " ", " "}) {
-		t.Fatalf("buttons = %q, want S on row 1", got)
-	}
-	if m.targets[0].muted {
-		t.Error("s must unmute the row it solos")
-	}
-
-	m.cursor = 1
-	press(m, "s")
-	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
-		t.Fatalf("buttons = %q, want only one S", got)
-	}
-}
-
 func TestStreamButtonMuteOnSoloRowIsNoOp(t *testing.T) {
 	m := newTestModel(t)
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 
 	m.cursor = 1
 	press(m, "m")
@@ -249,7 +232,7 @@ func TestUnseenExitBadgeClearsOnUnmute(t *testing.T) {
 // earns the badge; esc brings the lines back and drops it.
 func TestUnseenBadgeOnSoloHiddenOutput(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 
 	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden by solo"})
 	if !m.targets[1].unseen {
@@ -278,13 +261,13 @@ func TestUnseenBadgeOnSoloHiddenOutput(t *testing.T) {
 // goes; B stays badged until its own lines show.
 func TestUnseenBadgeClearsOnSoloSwitch(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden"})
 	if !m.targets[1].unseen {
 		t.Fatal("solo-hidden output did not raise the badge")
 	}
 
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	if m.targets[0].unseen {
 		t.Error("web's badge survived the solo switching away from API")
 	}
@@ -328,13 +311,13 @@ func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 		t.Fatalf("merged after mute = %q, want %q", got, want)
 	}
 
-	m.toggleSolo(2)
+	m.applyScope(2, "")
 	if got, want := m.paneLines(), []string{"worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
-	// Clearing solo brings the muted row back as muted, not streaming.
-	m.toggleSolo(2)
+	// Clearing the scope brings the muted row back as muted, not streaming.
+	m.applyScope(-1, "")
 	if got, want := m.paneLines(), []string{"web     w1", "worker  k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("merged after solo cleared = %q, want %q", got, want)
 	}
@@ -415,7 +398,7 @@ func TestSoloPaneKeepsPrefix(t *testing.T) {
 	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "world"})
 
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 	if got, want := m.paneLines(), []string{"web  hello"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
@@ -438,7 +421,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	_, rightW := m.layoutWidths()
 	lines := paneOf(m)
 
-	if !strings.HasPrefix(lines[0], "0:00 · 0 files · vite dev") {
+	if !strings.HasPrefix(lines[0], "0:00 · no files · vite dev") {
 		t.Fatalf("title = %q, want the cursor row's uptime, files, and command", lines[0])
 	}
 	if got := displayWidth(lines[0]); got != rightW {
@@ -480,21 +463,21 @@ func TestRightPaneTitleShowsRowState(t *testing.T) {
 	}{
 		{name: "running", state: stateRunning, setup: func(m *tuiModel) {
 			m.now = m.targets[0].lastStart.Add(12 * time.Second)
-		}, want: "0:12 · 0 files · make run"},
+		}, want: "0:12 · no files · make run"},
 		{name: "exited ok", state: stateExited, setup: func(m *tuiModel) {
 			m.targets[0].exitCode = 0
 			m.targets[0].exitLabel = "exit 0"
-		}, want: "✓ exit 0 · 0 files · make run"},
+		}, want: "✓ exit 0 · no files · make run"},
 		{name: "exited failure", state: stateExited, setup: func(m *tuiModel) {
 			m.targets[0].exitCode = -1
 			m.targets[0].exitLabel = "exit segv"
-		}, want: "✗ exit segv · 0 files · make run"},
+		}, want: "✗ exit segv · no files · make run"},
 		{name: "backoff", state: stateBackoff, setup: func(m *tuiModel) {
 			m.targets[0].backoffUntil = m.now.Add(4 * time.Second)
-		}, want: "backoff 4s · 0 files · make run"},
-		{name: "stopped", state: stateStopped, want: "stopped · 0 files · make run"},
-		{name: "off", state: stateOff, want: "off · 0 files · make run"},
-		{name: "starting", state: stateStarting, want: "starting · 0 files · make run"},
+		}, want: "backoff 4s · no files · make run"},
+		{name: "stopped", state: stateStopped, want: "stopped · no files · make run"},
+		{name: "off", state: stateOff, want: "off · no files · make run"},
+		{name: "starting", state: stateStarting, want: "starting · no files · make run"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -606,13 +589,13 @@ func TestSoloKeysAndClear(t *testing.T) {
 	m := newTestModel(t)
 	m.cursor = 1
 
-	press(m, "s")
+	m.liveSelect()
 	if m.solo != 1 {
 		t.Fatalf("solo = %d, want 1 after s", m.solo)
 	}
-	press(m, "s")
+	press(m, "esc")
 	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared after a second s", m.solo)
+		t.Fatalf("solo = %d, want cleared by esc", m.solo)
 	}
 
 	press(m, "down")
@@ -627,7 +610,7 @@ func TestSoloKeysAndClear(t *testing.T) {
 
 func TestEnterOnListRowFocusesPane(t *testing.T) {
 	m := newTestModel(t)
-	m.toggleSolo(2)
+	m.applyScope(2, "")
 	m.cursor = 2
 	press(m, "enter")
 	if !m.paneFocus {
@@ -741,12 +724,12 @@ func TestHelpOverlayToggles(t *testing.T) {
 	if !m.help || m.helpAll {
 		t.Fatal("? did not open the short help overlay")
 	}
-	if view := m.View(); !strings.Contains(view, "solo a target") || strings.Contains(view, "shift-drag") {
+	if view := m.View(); !strings.Contains(view, "move between rows") || strings.Contains(view, "shift-drag") {
 		t.Errorf("short help should list the core keys only:\n%s", view)
 	}
 	press(m, "?")
 	view := m.View()
-	for _, want := range []string{"mute", "solo", "shift-drag", "open the target's url"} {
+	for _, want := range []string{"mute", "scope", "shift-drag", "open the target's url"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("full help overlay is missing %q", want)
 		}
@@ -799,14 +782,14 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 	}
 }
 
-// Soloing a frozen pane appends the solo chip after the frozen one.
-func TestSoloChipAppendsToFrozen(t *testing.T) {
+// A scoped target adds nothing to the bottom line: the list selection shows it.
+func TestScopeAddsNoBottomLineChip(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.toggleSolo(0)
+	m.applyScope(0, "")
 	fadeNotice(m)
 	press(m, "p")
-	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G) · solo web") {
-		t.Fatalf("bottom line = %q, want paused then solo", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G)") || strings.Contains(got, "web") {
+		t.Fatalf("bottom line = %q, want the paused chip and no scope", got)
 	}
 }
 
@@ -931,13 +914,13 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 		t.Fatalf("cursor = %d, want 2 still", m.cursor)
 	}
 
-	// Shift-click solos the row under the pointer.
+	// Shift-click is a plain click: it scopes the row and leaves its mute alone.
 	m.handleMouse(mouse(2, 0, true))
-	if got := m.streamWord(0); got != "solo" {
-		t.Fatalf("stream after shift-click = %q, want solo", got)
+	if m.solo != 0 || m.cursor != 0 {
+		t.Fatalf("solo = %d cursor = %d after shift-click, want row 1 scoped", m.solo, m.cursor)
 	}
-	if m.solo != 0 {
-		t.Fatalf("solo = %d, want 0 after shift-click", m.solo)
+	if !m.targets[0].muted {
+		t.Error("shift-click unmuted the row")
 	}
 
 }
@@ -1049,7 +1032,7 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 
 func TestEscClearsSolo(t *testing.T) {
 	m := newTestModel(t)
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	press(m, "esc")
 	if m.solo != -1 {
 		t.Fatalf("solo = %d, want cleared", m.solo)

@@ -18,7 +18,7 @@ func listNames(m *tuiModel) []string {
 	var out []string
 	for _, r := range m.listRows() {
 		if r.header {
-			out = append(out, "▾"+r.schema)
+			out = append(out, "▾"+groupLabel(r.schema))
 			continue
 		}
 		out = append(out, m.targets[r.target].spec.Name)
@@ -35,7 +35,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 		schemaTarget("worker", "backend"),
 		target("job"),
 	)
-	want := []string{"▾backend", "api", "worker", "▾data", "db", "web", "job"}
+	want := []string{"▾backend", "api", "worker", "▾data", "db", "▾(no group)", "web", "job"}
 	if got := listNames(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("list = %v, want %v", got, want)
 	}
@@ -47,8 +47,11 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 	if !strings.HasPrefix(lines[1], "  ● api") {
 		t.Fatalf("member = %q, want the name indented under its header", lines[1])
 	}
-	if !strings.HasPrefix(lines[5], "● web") {
-		t.Fatalf("ungrouped = %q, want no indent", lines[5])
+	if !strings.HasPrefix(lines[5], "▾ (no group)") {
+		t.Fatalf("header = %q, want the trailing default header", lines[5])
+	}
+	if !strings.HasPrefix(lines[6], "  ● web") {
+		t.Fatalf("ungrouped member = %q, want it indented under default", lines[6])
 	}
 }
 
@@ -68,7 +71,7 @@ func TestSchemaSelectionMergesOnlyItsMembers(t *testing.T) {
 	paneOut(m, "api", "api-line")
 	paneOut(m, "worker", "worker-line")
 
-	press(m, "s") // cursor starts on the backend header
+	m.liveSelect() // cursor starts on the backend header
 	if m.schemaSel != "backend" {
 		t.Fatalf("schemaSel = %q, want backend", m.schemaSel)
 	}
@@ -83,7 +86,7 @@ func TestSoloOnAMemberReplacesTheSchemaSelection(t *testing.T) {
 	paneOut(m, "api", "api-line")
 	paneOut(m, "worker", "worker-line")
 
-	press(m, "s")
+	m.liveSelect()
 	press(m, "down", "down")
 	if m.solo != 1 || m.schemaSel != "" {
 		t.Fatalf("solo = %d schemaSel = %q, want worker soloed and no schema", m.solo, m.schemaSel)
@@ -99,7 +102,7 @@ func TestEscClearsSchemaSelectionToTheMergedPane(t *testing.T) {
 	paneOut(m, "web", "web-line")
 	paneOut(m, "api", "api-line")
 
-	press(m, "s")
+	m.liveSelect()
 	press(m, "esc")
 	if m.schemaSel != "" {
 		t.Fatalf("schemaSel = %q after esc, want none", m.schemaSel)
@@ -170,7 +173,7 @@ func TestSchemaSelectionTablesByDefaultAndCTogglesRaw(t *testing.T) {
 	m := newTestModel(t, api)
 	addLines(m, "api", jsonGet)
 
-	press(m, "s")
+	m.liveSelect()
 	if !m.tableOn() {
 		t.Fatal("a schema with columns did not start in table mode")
 	}

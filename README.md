@@ -30,12 +30,12 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
-toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream, `s` or `enter`
-solo a target or select a schema's targets (`esc` clears). On a schema header,
-`space`, `r`, and `m` act on its targets. `o` open the url, `G` resume the live tail, `p` browse the
+toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream. Moving the cursor
+scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
+On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url, `G` resume the live tail, `p` browse the
 scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
-`/` searches the pane (`n`/`N` step matches, `esc` clears it); `v` filters it
-(a leading `.` runs a yq expression per JSON line); `c` toggles the columns
+`/` or `v` filters the pane (each filter is a chip; a leading `.` runs a yq expression per JSON line);
+`ctrl+f` finds in it (`n`/`N` step matches); `esc` never clears filters or find, `backspace` removes the last chip; `c` toggles the columns
 table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or press
@@ -44,7 +44,7 @@ line), to show the pretty-printed object; `(−)` collapses it. Moving the curso
 newest line pauses the tail. Expanded keys are underlined and values tinted. With the
 cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `.path == value`
 chip. In an expanded block, click a key to add it as a column of the
-selection: the selected schema, else the soloed target, else a hint says to select one.
+selection: the selected schema, else the target the pane shows, else a hint says to select one.
 Click a scalar value to add a `.path == value` chip to the pane header. Chips AND together
 with `v`; click a chip's `×`, or press `backspace` with the pane focused, to remove one.
 Click the `×` after a column name in the table header to remove that column; a click on
@@ -53,20 +53,20 @@ the footer reads `unsaved columns · ctrl+s save` until then, and a schema or ta
 unsaved columns gets a `*` in its marker column, two cells after its name. A `columns:` list that a YAML alias uses elsewhere is
 not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
-Mouse: click a row to solo it, double-click to stop/start like `space`, a batch
-in the fs drawer to list its files, shift-click to solo, and a click on a schema
-header to select its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
+Mouse: click a row to show only its stream, double-click to stop/start like `space`,
+a batch in the fs drawer to list its files, and a click on a schema header to select
+its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
 Targets with a `group:` are listed under a `▾ name` header that counts
 its running members; targets without one follow. The right pane is always the
-merged stream; soloing narrows it to one target, and selecting a schema to its
+merged stream; clicking a row narrows it to one target, and selecting a schema to its
 members, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's state, uptime, how many files its
-last change batch held, and its command, with its url linked. It names a soloed or
-muted row in words (`solo` or `muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
+last change batch held, and its command, with its url linked. It names a muted
+row in words (`muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
 Each row keeps two marker cells after its name: `*` for unsaved columns and `✱` for
-hidden output. Muting or soloing a target posts a footer notice (`muted api`, `solo api`).
+hidden output. Muting a target posts a footer notice (`muted api`).
 The bottom-left footer reads `? help`. The fs drawer
 at the bottom of the left column is a feed of recent change batches, newest
 first. A batch is every change within 150ms of its first event, so one save
@@ -124,7 +124,7 @@ frontend:
   desc: Vite dev server
   on: web
   except: [node_modules, dist]
-  cmd: pnpm run dev
+  run: pnpm run dev
   delay: 250ms
   cooldown: 2s
   grace: 1s
@@ -132,7 +132,7 @@ frontend:
 api:
   on: [cmd, internal]
   except: vendor
-  cmd: go run ./cmd/api
+  run: go run ./cmd/api
 ```
 
 Each top-level key is one target. Fields:
@@ -142,7 +142,9 @@ Each top-level key is one target. Fields:
 | `desc` | free-form description |
 | `on` | watch paths or globs, a string or a list |
 | `except` | paths or globs to ignore, a string or a list |
-| `cmd` | shell command to run, required |
+| `run` | shell command to run, required. Older spelling: `cmd`; use one |
+| `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
+| `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
@@ -191,7 +193,7 @@ restarting rerun. Each save prints one line naming what moved:
 | `↺name(watch)` | `on`, `except`, `delay` or `no-gitignore` changed, only its watcher is rebuilt and the process is left alone |
 
 A target you stopped by hand stays stopped: a save swaps its spec but never
-starts it again. A target added while one stream is soloed waits for `space`.
+starts it again. A target added while the pane shows one target or group waits for `space`.
 `desc`, `url` and `open` are cosmetic, and `selected` only counts at startup.
 A config that does not parse changes nothing and only prints the error.
 

@@ -44,22 +44,18 @@ func TestEveryNonRunningStateNamesItself(t *testing.T) {
 	}
 }
 
-// The pane's top line names a soloed or muted cursor row in words.
-func TestPaneTitleNamesSoloAndMutedRows(t *testing.T) {
+// The pane's top line names a muted cursor row in words.
+func TestPaneTitleNamesMutedRow(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.cursor = 0
 	m.toggleMute(0)
 	if line := paneOf(m)[0]; !strings.HasPrefix(line, "muted · ") {
 		t.Errorf("title = %q, want it to start with muted", line)
 	}
-	m.toggleSolo(0)
-	if line := paneOf(m)[0]; !strings.HasPrefix(line, "solo · ") {
-		t.Errorf("title = %q, want it to start with solo", line)
-	}
 }
 
-// Mute and solo each post a footer notice naming the target.
-func TestMuteAndSoloNameTheTargetInTheFooter(t *testing.T) {
+// Mute posts a footer notice naming the target.
+func TestMuteNamesTheTargetInTheFooter(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.now = spawnClock
 	for _, tc := range []struct {
@@ -68,8 +64,6 @@ func TestMuteAndSoloNameTheTargetInTheFooter(t *testing.T) {
 	}{
 		{func() { m.toggleMute(0) }, "muted web"},
 		{func() { m.toggleMute(0) }, "unmuted web"},
-		{func() { m.toggleSolo(1) }, "solo api"},
-		{func() { m.toggleSolo(1) }, "unsolo api"},
 	} {
 		tc.act()
 		if m.notice != tc.want || !m.noticeLive() {

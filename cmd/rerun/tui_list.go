@@ -6,7 +6,10 @@ import (
 	"slices"
 )
 
-// listRow is one list line: a schema header, or a target, indented under its schema.
+// ungrouped keys the trailing default header; NUL keeps it apart from any config name.
+const ungrouped = "\x00default"
+
+// listRow is one list line: a group header, or a target, indented under its group.
 type listRow struct {
 	header  bool
 	schema  string
@@ -34,35 +37,72 @@ func groupTargets(rows []*tuiTarget) {
 	slices.SortStableFunc(rows, func(a, b *tuiTarget) int { return cmp.Compare(key(a), key(b)) })
 }
 
-// listRows is the list as drawn: each schema header precedes its members.
+// groupOf is the group key a target lists under: its schema, or ungrouped.
+func groupOf(t *tuiTarget) string {
+	if t.spec.Schema == "" {
+		return ungrouped
+	}
+	return t.spec.Schema
+}
+
+// groupLabel is the name a group shows as in the list, chips, and bottom line.
+func groupLabel(key string) string {
+	if key == ungrouped {
+		return "(no group)"
+	}
+	return key
+}
+
+// hasGroups reports whether any target has a group. Without one the list stays flat.
+func (m *tuiModel) hasGroups() bool {
+	for _, t := range m.targets {
+		if t.spec.Schema != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// listRows is the list as drawn: each group header precedes its members.
 func (m *tuiModel) listRows() []listRow {
+	grouped := m.hasGroups()
 	var rows []listRow
 	for i := 0; i < len(m.targets); {
-		schema := m.targets[i].spec.Schema
-		if schema == "" {
+		if !grouped {
 			rows = append(rows, listRow{target: i})
 			i++
 			continue
 		}
-		members := m.schemaMembers(schema)
-		rows = append(rows, listRow{header: true, schema: schema, target: -1, members: members})
+		key := groupOf(m.targets[i])
+		members := m.schemaMembers(key)
+		rows = append(rows, listRow{header: true, schema: key, target: -1, members: members})
 		for _, j := range members {
-			rows = append(rows, listRow{schema: schema, target: j, indent: true})
+			rows = append(rows, listRow{schema: key, target: j, indent: true})
 		}
 		i += len(members)
 	}
 	return rows
 }
 
-// schemaMembers is the target indices a schema names, in list order.
+// schemaMembers is the target indices a group key names, in list order.
 func (m *tuiModel) schemaMembers(schema string) []int {
 	var members []int
 	for i, t := range m.targets {
-		if t.spec.Schema == schema {
+		if groupOf(t) == schema {
 			members = append(members, i)
 		}
 	}
 	return members
+}
+
+// headerIndex is the list index of a group's header row, or -1 when there is none.
+func (m *tuiModel) headerIndex(key string) int {
+	for i, r := range m.listRows() {
+		if r.header && r.schema == key {
+			return i
+		}
+	}
+	return -1
 }
 
 // listRowAt is the list row at idx, if idx names one.
@@ -94,14 +134,6 @@ func (m *tuiModel) rowKey(r listRow) string {
 	return "target:" + m.targets[r.target].spec.Name
 }
 
-func (m *tuiModel) selectRow(r listRow) {
-	if r.header {
-		m.toggleSchema(r.schema)
-		return
-	}
-	m.toggleSolo(r.target)
-}
-
 // toggleRow is space: starts or stops a target, or a header's members.
 func (m *tuiModel) toggleRow(r listRow) {
 	if r.header {
@@ -129,23 +161,17 @@ func (m *tuiModel) rebootRow(r listRow) {
 	m.rebootTarget(r.target)
 }
 
-// toggleSchema selects a schema's targets, or clears the selection if it is set.
-func (m *tuiModel) toggleSchema(schema string) {
-	if m.schemaSel == schema {
-		m.clearScope()
-		return
-	}
-	m.selectScope(-1, schema)
-}
-
 func (m *tuiModel) liveSelect() {
 	if m.paneFocus || m.drawerFocus {
 		return
 	}
-	r, ok := m.cursorRow()
-	if !ok {
-		return
+	if r, ok := m.cursorRow(); ok {
+		m.applyRowScope(r)
 	}
+}
+
+// applyRowScope scopes the pane to a header's group, or to a target alone.
+func (m *tuiModel) applyRowScope(r listRow) {
 	if r.header {
 		if m.solo >= 0 || m.schemaSel != r.schema {
 			m.applyScope(-1, r.schema)
@@ -157,16 +183,8 @@ func (m *tuiModel) liveSelect() {
 	}
 }
 
-// selectScope sets the pane's selection: one target, one schema, or neither.
-// A solo that shows nothing is useless, so an explicit solo unmutes.
-func (m *tuiModel) selectScope(solo int, schema string) {
-	if solo >= 0 {
-		m.targets[solo].muted = false
-	}
-	m.applyScope(solo, schema)
-}
-
-// Moving the cursor must never unmute, so the scope is set without touching mutes.
+// applyScope sets the pane's selection: one target, one schema, or neither.
+// Moving the cursor must never unmute, so mutes are left alone.
 func (m *tuiModel) applyScope(solo int, schema string) {
 	m.solo = solo
 	m.schemaSel = schema
@@ -183,7 +201,7 @@ func (m *tuiModel) clearScope() {
 	if m.solo < 0 && m.schemaSel == "" {
 		return
 	}
-	m.selectScope(-1, "")
+	m.applyScope(-1, "")
 }
 
 // toggleTargets is space on a header: stops the running members, else starts them all.
@@ -254,7 +272,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	}
 	segs := []seg{
 		{text: "▾ "},
-		{text: padRight(r.schema, nameWidth(leftW))},
+		{text: padRight(groupLabel(r.schema), nameWidth(leftW))},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0, m.unseenIn(r.members))},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
 	}

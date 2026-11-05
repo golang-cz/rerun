@@ -226,7 +226,7 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	m.View()
 	m.handleMouse(mouse(2, 1, false))
 	if m.solo != 1 {
@@ -288,8 +288,8 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "web", line: "web says hi"})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "api says hi"})
-	m.cursor = 0    // web
-	m.toggleSolo(1) // api
+	m.cursor = 0        // web
+	m.applyScope(1, "") // api
 	m.targets[0].muted = true
 	m.targets[0].unseen = true
 

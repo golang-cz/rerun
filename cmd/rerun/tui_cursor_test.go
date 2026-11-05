@@ -91,7 +91,8 @@ func TestKeyboardPicksMatchTheClicks(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.View()
-	press(m, "s", "right", "enter")
+	m.liveSelect()
+	press(m, "right", "enter")
 
 	cursorTo(t, m, "level")
 	press(m, "a")
@@ -114,7 +115,8 @@ func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.View()
-	press(m, "s", "right", "enter")
+	m.liveSelect()
+	press(m, "right", "enter")
 
 	cursorTo(t, m, "request")
 	press(m, "f")
@@ -219,7 +221,7 @@ func TestHeaderNameClickIsNoOp(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 
 	x, y := findInPane(t, m, "method")
 	m.handleMouse(mouse(x+1, y, false))

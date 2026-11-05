@@ -290,16 +290,17 @@ func (m *tuiModel) inPaneHeader(x, y int) bool {
 
 // clickHeader acts on a header press at pane cell px: a chip's or a column's × removes it.
 func (m *tuiModel) clickHeader(px, y int) {
-	if m.titleRows() == 1 && y == 0 {
+	if y < m.barRows() {
+		chips := m.barChips()
 		for _, h := range m.layout.chips {
-			if px == h.x {
-				m.removeChip(h.idx)
+			if px == h.x && h.idx < len(chips) {
+				m.removeBarChip(chips[h.idx])
 				return
 			}
 		}
 		return
 	}
-	if !m.tableHeaderOn() {
+	if y < m.barRows()+m.titleRows() || !m.tableHeaderOn() {
 		return
 	}
 	for _, h := range m.layout.heads {

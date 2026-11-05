@@ -172,7 +172,7 @@ func TestFocusedEscReturnsToListAndKeepsScroll(t *testing.T) {
 	m.View()
 
 	m.cursor = 0
-	press(m, "s")
+	m.liveSelect()
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0", m.solo)
 	}

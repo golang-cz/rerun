@@ -61,17 +61,19 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 		t.Fatal("a yq filter hid the run rule")
 	}
 
-	press(m, "esc")
+	press(m, "v", "backspace", "backspace", "esc")
 	press(m, "ctrl+f")
 	typeString(m, "started")
-	m.commitInput()
+	press(m, "enter")
 	if len(m.searchMatches) != 0 {
 		t.Fatalf("search matched the run rule: %v", m.searchMatches)
 	}
-	press(m, "esc")
 	press(m, "ctrl+f")
+	for range "started" {
+		press(m, "backspace")
+	}
 	typeString(m, "listen")
-	m.commitInput()
+	press(m, "enter")
 	if len(m.searchMatches) != 1 {
 		t.Fatalf("search matches = %d for output, want 1", len(m.searchMatches))
 	}
@@ -83,7 +85,7 @@ func TestUnsampledRowsFeedTheSampleAfterAScopeSwitch(t *testing.T) {
 	addLines(m, "api", long)
 	addLines(m, "web", jsonGet)
 	m.cursor = 1
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	m.View()
 	if got, want := m.tableWidths()[0], displayWidth("method")+columnMarkW; got != want {
 		t.Fatalf("width = %d on web alone, want %d", got, want)
@@ -105,7 +107,7 @@ func TestFrozenWidthHoldsAcrossAScopeSwitch(t *testing.T) {
 	addLines(m, "api", short...)
 	addLines(m, "web", fmt.Sprintf(`{"request":{"method":%q},"response":{"status":200}}`, strings.Repeat("y", 40)))
 	m.cursor = 1
-	m.toggleSolo(1)
+	m.applyScope(1, "")
 	m.View()
 	press(m, "k")
 	m.View()
@@ -149,7 +151,7 @@ func TestExitRuleNamesSignalsAndErrors(t *testing.T) {
 	}{
 		{"signal", event{code: -1, err: sigErr}, "■ web killed by term", toneFail},
 		{"error", event{code: -1, err: errors.New("boom")}, "■ web failed: boom", toneFail},
-		{"zero", event{code: 0}, "■ web exited 0", toneOK},
+		{"zero", event{code: 0}, "✓ web exited 0", toneOK},
 		{"code", event{code: 3}, "■ web exited 3", toneFail},
 	}
 	for _, c := range cases {

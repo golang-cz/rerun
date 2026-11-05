@@ -94,7 +94,7 @@ func TestNestedKeyClickKeepsItsPath(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.View()
-	press(m, "s")
+	m.liveSelect()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, "method: ")

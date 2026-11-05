@@ -152,6 +152,12 @@ type tuiTarget struct {
 
 	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
 	restartBatch int
+	// building and buildStart track a build in flight, which the status column counts.
+	building   bool
+	buildStart time.Time
+	// health is the live run's probe state; lastRule is the restart rule it may still complete.
+	health   healthState
+	lastRule *restartRule
 
 	// colSpec is the spec the cached column expressions were parsed from, so
 	// a spec swap reparses exactly once. colBad marks a spec whose expression
@@ -267,7 +273,7 @@ type tuiModel struct {
 	disp      []dispRow
 	dispText  []string
 	dispDirty bool
-	// chips are the value filters clicked into the pane, ANDed with the v filter.
+	// chips are the value filters clicked into the pane; every chip ANDs with the rest.
 	chips []pickChip
 	// edits are the unsaved column picks, one per schema or target node.
 	edits []colEdit
@@ -275,11 +281,17 @@ type tuiModel struct {
 	// tableFlip is c's raw/table flip for the current selection.
 	tableFlip bool
 
-	// schemaSel is the schema whose members the pane merges, or "" for none.
+	// schemaSel is the group whose members the pane merges, or "" for none.
 	schemaSel string
 
-	// inputMode names the bottom-line bar that is open, input its in-progress
-	// text. While one is open it owns every key and the bottom line.
+	// barFocus routes keys to the filter bar; barSel is its focused chip, or -1.
+	barFocus bool
+	barSel   int
+
+	// pinSeq is the restart rule the pane holds at its top, 0 for none.
+	pinSeq int
+
+	// inputMode is the bar's open input and input its text; an open input owns every key.
 	inputMode int
 	input     string
 
@@ -289,14 +301,10 @@ type tuiModel struct {
 	searchMatches []int
 	searchRow     int
 
-	// filter hides pane rows whose raw line does not match. A query starting
-	// with "." is a yq expression. paneSel indexes the visible lines the
-	// filters keep. filterErr is a yq parse error that suspends the filter;
-	// filterStash restores the committed filter when an edit is cancelled.
-	// filterOn reports which one is active.
-	filter       string
+	// filters AND together; draft is the open input's predicate, nil when empty or invalid.
+	filters      []textFilter
+	draft        func(string) bool
 	filterErr    string
-	filterStash  string
 	paneSel      []int
 	paneSelDirty bool
 
@@ -352,6 +360,7 @@ func newTUI(targets []Target) *tuiModel {
 		lastClick:  -1,
 		hover:      -1,
 		searchRow:  -1,
+		barSel:     -1,
 		paneCurSub: -1,
 		styles:     newTUIStyles(),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
@@ -406,20 +415,14 @@ func (m *tuiModel) streamsTo(i int) bool {
 	case m.solo >= 0:
 		return m.solo == i
 	case m.schemaSel != "":
-		return m.targets[i].spec.Schema == m.schemaSel
+		return groupOf(m.targets[i]) == m.schemaSel
 	}
 	return true
 }
 
-// streamWord names how a target's stream is held: `solo` for the pane's only
-// stream, `muted` for a muted one. Solo hides every other row's mute state.
+// streamWord names a muted target's stream for the pane's title line.
 func (m *tuiModel) streamWord(i int) string {
-	switch {
-	case m.solo == i:
-		return "solo"
-	case m.solo >= 0:
-		return ""
-	case m.targets[i].muted:
+	if m.targets[i].muted {
 		return "muted"
 	}
 	return ""
@@ -440,17 +443,6 @@ func (m *tuiModel) toggleMute(i int) {
 	} else {
 		m.showNotice("unmuted "+t.spec.Name, false)
 	}
-}
-
-func (m *tuiModel) toggleSolo(i int) {
-	name := m.targets[i].spec.Name
-	if m.solo == i {
-		m.clearScope()
-		m.showNotice("unsolo "+name, false)
-		return
-	}
-	m.selectScope(i, "")
-	m.showNotice("solo "+name, false)
 }
 
 // refreshUnseen drops the badge from every row whose stream is in the pane
@@ -483,6 +475,7 @@ func (m *tuiModel) showHint(text string) {
 func (m *tuiModel) stopTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
+	t.building = false
 	t.state = stateStopped
 	t.exitLabel = ""
 	t.runner.control(ctrlStop)
@@ -491,6 +484,7 @@ func (m *tuiModel) stopTarget(i int) {
 func (m *tuiModel) startTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
+	t.building = false
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.runner.control(ctrlStart)
@@ -499,6 +493,7 @@ func (m *tuiModel) startTarget(i int) {
 func (m *tuiModel) rebootTarget(i int) {
 	t := m.targets[i]
 	t.restartBatch = 0
+	t.building = false
 	t.state = stateRunning
 	t.lastStart = m.now
 	t.exitLabel = ""
@@ -521,8 +516,24 @@ func (m *tuiModel) addLine(i int, line string) {
 	m.addRow(i, line, sepLine{})
 }
 
+// refreshRule rewrites a rule's stored raw text, so copy and search match what it now draws.
+func (m *tuiModel) refreshRule(rr *restartRule) {
+	raw := rr.label(1 << 16)
+	for k := range m.merged {
+		if m.merged[k].sep.restart == rr {
+			m.merged[k].text = raw
+		}
+	}
+	for k := range m.visibleSep {
+		if m.visibleSep[k].restart == rr {
+			m.visible[k] = raw
+			m.visibleRaw[k] = raw
+		}
+	}
+}
+
 func (m *tuiModel) addRule(i int, s sepLine) {
-	m.addRow(i, s.label, s)
+	m.addRow(i, s.raw(), s)
 }
 
 func (m *tuiModel) addRow(i int, line string, sep sepLine) {
@@ -671,6 +682,39 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.state = stateBackoff
 		t.backoffUntil = m.now.Add(ev.delay)
 
+	case evBuildStarted:
+		t.building = true
+		t.buildStart = eventTime(ev, m.now)
+
+	case evBuildOK, evBuildCancelled:
+		t.building = false
+
+	case evBuildFailed:
+		t.building = false
+		t.restartBatch = 0
+		m.addRule(i, buildFailedRule(t, ev))
+		if !(t.runStarted && t.state.up()) {
+			t.state = stateExited
+			t.exitCode = -1
+			t.exitLabel = "build failed"
+			t.lastRule = nil
+			t.unseen = true
+		}
+		for _, l := range ev.lines {
+			m.addLine(i, printable(l, false))
+		}
+
+	case evHealth:
+		// A probe from an earlier run says nothing about the live one.
+		if ev.runAt.Before(t.lastStart) {
+			break
+		}
+		t.health = ev.health
+		if rr := t.lastRule; ev.health == healthHealthy && rr != nil && rr.healthy == 0 && rr.at.Equal(ev.runAt) {
+			rr.healthy = ev.dur
+			m.refreshRule(rr)
+		}
+
 	case evStarted:
 		t.state = stateRunning
 		t.lastStart = ev.at
@@ -678,7 +722,25 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = -1
 		t.exitLabel = ""
 		t.backoffUntil = time.Time{}
-		m.addRule(i, sepLine{label: fmt.Sprintf("▶ %s started %s", t.spec.Name, eventTime(ev, m.now).Format("15:04:05"))})
+		t.health = ""
+		if t.spec.Health != "" {
+			t.health = healthStarting
+		}
+		if ev.restart {
+			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp}
+			t.lastRule = rr
+			m.addRule(i, sepLine{restart: rr})
+			if m.follow && m.solo == i && m.schemaSel == "" {
+				m.pinSeq = m.nextSeq
+			}
+		} else {
+			t.lastRule = nil
+			label := fmt.Sprintf("▶ %s started %s", t.spec.Name, eventTime(ev, m.now).Format("15:04:05"))
+			if ev.buildDur > 0 {
+				label += " · built " + shortDur(ev.buildDur)
+			}
+			m.addRule(i, sepLine{label: label})
+		}
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
 		}
@@ -690,6 +752,11 @@ func (m *tuiModel) applyEvent(ev event) {
 		}
 
 	case evExited:
+		// A swap's exit draws nothing; the ↻ rule at the next start stands for it.
+		if ev.restart {
+			return
+		}
+		t.lastRule = nil
 		t.state = stateExited
 		t.exitCode = ev.code
 		t.exitLabel = exitLabel(ev.code, ev.err)
@@ -781,7 +848,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		m.solo = j
 	}
 	m.schemaSel = ""
-	if schema != "" && len(m.schemaMembers(schema)) > 0 {
+	if schema != "" && m.hasGroups() && len(m.schemaMembers(schema)) > 0 {
 		m.schemaSel = schema
 	}
 	m.cursor = min(m.cursor, max(0, m.listLen()-1))
@@ -856,15 +923,14 @@ func (m *tuiModel) paneRowRaw(row int) int {
 	return m.disp[row].raw
 }
 
-// filterOn reports whether the v filter is narrowing the pane. A query with a
-// yq parse error suspends the filter, so the pane stays live behind the error.
-func (m *tuiModel) filterOn() bool { return m.filter != "" && m.filterErr == "" }
+// filterOn reports whether a text filter or an open draft narrows the pane.
+func (m *tuiModel) filterOn() bool { return len(m.filters) > 0 || m.draft != nil }
 
-// filterActive reports whether any filter, the v query or a chip, narrows the pane.
+// filterActive reports whether any text filter or value chip narrows the pane.
 func (m *tuiModel) filterActive() bool { return m.filterOn() || len(m.chips) > 0 }
 
 // rebuildPaneSel re-derives the visible subset for the current filters. The
-// filter expressions are parsed once here, never per line.
+// filter expressions are compiled once per edit, never per line.
 func (m *tuiModel) rebuildPaneSel() {
 	m.paneSelDirty = false
 	m.dispDirty = true
@@ -881,16 +947,22 @@ func (m *tuiModel) rebuildPaneSel() {
 	}
 }
 
-// lineKeeper is the per-line predicate for the v filter and every chip.
+// lineKeeper is the per-line predicate for the text filters, the open draft,
+// and every value chip.
 func (m *tuiModel) lineKeeper() func(string) bool {
-	var query func(string) bool
-	if m.filterOn() {
-		query = m.filterFunc()
+	keeps := make([]func(string) bool, 0, len(m.filters)+1)
+	for _, f := range m.filters {
+		keeps = append(keeps, f.keep)
+	}
+	if m.draft != nil {
+		keeps = append(keeps, m.draft)
 	}
 	chips := m.chips
 	return func(line string) bool {
-		if query != nil && !query(line) {
-			return false
+		for _, keep := range keeps {
+			if !keep(line) {
+				return false
+			}
 		}
 		for _, c := range chips {
 			if !yqMatches(c.prog, line) {
@@ -901,21 +973,27 @@ func (m *tuiModel) lineKeeper() func(string) bool {
 	}
 }
 
-// filterFunc builds the per-line predicate: a yq expression when the query
-// starts with ".", else a case-insensitive substring. A bad expression keeps
-// nothing; a line the expression cannot parse or evaluate is dropped.
-func (m *tuiModel) filterFunc() func(string) bool {
-	if strings.HasPrefix(m.filter, ".") {
-		expr, err := yqParse(m.filter)
+// textFilter is a committed text filter chip: its query and its compiled predicate.
+type textFilter struct {
+	query string
+	keep  func(string) bool
+}
+
+// compileFilter builds the per-line predicate: a yq expression when the query
+// starts with ".", else a case-insensitive substring. A yq query that does not
+// parse returns the error, so it never reaches the pane.
+func compileFilter(query string) (func(string) bool, error) {
+	if strings.HasPrefix(query, ".") {
+		expr, err := yqParse(query)
 		if err != nil {
-			return func(string) bool { return false }
+			return nil, err
 		}
-		return func(line string) bool { return yqMatches(expr, line) }
+		return func(line string) bool { return yqMatches(expr, line) }, nil
 	}
-	needle := strings.ToLower(m.filter)
+	needle := strings.ToLower(query)
 	return func(line string) bool {
 		return strings.Contains(strings.ToLower(line), needle)
-	}
+	}, nil
 }
 
 // recomputeSearch re-sweeps the pane's raw lines for the query. One Contains
@@ -967,15 +1045,6 @@ func (m *tuiModel) clearSearch() {
 	m.searchRow = -1
 }
 
-// clearFilter drops the filter and restores every pane row.
-func (m *tuiModel) clearFilter() {
-	m.filter = ""
-	m.filterErr = ""
-	m.paneSelDirty = true
-	m.vpDirty = true
-	m.recomputeSearch(true)
-}
-
 // searchJump moves to the next (dir > 0) or previous match and centers it,
 // wrapping at the ends. A search with no matches is a no-op.
 func (m *tuiModel) searchJump(dir int) {
@@ -1015,9 +1084,8 @@ func (m *tuiModel) centerOn(row int) {
 	m.vp.SetYOffset(min(max(row-m.vp.Height/2, 0), maxOff))
 }
 
-// searchStatus is the `12/47` counter, with the query appended while the bar
-// is open.
-func (m *tuiModel) searchStatus(showQuery bool) string {
+// searchStatus is the `12/47` counter.
+func (m *tuiModel) searchStatus() string {
 	pos := 0
 	for i, r := range m.searchMatches {
 		if r == m.searchRow {
@@ -1025,11 +1093,7 @@ func (m *tuiModel) searchStatus(showQuery bool) string {
 			break
 		}
 	}
-	s := fmt.Sprintf("%d/%d", pos, len(m.searchMatches))
-	if showQuery {
-		s += " " + m.search
-	}
-	return s
+	return fmt.Sprintf("%d/%d", pos, len(m.searchMatches))
 }
 
 // filterStatus is the bottom line's filtered row count.
@@ -1109,6 +1173,12 @@ func uptime(d time.Duration) string {
 
 // status is the row's second column: uptime while running, what happened after.
 func (m *tuiModel) status(t *tuiTarget) string {
+	if t.building {
+		return "⚙ " + shortDur(max(0, m.now.Sub(t.buildStart)))
+	}
+	if t.state.up() && t.health == healthUnhealthy {
+		return "unhealthy"
+	}
 	switch t.state {
 	case stateRunning:
 		return uptime(m.now.Sub(t.lastStart))
@@ -1134,7 +1204,32 @@ func (m *tuiModel) status(t *tuiTarget) string {
 }
 
 // glyph is the row's process state, backed by shape as well as color.
+// healthMark is the list mark a probe shows on a live run, or "" when there is none.
+func (t *tuiTarget) healthMark() (glyph, color string) {
+	if t.health == "" {
+		return "", ""
+	}
+	if t.state == stateExited {
+		return "■", colorRed
+	}
+	if !t.state.up() {
+		return "", ""
+	}
+	switch t.health {
+	case healthStarting:
+		return "◐", colorOrange
+	case healthHealthy:
+		return "●", colorGreen
+	case healthUnhealthy:
+		return "▲", colorRed
+	}
+	return "", ""
+}
+
 func (t *tuiTarget) glyph() string {
+	if g, _ := t.healthMark(); g != "" {
+		return g
+	}
 	switch t.state {
 	case stateRunning, stateStarting:
 		return "●"
