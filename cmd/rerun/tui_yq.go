@@ -67,6 +67,8 @@ func yqObjectValues(exprs []*yqlib.ExpressionNode, line string) ([]string, bool)
 	return vals, true
 }
 
+var cellSpaces = strings.NewReplacer("\t", " ", "\r", " ", "\n", " ")
+
 // yqScalar runs one expression over a decoded line and renders its first
 // non-null result: a scalar keeps its text, a map or sequence becomes compact
 // JSON. A missing value is the empty cell.
@@ -83,7 +85,8 @@ func yqScalar(expr *yqlib.ExpressionNode, root *yqlib.CandidateNode) string {
 			continue
 		}
 		if node.Kind == yqlib.ScalarNode {
-			return node.Value
+			// A tab or newline in a value would break the row's columns on screen.
+			return cellSpaces.Replace(node.Value)
 		}
 		var buf bytes.Buffer
 		if err := yqlib.NewJSONEncoder(yqlib.JsonPreferences{}).Encode(&buf, node); err != nil {

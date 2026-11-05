@@ -85,6 +85,24 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any key ends a frozen selection; copy feedback survives its 3s window.
 	m.clearSelection()
 
+	// The quit confirm is routed first, so enter after q quits instead of closing the modal.
+	if m.cfgErr != "" && !m.confirmQuit {
+		switch msg.String() {
+		case "esc", "enter":
+			m.cfgErr = ""
+			return m, nil
+		case "ctrl+c":
+			m.cfgErr = ""
+		case "q":
+			if m.inputMode != inputNone {
+				return m, nil
+			}
+			m.cfgErr = ""
+		default:
+			return m, nil
+		}
+	}
+
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
 	// into the query instead of running their commands.
 	if m.inputMode != inputNone {
@@ -136,11 +154,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 		m.helpAll = false
 
-	case "/":
-		m.openInput(inputSearch)
-
-	case "v":
+	case "/", "v":
 		m.openInput(inputFilter)
+
+	case "ctrl+f":
+		m.openInput(inputSearch)
 
 	case "c":
 		m.toggleTable()
@@ -237,6 +255,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.vpDirty = true
 		} else {
 			m.cursor = 0
+			m.liveSelect()
 		}
 
 	case "end":
@@ -246,6 +265,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.vp.GotoBottom()
 		} else {
 			m.cursor = max(0, m.listLen()-1)
+			m.liveSelect()
 		}
 
 	case "enter":
@@ -255,9 +275,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.paneFocus:
 			m.toggleCursorExpand()
 		default:
-			if r, ok := m.cursorRow(); ok {
-				m.selectRow(r)
-			}
+			m.paneFocus = true
 		}
 
 	case "a":
@@ -432,6 +450,7 @@ func (m *tuiModel) cancelInput() {
 
 func (m *tuiModel) moveCursor(delta int) {
 	m.cursor = min(max(m.cursor+delta, 0), max(0, m.listLen()-1))
+	m.liveSelect()
 }
 
 func (m *tuiModel) toggleTarget(i int) {
@@ -487,7 +506,7 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.help || m.confirmQuit {
+	if m.help || m.confirmQuit || m.cfgErr != "" {
 		return m, nil
 	}
 
@@ -573,13 +592,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.selectRow(r)
 	default:
 		m.cursor = row
+		m.paneFocus = false
+		m.liveSelect()
 		// The second click of a pair starts or stops the row, keeping the selection.
 		double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
 		if double {
 			m.toggleRow(r)
 			m.lastClick = -1 // a fast third click must not read as another double
 		} else {
-			m.selectRow(r)
 			m.lastClick = row
 		}
 		m.lastClickAt = time.Now()

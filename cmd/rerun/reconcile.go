@@ -114,7 +114,7 @@ func staleSpecLine(names []string) string {
 
 // configErrorLine is the banner for a config rerun could not parse.
 func configErrorLine(err error) string {
-	return "── config reload failed: " + oneLine(err.Error()) + " ──"
+	return "── config reload failed: " + oneLine(printable(err.Error(), false)) + " ──"
 }
 
 // oneLine flattens text, which may carry newlines, onto one pane row.
@@ -195,9 +195,10 @@ func (g *targetGroup) watchConfig(path string) {
 func (g *targetGroup) reload(path string) {
 	cfg, err := ParseConfig(path)
 	if err != nil {
-		g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
+		g.sink.emit(event{kind: evConfigErr, line: configErrorLine(err), err: err})
 		return
 	}
+	g.sink.emit(event{kind: evConfigOK})
 	g.applyConfig(cfg.Targets)
 }
 

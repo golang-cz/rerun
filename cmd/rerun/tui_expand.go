@@ -42,12 +42,29 @@ func (m *tuiModel) rebuildDisp() {
 		if !open {
 			continue
 		}
-		block, _ := jsonBlock(m.visibleRaw[raw], m.prefixW+2)
-		for _, r := range block {
+		for _, r := range m.expansionRows(raw) {
 			r.raw = raw
 			m.addDisp(r)
 		}
 	}
+}
+
+type blockKey struct{ seq, base int }
+
+// Expansions are few at a time, so a small cache covers every redraw.
+const blockCacheCap = 64
+
+func (m *tuiModel) expansionRows(raw int) []dispRow {
+	k := blockKey{m.visibleSeq[raw], m.prefixW + 2}
+	if rows, ok := m.blockCache[k]; ok {
+		return rows
+	}
+	rows, _ := jsonBlock(m.visibleRaw[raw], k.base)
+	if len(m.blockCache) >= blockCacheCap {
+		m.blockCache = map[blockKey][]dispRow{}
+	}
+	m.blockCache[k] = rows
+	return rows
 }
 
 func (m *tuiModel) addDisp(r dispRow) {

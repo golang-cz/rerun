@@ -60,7 +60,7 @@ func TestEnterExpandsAndCollapsesTheBottomLine(t *testing.T) {
 	m.View()
 
 	press(m, "right", "enter")
-	if !strings.Contains(plainPane(m), `"status": 403,`) {
+	if !strings.Contains(plainPane(m), `status: 403`) {
 		t.Fatalf("expanded pane lacks the pretty block:\n%s", plainPane(m))
 	}
 	if !strings.Contains(plainPane(m), "(−)") {
@@ -68,7 +68,7 @@ func TestEnterExpandsAndCollapsesTheBottomLine(t *testing.T) {
 	}
 
 	press(m, "enter")
-	if strings.Contains(plainPane(m), `"status": 403,`) {
+	if strings.Contains(plainPane(m), `status: 403`) {
 		t.Fatalf("collapsed pane still shows the block:\n%s", plainPane(m))
 	}
 }
@@ -100,7 +100,7 @@ func TestExpansionSurvivesNewLines(t *testing.T) {
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatal("new lines collapsed the expanded line")
 	}
-	if !strings.Contains(plainPane(m), `"status": 403,`) {
+	if !strings.Contains(plainPane(m), `status: 403`) {
 		t.Fatalf("the block vanished after new lines:\n%s", plainPane(m))
 	}
 }
@@ -114,7 +114,7 @@ func TestKeyClickAddsColumnToSelectedSchema(t *testing.T) {
 	press(m, "s")
 	m.toggleExpand(0)
 
-	x, y := findInPane(t, m, `"status": `)
+	x, y := findInPane(t, m, `status: `)
 	m.handleMouse(mouse(x+1, y, false))
 
 	want := []colEdit{{node: colNode{schema: true, name: "backend"}, cols: []Column{{Name: "status", Expr: ".status"}}}}
@@ -140,7 +140,7 @@ func TestKeyClickAddsColumnToSoloedTarget(t *testing.T) {
 	press(m, "s")
 	m.toggleExpand(0)
 
-	x, y := findInPane(t, m, `"level": `)
+	x, y := findInPane(t, m, `level: `)
 	m.handleMouse(mouse(x+1, y, false))
 
 	if len(m.edits) != 1 || m.edits[0].node != (colNode{name: "web"}) || m.edits[0].cols[0].Expr != ".level" {
@@ -155,7 +155,7 @@ func TestKeyClickWithoutSelectionHints(t *testing.T) {
 	m.View()
 	m.toggleExpand(0)
 
-	x, y := findInPane(t, m, `"status": `)
+	x, y := findInPane(t, m, `status: `)
 	m.handleMouse(mouse(x+1, y, false))
 
 	if m.hint != selectHint {
@@ -173,8 +173,8 @@ func TestValueClickAddsChipFilter(t *testing.T) {
 	m.View()
 	m.toggleExpand(0)
 
-	x, y := findInPane(t, m, `"status": 403`)
-	m.handleMouse(mouse(x+len(`"status": `)+1, y, false))
+	x, y := findInPane(t, m, `status: 403`)
+	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 
 	if len(m.chips) != 1 || m.chips[0].expr != ".status == 403" {
 		t.Fatalf("chips = %+v, want .status == 403", m.chips)
@@ -194,16 +194,16 @@ func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 	m.View()
 	m.toggleExpand(0)
 
-	x, y := findInPane(t, m, `"status": 403`)
-	m.handleMouse(mouse(x+len(`"status": `)+1, y, false))
+	x, y := findInPane(t, m, `status: 403`)
+	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 	x, y = findInPane(t, m, "×")
 	m.handleMouse(mouse(x, y, false))
 	if len(m.chips) != 0 {
 		t.Fatalf("chips = %+v after clicking ×, want none", m.chips)
 	}
 
-	x, y = findInPane(t, m, `"status": 403`)
-	m.handleMouse(mouse(x+len(`"status": `)+1, y, false))
+	x, y = findInPane(t, m, `status: 403`)
+	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 	press(m, "right", "backspace")
 	if len(m.chips) != 0 {
 		t.Fatalf("chips = %+v after backspace, want none", m.chips)
@@ -235,7 +235,7 @@ func TestErrorNoticeOutranksUnsavedFooter(t *testing.T) {
 	m.View()
 	press(m, "s")
 	m.toggleExpand(0)
-	x, y := findInPane(t, m, `"level": `)
+	x, y := findInPane(t, m, `level: `)
 	m.handleMouse(mouse(x+1, y, false))
 
 	m.showNotice("rerun: boom", true)
@@ -279,7 +279,7 @@ func TestSaveWritesSchemaAndSurvivesReload(t *testing.T) {
 	addLines(m, "api", jsonReq)
 	m.View()
 	m.toggleExpand(0)
-	x, y := findInPane(t, m, `"status": `)
+	x, y := findInPane(t, m, `status: `)
 	m.handleMouse(mouse(x+1, y, false))
 	m.pickValue(&jsonField{path: ".level", lit: `"info"`})
 

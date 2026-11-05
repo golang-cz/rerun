@@ -226,12 +226,15 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
 	}
 
-	// A click on the soloed row clears the solo.
 	m.toggleSolo(1)
 	m.View()
 	m.handleMouse(mouse(2, 1, false))
+	if m.solo != 1 {
+		t.Fatalf("solo after a click on the soloed row = %d, want 1", m.solo)
+	}
+	press(m, "esc")
 	if m.solo != -1 {
-		t.Fatalf("solo after a click on the soloed row = %d, want none", m.solo)
+		t.Fatalf("solo after esc = %d, want none", m.solo)
 	}
 }
 
@@ -574,7 +577,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 		group.reload(path)
 
 		got := sink.all()
-		if len(got) != 1 || got[0].kind != evNotice {
+		if len(got) != 1 || got[0].kind != evConfigErr {
 			t.Fatalf("events = %+v, want one notice", got)
 		}
 		if line := got[0].line; !strings.HasPrefix(line, "── config reload failed:") {
@@ -599,7 +602,12 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 
 		group.reload(path)
 
-		got := sink.all()
+		var got []event
+		for _, ev := range sink.all() {
+			if ev.kind != evConfigOK {
+				got = append(got, ev)
+			}
+		}
 		if len(got) != 1 || got[0].kind != evReconcile || got[0].line != "" {
 			t.Fatalf("events = %+v, want one silent reconcile", got)
 		}
@@ -727,5 +735,36 @@ func TestSchemaColumnsChangeIsCosmetic(t *testing.T) {
 	}
 	if got := fresh.Targets[0].Columns; !reflect.DeepEqual(got, []Column{{Name: "c", Expr: ".d"}}) {
 		t.Fatalf("columns = %+v, want the schema's new columns on the target", got)
+	}
+}
+
+// A restored file that changes nothing still clears the error modal.
+func TestRestoredConfigClearsTheErrorModal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	const good = "web:\n  on: src\n  cmd: sleep 30\n"
+	if err := os.WriteFile(path, []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingSink{}
+	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
+	t.Cleanup(group.cancel)
+
+	if err := os.WriteFile(path, []byte("web:\n  cmd: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	group.reload(path)
+	m := newTestModel(t, target("web"))
+	m.applyEvents(sink.all())
+	if m.cfgErr == "" {
+		t.Fatal("the broken reload did not open the modal")
+	}
+
+	if err := os.WriteFile(path, []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	group.reload(path)
+	m.applyEvents(sink.all()[len(sink.all())-1:])
+	if m.cfgErr != "" {
+		t.Fatal("restoring the same content left the modal open")
 	}
 }

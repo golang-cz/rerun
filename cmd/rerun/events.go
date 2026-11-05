@@ -24,6 +24,8 @@ const (
 	evCleared                     // the screen clear the ad-hoc mode prints
 	evReconcile                   // a rerun.yml reload changed the target list
 	evNotice                      // rerun's own line about the config; err is set when a reload failed
+	evConfigErr                   // a rerun.yml reload did not load; err is the parser's full error
+	evConfigOK                    // a rerun.yml reload parsed, so any earlier config error is over
 	evLoop                        // a target looks like it is rewriting its own trigger file
 )
 
@@ -132,7 +134,7 @@ func (s *plainSink) render(ev event) string {
 			return clearTerminal + "\n"
 		}
 
-	case evReconcile, evNotice:
+	case evReconcile, evNotice, evConfigErr:
 		// rerun's own line about the config, never a target's output. A reload
 		// with nothing to report prints nothing.
 		if ev.line == "" {

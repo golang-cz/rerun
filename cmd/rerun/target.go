@@ -945,6 +945,7 @@ func (r *targetRunner) reportExit() {
 		status: describeExit(code, err),
 		code:   code,
 		err:    err,
+		at:     time.Now(),
 	})
 }
 

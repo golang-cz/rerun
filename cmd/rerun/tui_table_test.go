@@ -30,11 +30,12 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 		t.Fatal("a target with columns did not start in table mode")
 	}
 	lines := paneOf(m)[m.titleHeight():]
-	if got := dropMarker(lines[0]); got != "web  GET       200" {
-		t.Fatalf("row 0 = %q, want the padded table row", got)
+	row0, row1 := dropMarker(lines[0]), dropMarker(lines[1])
+	if !strings.HasPrefix(row0, "web  GET") || !strings.HasPrefix(row1, "web  DELETE") {
+		t.Fatalf("rows = %q, %q, want the name prefix then the method", row0, row1)
 	}
-	if got := dropMarker(lines[1]); got != "web  DELETE    500" {
-		t.Fatalf("row 1 = %q, want the column padded to its × header", got)
+	if strings.Index(row0, "200") != strings.Index(row1, "500") {
+		t.Fatalf("status values start at %d and %d, want the same column", strings.Index(row0, "200"), strings.Index(row1, "500"))
 	}
 
 	press(m, "c")
@@ -58,7 +59,7 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 		t.Fatalf("visibleRaw = %q, want the raw JSON line", got)
 	}
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "method")
 	m.commitInput()
 	if len(m.searchMatches) != 1 {
@@ -167,9 +168,7 @@ func TestTableWidthsAreCappedByThePane(t *testing.T) {
 	}
 }
 
-// A solo flip rebuilds the visible list, so the table cache is dropped and
-// the surviving rows are evaluated again.
-func TestTableCellsInvalidatedOnSoloFlip(t *testing.T) {
+func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"), tableTarget("api"))
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", jsonPost)
@@ -181,8 +180,8 @@ func TestTableCellsInvalidatedOnSoloFlip(t *testing.T) {
 	m.cursor = 1 // web
 	press(m, "s")
 	m.View()
-	if got := m.cellEvals; got <= before {
-		t.Fatalf("cellEvals = %d after a solo flip, want more than %d", got, before)
+	if got := m.cellEvals; got != before {
+		t.Fatalf("cellEvals = %d after a solo flip, want %d: cached cells were re-decoded", got, before)
 	}
 }
 

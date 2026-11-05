@@ -279,13 +279,23 @@ func (m *tuiModel) tableHeaderOn() bool {
 // columnHeader draws each column name with its × and records the × cells for header clicks.
 func (m *tuiModel) columnHeader(w int) string {
 	cols := m.headerColumns()
+	widths := m.tableWidths()
 	names := make([]string, len(cols))
+	marked := make([]bool, len(cols))
 	for i, c := range cols {
-		names[i] = c.Name + " ×"
+		// The × only shows when the name leaves room for it, so a narrow column still names itself.
+		marked[i] = i < len(widths) && displayWidth(c.Name)+columnMarkW <= widths[i]
+		names[i] = c.Name
+		if marked[i] {
+			names[i] += " ×"
+		}
 	}
-	row, spans := tableRow(strings.Repeat(" ", m.prefixW)+"  ", names, m.tableWidths(), m.paneWidth())
+	row, spans := tableRow(strings.Repeat(" ", m.prefixW)+"  ", names, widths, m.paneWidth())
 	m.layout.heads = m.layout.heads[:0]
 	for i, s := range spans {
+		if !marked[i] {
+			continue
+		}
 		x := s.x0 + displayWidth(cols[i].Name) + 1
 		m.layout.heads = append(m.layout.heads, cellSpan{x0: x, x1: x + 1, col: s.col})
 	}

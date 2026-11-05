@@ -131,6 +131,9 @@ func (m *tuiModel) View() string {
 	if m.confirmQuit {
 		return overlayCenter(frame, m.confirmQuitView(), m.width, m.height)
 	}
+	if m.cfgErr != "" {
+		return overlayCenter(frame, m.configErrView(), m.width, m.height)
+	}
 	return frame
 }
 
@@ -147,6 +150,41 @@ func (m *tuiModel) confirmQuitView() string {
 		m.styles.hint.Render("enter quits · esc cancels · ctrl+c again quits")
 	// Width fits the body line on one row; 44 would wrap and split the sentence.
 	return m.styles.box.Padding(1, 2).Width(56).Render(body)
+}
+
+// Only the body is cut, so the border and the close hint survive a small screen.
+func (m *tuiModel) configErrView() string {
+	w := min(80, max(24, m.width-4))
+	body := strings.Split(lipgloss.NewStyle().Width(w-6).Render(m.cfgErr), "\n")
+	maxH := max(8, m.height-2)
+	box := func(lines []string) string {
+		return m.styles.box.Padding(1, 2).Width(w).Render(
+			m.styles.title.Render("rerun.yml not reloaded") + "\n\n" + strings.Join(lines, "\n") + "\n\n" +
+				m.styles.hint.Render("old config still running · esc close"))
+	}
+	full := len(body)
+	for len(body) > 1 && strings.Count(box(body), "\n")+1 > maxH {
+		body = body[:len(body)-1]
+	}
+	if len(body) < full {
+		body[len(body)-1] = "…"
+	}
+	return box(body)
+}
+
+// printable drops controls that would drive the terminal; newlines stay only when keepNL is set.
+func printable(s string, keepNL bool) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' && keepNL:
+			return r
+		case r == '\t' || r == '\n' || r == '\r':
+			return ' '
+		case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // overlayCenter splices box into frame at the canvas center, so the stream and
@@ -712,7 +750,7 @@ func (m *tuiModel) stateChip() string {
 
 // searchLine is the committed search counter.
 func (m *tuiModel) searchLine() string {
-	return "/" + m.search + " · " + m.searchStatus(false) + " · esc"
+	return "find " + m.search + " · " + m.searchStatus(false) + " · esc"
 }
 
 // filterLine is the committed filter counter, query included.
@@ -761,7 +799,7 @@ func (m *tuiModel) titleLine(w int) string {
 // it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
 	if m.vpDirty {
-		lines := m.tableLines(m.paneLines())
+		lines := m.sepLines(m.tableLines(m.paneLines()))
 		m.paneCol = m.clampPaneCol(lines)
 		content := strings.Join(m.markLines(m.panLines(lines)), "\n")
 		if len(lines) == 0 {
@@ -835,22 +873,23 @@ func (m *tuiModel) allMuted() bool {
 
 // helpShortKeys is the help overlay's first view: the keys used most.
 var helpShortKeys = [][2]string{
-	{"j/k ↑/↓", "move between rows (in the pane, move its cursor)"},
+	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row"},
 	{"r", "reboot the row"},
-	{"s enter", "solo a target, or select a schema's targets"},
+	{"s", "solo a target, or select a schema's targets"},
 	{"esc", "clear the search, the filter, or the solo"},
 	{"tab", "focus the fs drawer"},
 	{"enter a f", "pane: expand the line; a adds its key, f filters its value"},
 	{"c", "toggle the columns table"},
-	{"v", "filter the pane (a leading . runs yq)"},
+	{"/", "filter the pane (a leading . runs yq)"},
+	{"ctrl+f", "find in the pane (n/N jump)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q", "quit (asks first)"},
 }
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows; ↑/↓ move the pane cursor when focused"},
+	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (schema row: its targets)"},
@@ -858,12 +897,12 @@ var helpKeys = [][2]string{
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (schema row: its targets)"},
-	{"s enter", "solo a target, or select a schema's targets (again or esc clears)"},
+	{"s", "solo a target, or select a schema's targets (again or esc clears)"},
 	{"esc", "clear search, then filter, then solo or schema"},
 	{"o G", "open the target's url / resume the live tail"},
 	{"p", "browse the scrollback (again or G goes live)"},
-	{"/", "search the pane (n/N next/prev, esc clears)"},
-	{"v", "filter (esc clears; leading . is yq)"},
+	{"ctrl+f", "find in the pane (n/N next/prev, esc clears)"},
+	{"/ v", "filter the lines (esc clears; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
 	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},

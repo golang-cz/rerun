@@ -42,7 +42,7 @@ func TestEnterExpandsTheCursorLine(t *testing.T) {
 	if m.follow {
 		t.Fatal("expanding a line did not pause the tail")
 	}
-	if !strings.Contains(plainPane(m), `"status": 403,`) {
+	if !strings.Contains(plainPane(m), `status: 403`) {
 		t.Fatalf("the block is not on screen:\n%s", plainPane(m))
 	}
 }
@@ -126,19 +126,22 @@ func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	}
 }
 
-// Expanded keys are underlined and scalar values tinted, so the click targets read without color.
-func TestExpandedKeysAndValuesGetCues(t *testing.T) {
+// Keys stay plain and scalar values are tinted, so a key is never underlined.
+func TestExpandedKeysAreNotUnderlinedAndValuesGetCues(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.toggleExpand(0)
 
 	var key, val bool
 	for _, line := range m.paneLines() {
-		key = key || strings.Contains(line, "\x1b[4m\"level\"\x1b[24m")
-		val = val || strings.Contains(line, "\x1b[36m\"info\"\x1b[39m")
+		if strings.Contains(line, "\x1b[4m") {
+			t.Fatalf("expanded key is underlined: %q", line)
+		}
+		key = key || strings.Contains(line, "level: ")
+		val = val || strings.Contains(line, "\x1b[36minfo\x1b[39m")
 	}
 	if !key || !val {
-		t.Fatalf("key cue %v, value cue %v; want both", key, val)
+		t.Fatalf("key on the pane %v, value cue %v; want both", key, val)
 	}
 }
 

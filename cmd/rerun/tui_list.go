@@ -94,7 +94,6 @@ func (m *tuiModel) rowKey(r listRow) string {
 	return "target:" + m.targets[r.target].spec.Name
 }
 
-// selectRow is `s` and enter: selects a schema's targets, or solos a target.
 func (m *tuiModel) selectRow(r listRow) {
 	if r.header {
 		m.toggleSchema(r.schema)
@@ -139,14 +138,39 @@ func (m *tuiModel) toggleSchema(schema string) {
 	m.selectScope(-1, schema)
 }
 
+func (m *tuiModel) liveSelect() {
+	if m.paneFocus || m.drawerFocus {
+		return
+	}
+	r, ok := m.cursorRow()
+	if !ok {
+		return
+	}
+	if r.header {
+		if m.solo >= 0 || m.schemaSel != r.schema {
+			m.applyScope(-1, r.schema)
+		}
+		return
+	}
+	if m.solo != r.target || m.schemaSel != "" {
+		m.applyScope(r.target, "")
+	}
+}
+
 // selectScope sets the pane's selection: one target, one schema, or neither.
+// A solo that shows nothing is useless, so an explicit solo unmutes.
 func (m *tuiModel) selectScope(solo int, schema string) {
-	m.solo = solo
-	m.schemaSel = schema
-	m.tableFlip = false
 	if solo >= 0 {
 		m.targets[solo].muted = false
 	}
+	m.applyScope(solo, schema)
+}
+
+// Moving the cursor must never unmute, so the scope is set without touching mutes.
+func (m *tuiModel) applyScope(solo int, schema string) {
+	m.solo = solo
+	m.schemaSel = schema
+	m.tableFlip = false
 	m.refreshUnseen()
 	m.group.setSoloGuard(solo >= 0 || schema != "")
 	m.mergedDirty = true

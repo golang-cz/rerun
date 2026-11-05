@@ -53,6 +53,8 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyHome}
 	case "end":
 		return tea.KeyMsg{Type: tea.KeyEnd}
+	case "ctrl+f":
+		return tea.KeyMsg{Type: tea.KeyCtrlF}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -621,23 +623,26 @@ func TestSoloKeysAndClear(t *testing.T) {
 		t.Fatalf("solo = %d, want cleared after a second s", m.solo)
 	}
 
-	press(m, "enter")
-	if m.solo != 1 {
-		t.Fatalf("solo = %d, want 1 after enter", m.solo)
+	press(m, "down")
+	if m.solo != 2 {
+		t.Fatalf("solo = %d, want 2 after moving the cursor onto it", m.solo)
 	}
-	press(m, "enter")
+	press(m, "esc")
 	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared after a second enter", m.solo)
+		t.Fatalf("solo = %d, want cleared by esc", m.solo)
 	}
 }
 
-func TestEnterOnSoloedRowClearsIt(t *testing.T) {
+func TestEnterOnListRowFocusesPane(t *testing.T) {
 	m := newTestModel(t)
 	m.toggleSolo(2)
 	m.cursor = 2
 	press(m, "enter")
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared", m.solo)
+	if !m.paneFocus {
+		t.Fatal("enter on a list row did not focus the log pane")
+	}
+	if m.solo != 2 {
+		t.Fatalf("solo = %d, want the scope kept by enter", m.solo)
 	}
 }
 
@@ -744,7 +749,7 @@ func TestHelpOverlayToggles(t *testing.T) {
 	if !m.help || m.helpAll {
 		t.Fatal("? did not open the short help overlay")
 	}
-	if view := m.View(); !strings.Contains(view, "s enter") || strings.Contains(view, "shift-drag") {
+	if view := m.View(); !strings.Contains(view, "solo a target") || strings.Contains(view, "shift-drag") {
 		t.Errorf("short help should list the core keys only:\n%s", view)
 	}
 	press(m, "?")
@@ -925,12 +930,10 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 		t.Error("solo dropped the hidden mute state")
 	}
 
-	// A second click on the soloed row clears solo. Slowing it past the
-	// double-click window keeps it a single click; the pair case is below.
 	slowClick(m)
 	m.handleMouse(mouse(2, 1, false))
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared after the second single click", m.solo)
+	if m.solo != 1 {
+		t.Fatalf("solo = %d, want 1 kept after the second single click", m.solo)
 	}
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 2 still", m.cursor)
@@ -1005,10 +1008,9 @@ func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 	m.handleMouse(mouse(2, 0, false))
 	queuedCtrl(t, m.targets[0].runner) // drain the stop
 
-	// The third click is a fresh single: it toggles solo, never stop/start.
 	m.handleMouse(mouse(2, 0, false))
-	if m.solo != -1 {
-		t.Fatalf("solo = %d, want cleared by the third click's solo toggle", m.solo)
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want 0 kept by the third click", m.solo)
 	}
 	if m.targets[0].state != stateStopped {
 		t.Fatalf("state = %v, want stopped still (no start on the third click)", m.targets[0].state)
@@ -1447,8 +1449,7 @@ func TestBackoffEventAddsNoPaneLine(t *testing.T) {
 	}
 }
 
-// An exit sets the row's glyph and label and writes no pane line.
-func TestExitEventAddsNoPaneLine(t *testing.T) {
+func TestExitEventAddsOnlyTheRunRule(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	before := m.paneLen()
 	m.applyEvent(event{kind: evExited, target: "web", status: "exit 1", code: 1})
@@ -1456,8 +1457,11 @@ func TestExitEventAddsNoPaneLine(t *testing.T) {
 	if m.targets[0].state != stateExited || m.targets[0].exitLabel == "" {
 		t.Fatalf("exit state = %v, label %q, want the exited state and a label", m.targets[0].state, m.targets[0].exitLabel)
 	}
-	if got := m.paneLen(); got != before {
-		t.Fatalf("pane lines after an exit = %d, want %d", got, before)
+	if got := m.paneLen(); got != before+1 {
+		t.Fatalf("pane lines after an exit = %d, want %d", got, before+1)
+	}
+	if !strings.Contains(m.visibleRaw[len(m.visibleRaw)-1], "■ web exited 1") {
+		t.Fatalf("last pane line = %q, want the exit rule", m.visibleRaw[len(m.visibleRaw)-1])
 	}
 }
 

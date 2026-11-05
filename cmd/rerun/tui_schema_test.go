@@ -84,7 +84,7 @@ func TestSoloOnAMemberReplacesTheSchemaSelection(t *testing.T) {
 	paneOut(m, "worker", "worker-line")
 
 	press(m, "s")
-	press(m, "down", "down", "s")
+	press(m, "down", "down")
 	if m.solo != 1 || m.schemaSel != "" {
 		t.Fatalf("solo = %d schemaSel = %q, want worker soloed and no schema", m.solo, m.schemaSel)
 	}

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"math"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
@@ -10,9 +13,11 @@ import (
 // tableHint is shown when `c` has no columns to work with.
 const tableHint = "c needs a target with columns"
 
-// tableWidthRows bounds the width scan: only the newest rows decide the
-// columns, so a long history cannot slow a frame.
-const tableWidthRows = 1000
+const columnCapW = 24
+
+const sampleValues = 100
+
+const clockLayout = "15:04:05"
 
 // cellCache is one visible line's table form. A zero value means "not
 // evaluated yet"; raw means the line has no table form and keeps its raw text.
@@ -22,6 +27,13 @@ type cellCache struct {
 }
 
 func (c cellCache) evaluated() bool { return c.raw || c.vals != nil }
+
+type cellEntry struct {
+	cell cellCache
+	// A column change must re-decode the line, so the decoding columns are kept.
+	cols []Column
+	gen  int
+}
 
 // toggleTable flips the selection between raw lines and the columns table. A
 // selection with nothing to tabulate says so instead of toggling.
@@ -131,35 +143,60 @@ func tableRow(lead string, cells []string, widths []int, budget int) (string, []
 			b.WriteString("  ")
 			x += 2
 		}
-		w := 0
+		w := columnCapW
 		if i < len(widths) {
 			w = widths[i]
 		}
-		b.WriteString(padRight(v, w))
+		b.WriteString(padRight(ellipsize(v, w), w))
 		spans = append(spans, cellSpan{x0: x, x1: x + w, col: i})
 		x += w
 	}
 	return truncate(strings.TrimRight(b.String(), " "), budget), spans
 }
 
-// evaluateCells parses every visible line that has no cached table form yet,
-// once. Rebuilds clear the cache, so a solo flip or a config reload reswarms
-// it, while an arriving line costs exactly one decode.
 func (m *tuiModel) evaluateCells() {
 	m.ensurePane()
+	m.syncColumnSample()
 	for i := range m.visibleRaw {
 		if m.visibleCells[i].evaluated() {
 			continue
 		}
-		m.cellEvals++
-		m.visibleCells[i] = m.evaluateCell(i)
+		m.visibleCells[i] = m.cellFor(i).cell
+		m.sampleAt(i)
 	}
+}
+
+func (m *tuiModel) cellFor(raw int) *cellEntry {
+	seq := m.visibleSeq[raw]
+	var cols []Column
+	if t := m.visibleTarget(raw); t != nil {
+		cols = t.spec.Columns
+	}
+	if e, ok := m.cellBySeq[seq]; ok && slices.Equal(e.cols, cols) {
+		return e
+	}
+	m.cellEvals++
+	e := &cellEntry{cell: m.evaluateCell(raw), cols: slices.Clone(cols)}
+	m.cellBySeq[seq] = e
+	return e
+}
+
+func (m *tuiModel) sampleAt(raw int) {
+	e, ok := m.cellBySeq[m.visibleSeq[raw]]
+	if !ok || e.cell.raw || e.gen == m.colSample.gen {
+		return
+	}
+	e.gen = m.colSample.gen
+	m.colSample.observe(e.cell.vals)
 }
 
 // evaluateCell is one line's table form: its column values, or raw when its
 // target has none, its expressions do not compile, or the line is not a JSON
 // object.
 func (m *tuiModel) evaluateCell(raw int) cellCache {
+	if m.visibleSep[raw].isSep() {
+		return cellCache{raw: true}
+	}
 	t := m.visibleTarget(raw)
 	if t == nil {
 		return cellCache{raw: true}
@@ -172,44 +209,156 @@ func (m *tuiModel) evaluateCell(raw int) cellCache {
 	if !ok {
 		return cellCache{raw: true}
 	}
+	for i := range vals {
+		if i < len(t.spec.Columns) && timeColumn(t.spec.Columns[i].Name) {
+			vals[i] = clockValue(vals[i])
+		}
+	}
 	return cellCache{vals: vals}
 }
 
-// tableWidths is the per-column width over the newest rows' cached cells and
-// the selection's column names, so a header always fits. Each contribution is
-// capped at the row budget, so one huge cell cannot blow the row or the frame.
+// Widths ignore the rows, so a cell keeps its place as rows arrive.
 func (m *tuiModel) tableWidths() []int {
-	budget := m.tableBudget()
-	start := max(0, len(m.visibleCells)-tableWidthRows)
-	var widths []int
-	for _, c := range m.headerColumns() {
-		widths = append(widths, min(displayWidth(c.Name)+columnMarkW, budget))
+	names := m.syncColumnSample()
+	widths := make([]int, len(names))
+	for i, name := range names {
+		if w, ok := fixedColumnW(name); ok {
+			widths[i] = w
+		} else {
+			widths[i] = m.colSample.width(i)
+		}
 	}
-	for i := start; i < len(m.visibleCells); i++ {
-		c := m.visibleCells[i]
-		if !c.evaluated() || c.raw {
-			continue
+	if n := len(widths); n > 0 {
+		used := 2 * (n - 1)
+		for _, w := range widths[:n-1] {
+			used += w
 		}
-		for j, v := range c.vals {
-			w := min(displayWidth(v), budget)
-			if j >= len(widths) {
-				widths = append(widths, w)
-			} else if w > widths[j] {
-				widths[j] = w
-			}
-		}
+		widths[n-1] = max(0, m.tableBudget()-used)
 	}
 	return widths
 }
 
-// tableBudget is the cells a table row's values may use: the pane minus the
-// name prefix and its two-space separator.
+func fixedColumnW(name string) (w int, ok bool) {
+	switch {
+	case name == "level":
+		return 5, true
+	case timeColumn(name):
+		return 8, true
+	}
+	return 0, false
+}
+
+func timeColumn(name string) bool {
+	return name == "time" || name == "ts" || name == "timestamp"
+}
+
+func clockValue(v string) string {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t.Local().Format(clockLayout)
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05"} {
+		if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+			return t.Format(clockLayout)
+		}
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 || math.IsInf(f, 0) || math.IsNaN(f) || strings.ContainsAny(v, "eE") {
+		return v
+	}
+	whole, _, _ := strings.Cut(v, ".")
+	switch len(whole) {
+	case 10:
+		sec := math.Floor(f)
+		return time.Unix(int64(sec), int64((f-sec)*1e9)).Local().Format(clockLayout)
+	case 13:
+		return time.UnixMilli(int64(f)).Local().Format(clockLayout)
+	}
+	return v
+}
+
+type colSampler struct {
+	names  []string
+	seen   []int
+	widest []int
+	frozen []int
+	// Counted once per generation, so a rebuilt cache never double-counts a line.
+	gen int
+}
+
+func (s *colSampler) reset(names []string) {
+	s.gen++
+	s.names = slices.Clone(names)
+	s.seen = make([]int, len(names))
+	s.widest = make([]int, len(names))
+	s.frozen = make([]int, len(names))
+}
+
+// The last column takes the remainder, so it is never sampled.
+func (s *colSampler) observe(vals []string) {
+	for i, v := range vals {
+		if i >= len(s.names)-1 {
+			break
+		}
+		if _, fixed := fixedColumnW(s.names[i]); fixed || s.frozen[i] > 0 || v == "" {
+			continue
+		}
+		s.seen[i]++
+		s.widest[i] = max(s.widest[i], min(displayWidth(v), columnCapW))
+		if s.seen[i] >= sampleValues {
+			s.frozen[i] = s.provisional(i)
+		}
+	}
+}
+
+func (s *colSampler) provisional(i int) int {
+	return min(columnCapW, max(displayWidth(s.names[i])+columnMarkW, s.widest[i]))
+}
+
+func (s *colSampler) width(i int) int {
+	if s.frozen[i] > 0 {
+		return s.frozen[i]
+	}
+	return s.provisional(i)
+}
+
+func (m *tuiModel) syncColumnSample() []string {
+	names := m.columnNames()
+	if slices.Equal(m.colSample.names, names) {
+		return names
+	}
+	m.colSample.reset(names)
+	for i := range m.visibleRaw {
+		if m.visibleCells[i].evaluated() {
+			m.sampleAt(i)
+		}
+	}
+	return names
+}
+
+func (m *tuiModel) columnNames() []string {
+	cols := m.headerColumns()
+	if len(cols) == 0 {
+		for _, i := range m.scopeMembers() {
+			if len(m.targets[i].spec.Columns) > 0 {
+				cols = m.targets[i].spec.Columns
+				break
+			}
+		}
+	}
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = c.Name
+	}
+	return names
+}
+
+// The (+) mark takes the row's last cells, so a row is never cut under it.
 func (m *tuiModel) tableBudget() int {
 	w := m.paneWidth()
 	if w <= 0 {
 		return 0
 	}
-	return max(0, w-m.prefixW-2)
+	return max(0, w-m.prefixW-2-markW)
 }
 
 // columns returns the target's compiled column expressions, reparsing only

@@ -26,8 +26,14 @@ func TestStreamHoldsOnlyTargetOutput(t *testing.T) {
 		{kind: evOutput, target: "web", line: "ready"},
 	})
 
-	if want := []string{"listening", "ready"}; !reflect.DeepEqual(m.visibleRaw, want) {
-		t.Fatalf("stream = %q, want only the target's output %q", m.visibleRaw, want)
+	var got []string
+	for i, line := range m.visibleRaw {
+		if !m.visibleSep[i].isSep() {
+			got = append(got, line)
+		}
+	}
+	if want := []string{"listening", "ready"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stream = %q, want only the target's output %q", got, want)
 	}
 }
 

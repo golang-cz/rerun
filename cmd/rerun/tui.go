@@ -132,6 +132,8 @@ type tuiTarget struct {
 	exitCode  int
 	exitLabel string
 	lastStart time.Time
+	// runStarted is set by a real start, so an exit without one shows no duration.
+	runStarted bool
 	// backoffUntil is when a backoff-delayed start may run.
 	backoffUntil time.Time
 
@@ -173,6 +175,7 @@ type tuiModel struct {
 	// confirmQuit is the `q` modal: the frame keeps running behind it, and
 	// only enter quits.
 	confirmQuit bool
+	cfgErr      string
 
 	// paneFocus puts the arrow keys on the log pane: up/down scroll it,
 	// left/right pan its columns. False means the left list owns them.
@@ -242,11 +245,17 @@ type tuiModel struct {
 	visibleCells []cellCache
 	// cellEvals counts the lines evaluated for the table, which the tests read.
 	cellEvals int
+	colSample colSampler
 
 	// visibleSeq and visibleObj mirror visible: each line's sequence number, which
 	// keys its expansion, and whether it is a JSON object.
 	visibleSeq []int
 	visibleObj []bool
+	visibleSep []sepLine
+	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
+	cellBySeq map[int]*cellEntry
+	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.
+	blockCache map[blockKey][]dispRow
 	nextSeq    int
 	// expanded is the set of sequence numbers shown pretty-printed.
 	expanded map[int]bool
@@ -346,6 +355,9 @@ func newTUI(targets []Target) *tuiModel {
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
 		visibleCells: []cellCache{},
+		visibleSep:   []sepLine{},
+		cellBySeq:    map[int]*cellEntry{},
+		blockCache:   map[blockKey][]dispRow{},
 		expanded:     map[int]bool{},
 	}
 	m.vp = viewport.New(80, 20)
@@ -503,10 +515,21 @@ func (m *tuiModel) openTarget(i int) {
 // addLine appends one line to a target's stream and to the merged view when
 // that target streams into it.
 func (m *tuiModel) addLine(i int, line string) {
+	m.addRow(i, line, sepLine{})
+}
+
+func (m *tuiModel) addRule(i int, s sepLine) {
+	m.addRow(i, s.label, s)
+}
+
+func (m *tuiModel) addRow(i int, line string, sep sepLine) {
 	t := m.targets[i]
 	m.nextSeq++
-	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line)}
+	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
 	m.merged = appendCapped(m.merged, ml)
+	if len(m.cellBySeq) > 2*lineCap {
+		m.pruneCells()
+	}
 	if m.streamsTo(i) {
 		m.visible = appendCapped(m.visible, m.prefixed(ml))
 		m.visibleRaw = appendCapped(m.visibleRaw, line)
@@ -514,6 +537,7 @@ func (m *tuiModel) addLine(i int, line string) {
 		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
 		m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
 		m.visibleObj = appendCapped(m.visibleObj, ml.obj)
+		m.visibleSep = appendCapped(m.visibleSep, sep)
 		m.dispDirty = true
 		if m.filterActive() {
 			m.paneSelDirty = true
@@ -584,7 +608,19 @@ func (m *tuiModel) applyEvents(events []event) {
 
 func (m *tuiModel) applyEvent(ev event) {
 	switch ev.kind {
+	case evConfigErr:
+		m.showNotice(ev.line, true)
+		if ev.err != nil {
+			m.cfgErr = printable(ev.err.Error(), true)
+		}
+		return
+
+	case evConfigOK:
+		m.cfgErr = ""
+		return
+
 	case evReconcile:
+		m.cfgErr = ""
 		// Adopt the list first, so the banner lands in the new pane.
 		if ev.cfg != nil {
 			m.rebuildRows(ev.cfg)
@@ -635,9 +671,11 @@ func (m *tuiModel) applyEvent(ev event) {
 	case evStarted:
 		t.state = stateRunning
 		t.lastStart = ev.at
+		t.runStarted = true
 		t.exitCode = -1
 		t.exitLabel = ""
 		t.backoffUntil = time.Time{}
+		m.addRule(i, sepLine{label: fmt.Sprintf("▶ %s started %s", t.spec.Name, eventTime(ev, m.now).Format("15:04:05"))})
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
 		}
@@ -653,6 +691,8 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.exitCode = ev.code
 		t.exitLabel = exitLabel(ev.code, ev.err)
 		t.unseen = true
+		m.addRule(i, exitRule(t, ev, m.now))
+		t.runStarted = false
 
 	case evWatcherErr:
 		m.showNotice(fmt.Sprintf("rerun: %s: watcher error: %v", t.spec.Name, ev.err), true)
@@ -831,7 +871,8 @@ func (m *tuiModel) rebuildPaneSel() {
 	}
 	keep := m.lineKeeper()
 	for i := range m.visible {
-		if keep(m.visibleRaw[i]) {
+		// Run rules are not output, so a filter must not swallow the boundaries.
+		if m.visibleSep[i].isSep() || keep(m.visibleRaw[i]) {
 			m.paneSel = append(m.paneSel, i)
 		}
 	}
@@ -891,7 +932,12 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 		if m.rowInfo(row).sub >= 0 {
 			continue
 		}
-		if strings.Contains(strings.ToLower(m.visibleRaw[m.paneRowRaw(row)]), q) {
+		raw := m.paneRowRaw(row)
+		// Run rules are not output, so a search never lands on one.
+		if m.visibleSep[raw].isSep() {
+			continue
+		}
+		if strings.Contains(strings.ToLower(m.visibleRaw[raw]), q) {
 			m.searchMatches = append(m.searchMatches, row)
 		}
 	}
@@ -997,10 +1043,11 @@ type mergedLine struct {
 	text   string
 	seq    int
 	obj    bool
+	sep    sepLine
 }
 
 func (m *tuiModel) prefixed(line mergedLine) string {
-	if line.name == "" {
+	if line.name == "" || line.sep.isSep() {
 		return line.text
 	}
 	return padRight(line.name, m.prefixW) + "  " + line.text
@@ -1013,6 +1060,7 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleCells = m.visibleCells[:0]
 	m.visibleSeq = m.visibleSeq[:0]
 	m.visibleObj = m.visibleObj[:0]
+	m.visibleSep = m.visibleSep[:0]
 	for _, line := range m.merged {
 		if !m.streamsTo(line.target) {
 			continue
@@ -1023,10 +1071,22 @@ func (m *tuiModel) rebuildMerged() {
 		m.visibleCells = appendCapped(m.visibleCells, cellCache{})
 		m.visibleSeq = appendCapped(m.visibleSeq, line.seq)
 		m.visibleObj = appendCapped(m.visibleObj, line.obj)
+		m.visibleSep = appendCapped(m.visibleSep, line.sep)
 	}
 	m.mergedDirty = false
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
 	m.dispDirty = true
+}
+
+// Drops entries for lines that scrolled out, so streaming cannot grow the map.
+func (m *tuiModel) pruneCells() {
+	live := make(map[int]*cellEntry, len(m.merged))
+	for _, line := range m.merged {
+		if e, ok := m.cellBySeq[line.seq]; ok {
+			live[line.seq] = e
+		}
+	}
+	m.cellBySeq = live
 }
 
 // uptime renders a running target's age as a clock: 0:07, 2:03, 1:02:03, then 4d03h.

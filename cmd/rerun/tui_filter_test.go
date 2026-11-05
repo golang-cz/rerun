@@ -49,7 +49,7 @@ func TestSearchCounterIsIncremental(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.View()
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	if m.inputMode != inputSearch {
 		t.Fatalf("inputMode = %d, want inputSearch", m.inputMode)
 	}
@@ -74,7 +74,7 @@ func TestSearchRecomputesOnNewLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.View()
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "fresh")
 	press(m, "enter")
 	if got := bottomPaneLine(m); !strings.Contains(got, "0/0") {
@@ -95,7 +95,7 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.View()
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "enter")
 	if !m.follow {
@@ -169,7 +169,7 @@ func TestSearchEscCancelVsClear(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.View()
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "esc")
 	if m.inputMode != inputNone || m.search != "" || len(m.searchMatches) != 0 {
@@ -177,14 +177,14 @@ func TestSearchEscCancelVsClear(t *testing.T) {
 			m.inputMode, m.search, len(m.searchMatches))
 	}
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "enter")
 	if m.search != "line" || m.inputMode != inputNone {
 		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
 	}
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	if m.input != "line" {
 		t.Fatalf("reopening seeded input = %q, want line", m.input)
 	}
@@ -201,7 +201,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.View()
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "enter")
 	m.scrollUp(5)
@@ -213,7 +213,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 		t.Fatal("the marker was not recorded while a search was active")
 	}
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	if got := bottomPaneLine(m); !strings.Contains(got, "line") || strings.Contains(got, "new") {
 		t.Fatalf("the open bar did not outrank the marker: %q", got)
 	}
@@ -501,7 +501,7 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 	addLines(m, "api", "alpha")
 	m.View()
 
-	press(m, "/")
+	press(m, "ctrl+f")
 	typeString(m, "alpha")
 	press(m, "enter")
 	if got := bottomPaneLine(m); !strings.Contains(got, "1/2") {
