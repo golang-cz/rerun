@@ -54,6 +54,11 @@ func WithStdout(w io.Writer) Option {
 	return func(cmd *exec.Cmd) { cmd.Stdout = w }
 }
 
+// WithStdin feeds the child's stdin from r instead of the terminal.
+func WithStdin(r io.Reader) Option {
+	return func(cmd *exec.Cmd) { cmd.Stdin = r }
+}
+
 // WithStderr routes the child's stderr to w instead of os.Stderr.
 func WithStderr(w io.Writer) Option {
 	return func(cmd *exec.Cmd) { cmd.Stderr = w }

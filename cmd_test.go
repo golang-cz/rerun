@@ -257,3 +257,19 @@ func TestSpawnedChildSeesRerunMarker(t *testing.T) {
 		t.Fatalf("child RERUN = %q, want 1", got)
 	}
 }
+
+// TestWithStdinFeedsChild proves the option replaces the inherited terminal stdin.
+func TestWithStdinFeedsChild(t *testing.T) {
+	var out bytes.Buffer
+	cmd, err := StartCommand([]string{"read x; echo got:$x"}, time.Second,
+		WithStdin(strings.NewReader("hi\n")), WithStdout(&out))
+	if err != nil {
+		t.Fatalf("StartCommand: %v", err)
+	}
+	if err := cmd.WaitExit(context.Background()); err != nil {
+		t.Fatalf("WaitExit: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "got:hi" {
+		t.Fatalf("output = %q, want %q", got, "got:hi")
+	}
+}

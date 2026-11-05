@@ -51,6 +51,9 @@ func runTargets(targets []Target, out io.Writer, configPath string, signals <-ch
 	}
 	signals, stopSignals := signalChannel(signals)
 	defer stopSignals()
+	// Ad-hoc children inherit stdin, so they can leave the tty in raw mode.
+	tty := saveTTY()
+	defer tty.restore()
 
 	group := newTargetGroup(targets, newPlainSink(out), configPath)
 	group.start()
@@ -871,9 +874,17 @@ func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, err
 	if err != nil {
 		return nil, nil, err
 	}
+	// Keeps children from reading keys meant for the TUI or leaving the tty raw.
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		_ = pw.Close()
+		_ = pr.Close()
+		return nil, nil, err
+	}
+	defer devNull.Close()
 
 	cmd, err := rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace,
-		rerun.WithStdout(pw), rerun.WithStderr(pw))
+		rerun.WithStdin(devNull), rerun.WithStdout(pw), rerun.WithStderr(pw))
 	if err != nil {
 		_ = pw.Close()
 		_ = pr.Close()

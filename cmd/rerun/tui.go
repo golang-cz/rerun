@@ -28,6 +28,9 @@ const maxEventBatch = 256
 func runTUI(targets []Target, configPath string, signals <-chan os.Signal) int {
 	signals, stopSignals := signalChannel(signals)
 	defer stopSignals()
+	// Runs after shutdownTargets; bubbletea restores before children are killed.
+	tty := saveTTY()
+	defer tty.restore()
 
 	model := newTUI(targets)
 	model.group.configPath = configPath
