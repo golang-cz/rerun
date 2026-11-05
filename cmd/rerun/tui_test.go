@@ -280,7 +280,7 @@ func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
 	m.help, m.helpAll = true, true
 	view := m.View()
-	for _, want := range []string{"● run", "○ stopped", "✓ ok", "✗ exit", "· off", "✱ unseen"} {
+	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off", "✱ unseen"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help is missing the legend %q", want)
 		}
@@ -1088,7 +1088,7 @@ func TestRowStatusText(t *testing.T) {
 	if got := m.targets[0].glyph(); got != "✗" {
 		t.Errorf("glyph = %q, want ✗", got)
 	}
-	if got := stateColor(m.targets[0]); got != colorRed {
+	if got := stateColor(m.targets[0]); got != runRed {
 		t.Errorf("color = %q, want red", got)
 	}
 }
@@ -1379,10 +1379,10 @@ func TestRowStatusStartingFreezesUptime(t *testing.T) {
 		t.Fatalf("status = %q, want starting", got)
 	}
 	if got := row.glyph(); got != "●" {
-		t.Fatalf("glyph = %q, want the running glyph", got)
+		t.Fatalf("glyph = %q, want the starting glyph", got)
 	}
-	if got := stateColor(row); got != colorYellow {
-		t.Fatalf("color = %q, want the running color", got)
+	if got := stateColor(row); got != colorGray {
+		t.Fatalf("color = %q, want the starting color", got)
 	}
 }
 

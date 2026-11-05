@@ -267,6 +267,8 @@ type tuiModel struct {
 	visibleSeq []int
 	visibleObj []bool
 	visibleSep []sepLine
+	// visibleLvl mirrors visible with each line's JSON level.
+	visibleLvl []levelHit
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
 	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.
@@ -488,7 +490,7 @@ func (m *tuiModel) showHint(text string) {
 func (m *tuiModel) cancelBuild(i int) {
 	t := m.targets[i]
 	t.buildCancelled = t.building
-	m.setBuildState(i, false, false)
+	m.setBuildState(i, false, t.buildFailed)
 }
 
 func (m *tuiModel) stopTarget(i int) {
@@ -559,6 +561,9 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) {
 	t := m.targets[i]
 	m.nextSeq++
 	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
+	if ml.obj {
+		ml.lvl = jsonLevel(line)
+	}
 	m.merged = appendCapped(m.merged, ml)
 	if len(m.cellBySeq) > 2*lineCap {
 		m.pruneCells()
@@ -610,6 +615,7 @@ func (m *tuiModel) showLine(ml mergedLine) {
 	m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
 	m.visibleObj = appendCapped(m.visibleObj, ml.obj)
 	m.visibleSep = appendCapped(m.visibleSep, ml.sep)
+	m.visibleLvl = appendCapped(m.visibleLvl, ml.lvl)
 	m.dispDirty = true
 	if m.filterActive() {
 		m.paneSelDirty = true
@@ -751,6 +757,9 @@ func (m *tuiModel) applyEvent(ev event) {
 
 	case evBuildOK:
 		t.buildCancelled = false
+		if t.exitLabel == "build failed" {
+			t.exitLabel = ""
+		}
 		m.setBuildState(i, false, false)
 		m.addBuildRule(i, buildEndRule(t.spec.Name, true, ev.dur))
 
@@ -1191,6 +1200,8 @@ type mergedLine struct {
 	seq    int
 	obj    bool
 	sep    sepLine
+	// lvl is the JSON level behind the line, zero for plain text.
+	lvl levelHit
 }
 
 func (m *tuiModel) prefixed(line mergedLine) string {
@@ -1208,6 +1219,7 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleSeq = m.visibleSeq[:0]
 	m.visibleObj = m.visibleObj[:0]
 	m.visibleSep = m.visibleSep[:0]
+	m.visibleLvl = m.visibleLvl[:0]
 	if m.buildView >= 0 {
 		for _, line := range m.buildLog[m.targets[m.buildView].spec.Name] {
 			line.target = m.buildView
@@ -1264,6 +1276,9 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	if t.building {
 		return "⚙ " + shortDur(max(0, m.now.Sub(t.buildStart)))
 	}
+	if t.buildFailed {
+		return "✗ build"
+	}
 	if t.state.up() && t.health == healthUnhealthy {
 		return "unhealthy"
 	}
@@ -1298,18 +1313,18 @@ func (t *tuiTarget) healthMark() (glyph, color string) {
 		return "", ""
 	}
 	if t.state == stateExited {
-		return "■", colorRed
+		return "■", runRed
 	}
 	if !t.state.up() {
 		return "", ""
 	}
 	switch t.health {
 	case healthStarting:
-		return "◐", colorOrange
+		return "●", colorGray
 	case healthHealthy:
-		return "●", colorGreen
+		return "●", runGreen
 	case healthUnhealthy:
-		return "▲", colorRed
+		return "▲", runRed
 	}
 	return "", ""
 }
@@ -1319,7 +1334,9 @@ func (t *tuiTarget) glyph() string {
 		return g
 	}
 	switch t.state {
-	case stateRunning, stateStarting:
+	case stateRunning:
+		return "●"
+	case stateStarting:
 		return "●"
 	case stateExited, stateBackoff:
 		if t.exitCode == 0 {

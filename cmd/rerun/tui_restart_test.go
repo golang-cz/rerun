@@ -143,7 +143,7 @@ func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 				lines: []string{"boom \x1b[31mred", "second"}}})
 			m.View()
 
-			want := "✗ api build failed · select ⚙ build for output · a.go +1 · " + c.tail
+			want := "✗ api build failed · press b for output · a.go +1 · " + c.tail
 			raw := rawPane(m)
 			if len(raw) != 1 || raw[0] != want {
 				t.Fatalf("pane = %q, want only the rule %q", raw, want)
@@ -161,8 +161,8 @@ func TestListMarksPerState(t *testing.T) {
 	if tg.glyph() != "●" {
 		t.Fatalf("running without a probe: glyph = %q, want today's ●", tg.glyph())
 	}
-	if got := stateColor(tg); got != colorYellow {
-		t.Fatalf("running without a probe: color = %q, want today's yellow", got)
+	if got := stateColor(tg); got != runGreen {
+		t.Fatalf("running without a probe: color = %q, want %q", got, runGreen)
 	}
 
 	cases := []struct {
@@ -170,9 +170,9 @@ func TestListMarksPerState(t *testing.T) {
 		glyph  string
 		color  string
 	}{
-		{healthStarting, "◐", colorOrange},
-		{healthHealthy, "●", colorGreen},
-		{healthUnhealthy, "▲", colorRed},
+		{healthStarting, "●", colorGray},
+		{healthHealthy, "●", runGreen},
+		{healthUnhealthy, "▲", runRed},
 	}
 	for _, c := range cases {
 		tg.health = c.health
@@ -184,7 +184,7 @@ func TestListMarksPerState(t *testing.T) {
 	tg.health = healthHealthy
 	tg.state = stateExited
 	tg.exitCode = 1
-	if tg.glyph() != "■" || stateColor(tg) != colorRed {
+	if tg.glyph() != "■" || stateColor(tg) != runRed {
 		t.Errorf("exited with a probe: glyph %q color %q, want ■ red", tg.glyph(), stateColor(tg))
 	}
 }
@@ -202,9 +202,6 @@ func TestBuildingStatusCountsElapsed(t *testing.T) {
 	m.now = m.now.Add(2 * time.Second)
 	if got := m.status(tg); got != "⚙ 6s" {
 		t.Fatalf("after 2s status = %q, want ⚙ 6s", got)
-	}
-	if w := displayWidth("⚙"); w != 1 {
-		t.Fatalf("displayWidth(⚙) = %d, want 1 (the list column needs one cell)", w)
 	}
 }
 

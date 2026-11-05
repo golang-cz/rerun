@@ -34,127 +34,268 @@ func buildFail(name string, dur time.Duration) event {
 	return event{kind: evBuildFailed, target: name, dur: dur, err: errTest}
 }
 
-// listLabels is the list as rows: a header as ▾group, a build row as └ build:name, a target by name.
+// listLabels is the list as drawn: a header as ▾group, every target by name.
 func listLabels(m *tuiModel) []string {
 	var out []string
 	for _, r := range m.listRows() {
-		switch {
-		case r.header:
+		if r.header {
 			out = append(out, "▾"+groupLabel(r.schema))
-		case r.build:
-			out = append(out, "└ build:"+m.targets[r.target].spec.Name)
-		default:
-			out = append(out, m.targets[r.target].spec.Name)
+			continue
 		}
+		out = append(out, m.targets[r.target].spec.Name)
 	}
 	return out
 }
 
-// listLine is the left column's line that starts with prefix, trimmed.
-func listLine(m *tuiModel, prefix string) string {
-	for _, line := range leftPane(m) {
-		if strings.HasPrefix(line, prefix) {
-			return line
+// openBuildLog selects a target's row and presses b.
+func openBuildLog(m *tuiModel, name string) {
+	for i, r := range m.listRows() {
+		if !r.header && m.targets[r.target].spec.Name == name {
+			m.cursor = i
+			break
 		}
 	}
-	return ""
-}
-
-func selectBuildRow(m *tuiModel) {
-	m.cursor = m.targetRowIndex(0) + 1
 	m.liveSelect()
+	press(m, "b")
 }
 
-func TestBuildRowAppearsWhileBuilding(t *testing.T) {
+// leftLineRaw is one left-column line, unstripped of its trailing blanks.
+func leftLineRaw(m *tuiModel, y int) string {
+	m.View()
+	leftW, _ := m.layoutWidths()
+	return ansi.Strip(m.leftLine(y, leftW))
+}
+
+func TestBuildNeverChangesTheRowCount(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got, want := listLabels(m), []string{"api", "└ build:api", "web"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("rows = %q, want %q", got, want)
+	want := []string{"api", "web"}
+	steps := []event{buildStart("api", buildAt), buildOK("api", time.Second), buildStart("api", buildAt), buildFail("api", time.Second), buildStart("api", buildAt), {kind: evBuildCancelled, target: "api"}}
+	for _, ev := range steps {
+		m.applyEvents([]event{ev})
+		if got := listLabels(m); !reflect.DeepEqual(got, want) {
+			t.Fatalf("after %v, rows = %q, want %q", ev.kind, got, want)
+		}
 	}
+}
+
+func TestBuildStatusTextPerState(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
-	if line := listLine(m, "└ ⚙ build"); !strings.HasSuffix(strings.TrimRight(line, " "), "4s") {
-		t.Fatalf("build row = %q, want its 4s elapsed time", line)
-	}
-}
+	row := func() string { return strings.TrimRight(leftLineRaw(m, 0), " ") }
 
-func TestBuildRowIsIndentedUnderItsGroupedService(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("web", "backend"))
+	if got := row(); !strings.HasSuffix(got, "0:04") {
+		t.Fatalf("idle row = %q, want the uptime", got)
+	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
+	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "⚙ 4s") {
+		t.Fatalf("building row = %q, want the run mark and ⚙ 4s", got)
+	}
+	m.now = buildAt.Add(64 * time.Second)
+	if got := row(); !strings.HasSuffix(got, "⚙ 1m4s") {
+		t.Fatalf("long build row = %q, want ⚙ 1m4s", got)
+	}
+	m.applyEvents([]event{buildFail("api", time.Second)})
+	if got := row(); !strings.HasSuffix(got, "✗ build") {
+		t.Fatalf("failed row = %q, want ✗ build", got)
+	}
+}
+
+func TestBuildStatusKeepsColumnWidth(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
-	if got, want := listLabels(m), []string{"▾backend", "api", "└ build:api", "web"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("rows = %q, want %q", got, want)
-	}
-	if line := listLine(m, "  └ ⚙ build"); line == "" {
-		t.Fatalf("grouped build row is not indented under its service: %q", leftPane(m))
-	}
-}
-
-func TestBuildRowLeavesAfterSuccessOrCancel(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
-	if got := listLabels(m); !reflect.DeepEqual(got, []string{"api"}) {
-		t.Fatalf("after ok, rows = %q", got)
-	}
-
-	m.applyEvents([]event{buildStart("api", buildAt), {kind: evBuildCancelled, target: "api"}})
-	if got := listLabels(m); !reflect.DeepEqual(got, []string{"api"}) {
-		t.Fatalf("after cancel, rows = %q", got)
+	leftW, _ := m.layoutWidths()
+	statusCell := func(line string) string { return strings.TrimSpace(sliceCells(line, leftW-statusW, leftW)) }
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	m.now = buildAt.Add(64 * time.Second)
+	long := leftLineRaw(m, 0)
+	m.applyEvents([]event{buildFail("api", time.Second)})
+	failed := leftLineRaw(m, 0)
+	for want, line := range map[string]string{"⚙ 1m4s": long, "✗ build": failed} {
+		if displayWidth(line) != leftW || statusCell(line) != want {
+			t.Fatalf("row = %q, want status %q in the %d-cell column", line, want, leftW)
+		}
 	}
 }
 
-func TestFailedBuildKeepsRedRowUntilTheNextBuild(t *testing.T) {
+func TestBuildFailedStatusHoldsUntilNextSuccessOrStart(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
-	if got, want := listLabels(m), []string{"api", "└ build:api"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("after failure, rows = %q, want %q", got, want)
-	}
-	if line := listLine(m, "└ ✗ build"); line == "" {
-		t.Fatalf("failed build row missing its ✗ glyph: %q", leftPane(m))
-	}
-
-	m.applyEvents([]event{buildStart("api", buildAt.Add(time.Minute))})
-	if line := listLine(m, "└ ⚙ build"); line == "" {
-		t.Fatal("a new build did not replace the failed row with ⚙")
-	}
-	m.applyEvents([]event{buildOK("api", time.Second)})
-	if got := listLabels(m); !reflect.DeepEqual(got, []string{"api"}) {
-		t.Fatalf("after the retry passed, rows = %q", got)
-	}
-}
-
-func TestStopClearsTheBuildRow(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
+	tg := m.targets[0]
 	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
 	m.stopTarget(0)
-	if got := listLabels(m); !reflect.DeepEqual(got, []string{"api"}) {
-		t.Fatalf("after stop, rows = %q", got)
+	if got := m.status(tg); got != "✗ build" {
+		t.Fatalf("status after a stop = %q, want ✗ build until the next build", got)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	if got := m.status(tg); !strings.HasPrefix(got, "⚙") {
+		t.Fatalf("status on the next build start = %q, want ⚙", got)
+	}
+	m.applyEvents([]event{buildFail("api", time.Second), buildStart("api", buildAt), buildOK("api", time.Second)})
+	if got := m.status(tg); strings.Contains(got, "build") {
+		t.Fatalf("status after a successful build = %q, want the uptime", got)
 	}
 }
 
-func TestSelectingBuildRowScopesToBuildLinesOnly(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{
-		{kind: evStarted, target: "api", at: buildAt},
-		{kind: evOutput, target: "api", line: "server up"},
-		buildStart("api", buildAt.Add(time.Second)),
-		buildOut("api", buildAt.Add(time.Second), "compiling"),
-		buildOut("api", buildAt.Add(time.Second), "linking"),
-		{kind: evOutput, target: "web", line: "web line"},
-	})
-	m.View()
-	m.cursor = 0
-	press(m, "down")
+func TestRunColorsPerState(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.now = buildAt
+	tg := m.targets[0]
+	tg.state = stateRunning
+	cases := []struct {
+		name  string
+		setup func()
+		glyph string
+		color string
+	}{
+		{"running", func() {}, "●", runGreen},
+		{"starting", func() { tg.state = stateStarting }, "●", colorGray},
+		{"healthy", func() { tg.state = stateRunning; tg.health = healthHealthy }, "●", runGreen},
+		{"starting probe", func() { tg.health = healthStarting }, "●", colorGray},
+		{"unhealthy", func() { tg.health = healthUnhealthy }, "▲", runRed},
+	}
+	for _, c := range cases {
+		tg.health = ""
+		tg.state = stateRunning
+		c.setup()
+		if tg.glyph() != c.glyph || stateColor(tg) != c.color {
+			t.Errorf("%s: glyph %q color %q, want %q %q", c.name, tg.glyph(), stateColor(tg), c.glyph, c.color)
+		}
+	}
+	tg.health, tg.state, tg.building = "", stateRunning, true
+	if got := statusColor(tg); got != runYellow {
+		t.Fatalf("building status color = %q, want %q", got, runYellow)
+	}
+	tg.building, tg.buildFailed = false, true
+	if got := statusColor(tg); got != runRed {
+		t.Fatalf("failed status color = %q, want %q", got, runRed)
+	}
+}
 
-	want := []string{"⚙ api build started " + buildAt.Add(time.Second).Format("15:04:05"), "compiling", "linking"}
-	if got := rawPane(m); !reflect.DeepEqual(got, want) {
-		t.Fatalf("pane = %q, want the build log %q", got, want)
+func TestClickingTheStatusOpensTheBuildLog(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.View()
+	leftW, _ := m.layoutWidths()
+	m.Update(mouse(leftW-2, 0, false))
+
+	if m.buildView != 0 {
+		t.Fatalf("buildView = %d after the status click, want api", m.buildView)
+	}
+	if got := rawPane(m); got[len(got)-1] != "compiling" {
+		t.Fatalf("pane = %q, want the build log", got)
+	}
+	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (building)") {
+		t.Fatalf("title = %q", title)
+	}
+}
+
+func TestBKeyOpensAndClosesTheBuildLog(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}, {kind: evOutput, target: "api", line: "server up"}})
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+
+	press(m, "b")
+	if m.buildView != 0 || m.solo != 0 {
+		t.Fatalf("b left buildView=%d solo=%d, want the api build log", m.buildView, m.solo)
+	}
+	press(m, "b")
+	if m.buildView != -1 || m.solo != 0 {
+		t.Fatalf("second b left buildView=%d, want the service log", m.buildView)
+	}
+	press(m, "b")
+	press(m, "esc")
+	if m.buildView != -1 || m.solo != 0 {
+		t.Fatalf("esc left buildView=%d solo=%d, want the api service log", m.buildView, m.solo)
+	}
+	for _, line := range rawPane(m) {
+		if line == "compiling" {
+			t.Fatalf("service log holds build output: %q", rawPane(m))
+		}
+	}
+}
+
+func TestMovingTheCursorLeavesTheBuildLog(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	openBuildLog(m, "api")
+	press(m, "down")
+	if m.buildView != -1 || m.solo != 1 {
+		t.Fatalf("moving to web left buildView=%d solo=%d", m.buildView, m.solo)
+	}
+}
+
+func TestBuildLogTitleNamesTheState(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	title := func() string { return ansi.Strip(m.titleLine(80)) }
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	openBuildLog(m, "api")
+	if got := title(); !strings.Contains(got, "api · build log (building)") {
+		t.Fatalf("building title = %q", got)
+	}
+	m.applyEvents([]event{buildFail("api", time.Second)})
+	if got := title(); !strings.Contains(got, "api · build log (failed)") {
+		t.Fatalf("failed title = %q", got)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	if got := title(); !strings.Contains(got, "api · build log (done)") {
+		t.Fatalf("done title = %q", got)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	m.stopTarget(0)
+	if got := title(); !strings.Contains(got, "api · build log (cancelled)") {
+		t.Fatalf("cancelled title = %q", got)
+	}
+}
+
+func TestBuildLogStaysUntilTheCursorMoves(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	openBuildLog(m, "api")
+	m.applyEvents([]event{buildOK("api", time.Second)})
+
+	if r, _ := m.cursorRow(); r.header || m.targets[r.target].spec.Name != "api" {
+		t.Fatalf("cursor on %+v after success, want the api row", r)
+	}
+	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (done)") {
+		t.Fatalf("title = %q, want the finished build log", title)
+	}
+	started := "⚙ api build started " + buildAt.Format("15:04:05")
+	if got := rawPane(m); len(got) != 3 || got[0] != started || got[1] != "compiling" || got[2] != "✓ api build ok · 1s" {
+		t.Fatalf("pane after success = %q, want the build log kept", got)
+	}
+	press(m, "down")
+	if m.buildView != -1 {
+		t.Fatalf("buildView = %d after the cursor moved, want -1", m.buildView)
+	}
+}
+
+func TestStoppedBuildLogSaysCancelled(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	openBuildLog(m, "api")
+	m.stopTarget(0)
+
+	if r, _ := m.cursorRow(); r.header || m.targets[r.target].spec.Name != "api" {
+		t.Fatalf("cursor on %+v after stop, want the api row", r)
+	}
+	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (cancelled)") {
+		t.Fatalf("title = %q, want it to say cancelled", title)
+	}
+}
+
+func TestFailedRuleHintPointsAtB(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
+	if got := rawPane(m); len(got) != 1 || !strings.Contains(got[0], "press b for output") {
+		t.Fatalf("service pane = %q, want the failure rule with the b hint", got)
 	}
 }
 
 func TestBuildOutputStreamsLiveIntoItsView(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	selectBuildRow(m)
+	openBuildLog(m, "api")
 
 	m.applyEvents([]event{buildOut("api", buildAt, "step \x1b[31m1")})
 	if got := rawPane(m); got[len(got)-1] != "step [31m1" {
@@ -195,10 +336,7 @@ func TestFailedBuildKeepsRuleInBothViews(t *testing.T) {
 		buildOut("api", buildAt, "boom"),
 		buildFail("api", 6*time.Second),
 	})
-	if got := rawPane(m); len(got) != 1 || !strings.HasPrefix(got[0], "✗ api build failed") {
-		t.Fatalf("service pane = %q, want only the failure rule", got)
-	}
-	selectBuildRow(m)
+	openBuildLog(m, "api")
 	if got := rawPane(m); got[len(got)-1] != "✗ api build failed · 6s" || got[len(got)-2] != "boom" {
 		t.Fatalf("build view = %q, want the boom line then the failure rule", got)
 	}
@@ -213,7 +351,7 @@ func TestNewBuildStartsWithRuleAndKeepsHistory(t *testing.T) {
 		buildOut("api", first, "old line"),
 		buildFail("api", time.Second),
 	})
-	selectBuildRow(m)
+	openBuildLog(m, "api")
 	m.applyEvents([]event{buildStart("api", second, "/x/a.go")})
 
 	got := rawPane(m)
@@ -237,7 +375,7 @@ func TestNewBuildStartsWithRuleAndKeepsHistory(t *testing.T) {
 func TestLinesFromAReplacedBuildAreDropped(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildStart("api", buildAt.Add(time.Minute))})
-	selectBuildRow(m)
+	openBuildLog(m, "api")
 	m.applyEvents([]event{buildOut("api", buildAt, "stale")})
 	for _, line := range rawPane(m) {
 		if line == "stale" {
@@ -246,24 +384,28 @@ func TestLinesFromAReplacedBuildAreDropped(t *testing.T) {
 	}
 }
 
-func TestEscFromBuildRowGoesToItsService(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("web", "backend"))
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	press(m, "down", "down")
-	if r, _ := m.cursorRow(); !r.build {
-		t.Fatalf("cursor row = %+v, want the build row", r)
+func TestLongBuildLeavesServiceLinesIntact(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{{kind: evOutput, target: "api", line: "server up"}})
+	evs := []event{buildStart("api", buildAt)}
+	for i := 0; i < 5000; i++ {
+		evs = append(evs, buildOut("api", buildAt, "step"))
 	}
-	press(m, "esc")
-	r, _ := m.cursorRow()
-	if r.build || r.header || m.targets[r.target].spec.Name != "api" {
-		t.Fatalf("esc left the cursor on %+v, want the api row", r)
+	m.applyEvents(evs)
+
+	m.cursor = 0
+	m.liveSelect()
+	m.applyEvents([]event{{kind: evOutput, target: "api", line: "still serving"}})
+	got := rawPane(m)
+	if len(got) != 2 || got[0] != "server up" || got[1] != "still serving" {
+		t.Fatalf("service pane after a 5000-line build holds %d lines, first %q", len(got), got[0])
 	}
-	if m.buildView != -1 || m.solo != 0 {
-		t.Fatalf("esc scope buildView=%d solo=%d, want -1 and api", m.buildView, m.solo)
+	if n := len(m.buildLog["api"]); n != buildLogCap {
+		t.Fatalf("build log holds %d lines, want the cap %d", n, buildLogCap)
 	}
 }
 
-func TestGroupJumpsSkipBuildRows(t *testing.T) {
+func TestGroupJumpsSkipOverBuildingServices(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("web", "backend"), schemaTarget("worker", "ops"))
 	m.applyEvents([]event{buildStart("api", buildAt)})
 	m.cursor = 0
@@ -274,26 +416,6 @@ func TestGroupJumpsSkipBuildRows(t *testing.T) {
 	press(m, "[")
 	if r, _ := m.cursorRow(); !r.header || r.schema != "backend" {
 		t.Fatalf("[ landed on %+v, want the backend header", r)
-	}
-}
-
-func TestCursorFollowsItsRowWhenABuildRowAppears(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.cursor = 1
-	m.liveSelect()
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	if r, _ := m.cursorRow(); r.build || m.targets[r.target].spec.Name != "web" {
-		t.Fatalf("cursor moved to %+v, want web", r)
-	}
-}
-
-func TestBuildRowCursorFallsBackToServiceWhenItVanishes(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	selectBuildRow(m)
-	m.applyEvents([]event{buildOK("api", time.Second)})
-	if r, _ := m.cursorRow(); r.build || m.targets[r.target].spec.Name != "api" {
-		t.Fatalf("cursor on %+v after the row vanished, want api", r)
 	}
 }
 
@@ -343,65 +465,14 @@ func TestBuildStreamsItsOutputLiveWithItsStart(t *testing.T) {
 	}
 }
 
-func TestLongBuildLeavesServiceLinesIntact(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{{kind: evOutput, target: "api", line: "server up"}})
-	evs := []event{buildStart("api", buildAt)}
-	for i := 0; i < 5000; i++ {
-		evs = append(evs, buildOut("api", buildAt, "step"))
-	}
-	m.applyEvents(evs)
-
-	m.cursor = 0
-	m.liveSelect()
-	m.applyEvents([]event{{kind: evOutput, target: "api", line: "still serving"}})
-	got := rawPane(m)
-	if len(got) != 2 || got[0] != "server up" || got[1] != "still serving" {
-		t.Fatalf("service pane after a 5000-line build holds %d lines, first %q", len(got), got[0])
-	}
-	if n := len(m.buildLog["api"]); n != buildLogCap {
-		t.Fatalf("build log holds %d lines, want the cap %d", n, buildLogCap)
-	}
-}
-
-func TestBuildLogStaysUntilTheCursorMoves(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	selectBuildRow(m)
-	m.applyEvents([]event{buildOK("api", time.Second)})
-
-	if r, _ := m.cursorRow(); r.build || m.targets[r.target].spec.Name != "api" {
-		t.Fatalf("cursor on %+v after success, want the api row", r)
-	}
-	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (done)") {
-		t.Fatalf("title = %q, want it to name the finished build log", title)
-	}
-	started := "⚙ api build started " + buildAt.Format("15:04:05")
-	if got := rawPane(m); len(got) != 3 || got[0] != started || got[1] != "compiling" || got[2] != "✓ api build ok · 1s" {
-		t.Fatalf("pane after success = %q, want the build log kept", got)
-	}
-
-	press(m, "down")
-	if m.buildView != -1 {
-		t.Fatalf("buildView = %d after the cursor moved, want -1", m.buildView)
-	}
-	for _, line := range rawPane(m) {
-		if line == "compiling" {
-			t.Fatalf("build log still shows after the cursor moved: %q", rawPane(m))
-		}
-	}
-}
-
-func TestStoppedBuildLogSaysCancelled(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	selectBuildRow(m)
-	m.stopTarget(0)
-
-	if r, _ := m.cursorRow(); r.build {
-		t.Fatalf("cursor stayed on the build row after stop: %+v", r)
-	}
-	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (cancelled)") {
-		t.Fatalf("title = %q, want it to say cancelled", title)
+func TestStartingAndStoppedDifferByShape(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	tg := m.targets[0]
+	tg.state = stateStarting
+	starting := tg.glyph()
+	tg.state = stateStopped
+	stopped := tg.glyph()
+	if starting != "●" || stopped != "○" {
+		t.Fatalf("starting draws %q and stopped %q, want a filled ● and a hollow ○", starting, stopped)
 	}
 }

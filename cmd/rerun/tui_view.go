@@ -13,10 +13,14 @@ import (
 // Herdr-style palette: the color leads, the glyph shape backs it up.
 const (
 	colorYellow = "3"
-	colorOrange = "208"
 	colorGreen  = "2"
 	colorRed    = "1"
 	colorGray   = "8"
+
+	// Run-state colors, apart from the rule colors, so healthy and starting read differently.
+	runGreen  = "46"
+	runYellow = "220"
+	runRed    = "196"
 )
 
 // Left column geometry: glyph, space, name, a two-cell marker, status —
@@ -388,9 +392,6 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	if r.header {
 		return m.schemaLine(m.layout.offset+y, r, leftW)
 	}
-	if r.build {
-		return m.buildLine(m.layout.offset+y, r, leftW)
-	}
 	return m.targetLine(m.layout.offset+y, r, leftW)
 }
 
@@ -502,35 +503,13 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		seg{text: " "},
 		seg{text: padRight(t.spec.Name, name), link: t.spec.URL},
 		seg{text: marker(m.targetDirty(t), t.unseen)},
-		seg{text: padRight(m.status(t), statusW), color: statusColor(t)},
+		seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)},
 	)
 	style := m.rowStyle(row, r)
 	if t.flashing(m.now) {
 		style = style.Reverse(true)
 	}
 	return renderSegs(segs, style, leftW)
-}
-
-func (m *tuiModel) buildLine(row int, r listRow, leftW int) string {
-	t := m.targets[r.target]
-	name := nameWidth(leftW)
-	var segs []seg
-	if r.indent {
-		segs = append(segs, seg{text: "  "})
-		name = max(0, name-2)
-	}
-	glyph, color, status := "⚙", colorYellow, shortDur(max(0, m.now.Sub(t.buildStart)))
-	if t.buildFailed {
-		glyph, color, status = "✗", colorRed, ""
-	}
-	segs = append(segs,
-		seg{text: "└ "},
-		seg{text: glyph + " ", color: color},
-		seg{text: padRight("build", max(0, name-2))},
-		seg{text: "  "},
-		seg{text: padRight(status, statusW), color: color},
-	)
-	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }
 
 // opColor ties a feed file glyph to the row palette: a created file is
@@ -570,21 +549,31 @@ func stateColor(t *tuiTarget) string {
 		return c
 	}
 	switch t.state {
-	case stateRunning, stateStarting:
-		return colorYellow
+	case stateRunning:
+		return runGreen
+	case stateStarting:
+		return colorGray
 	case stateExited, stateBackoff:
 		if t.exitCode == 0 {
-			return colorGreen
+			return runGreen
 		}
-		return colorRed
+		return runRed
 	}
 	return colorGray
+}
+
+// statusHit reports whether a list click lands in the status column.
+func (m *tuiModel) statusHit(x int) bool {
+	return x >= m.layout.leftW-statusW && x < m.layout.leftW
 }
 
 // statusColor keeps the uptime quiet and lets a red or green exit speak.
 func statusColor(t *tuiTarget) string {
 	if t.building {
-		return colorYellow
+		return runYellow
+	}
+	if t.buildFailed {
+		return runRed
 	}
 	if t.state == stateExited {
 		return stateColor(t)
@@ -795,9 +784,7 @@ func (m *tuiModel) copyHintActive() bool {
 // glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
 	var segs []seg
-	if r, ok := m.cursorRow(); ok && r.build {
-		segs = append(segs, seg{text: m.buildTitle(m.targets[r.target])})
-	} else if i := m.cursorTarget(); i >= 0 && i == m.buildView {
+	if i := m.cursorTarget(); i >= 0 && i == m.buildView {
 		segs = append(segs, seg{text: m.buildLogTitle(m.targets[i])})
 	} else if i >= 0 {
 		t := m.targets[i]
@@ -813,17 +800,6 @@ func (m *tuiModel) titleLine(w int) string {
 		}
 	}
 	return renderSegs(segs, m.titleStyle(), w)
-}
-
-func (m *tuiModel) buildTitle(t *tuiTarget) string {
-	state := "✗ failed"
-	if t.building {
-		state = "⚙ " + shortDur(max(0, m.now.Sub(t.buildStart)))
-	}
-	if t.spec.Build == "" {
-		return fmt.Sprintf("%s build · %s", t.spec.Name, state)
-	}
-	return fmt.Sprintf("%s build · %s · %s", t.spec.Name, state, t.spec.Build)
 }
 
 // buildLogTitle names the build log the pane still shows after the cursor's row left it.
@@ -857,7 +833,7 @@ func (m *tuiModel) syncContent() {
 		m.vpDirty = true
 	}
 	if m.vpDirty {
-		lines := m.sepLines(m.tableLines(m.paneLines()))
+		lines := m.paintLevels(m.sepLines(m.tableLines(m.paneLines())))
 		m.paneCol = m.clampPaneCol(lines)
 		content := strings.Join(m.padForPin(m.markLines(m.panLines(lines))), "\n")
 		if len(lines) == 0 {
@@ -956,7 +932,7 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows, selecting each; └ build shows its log; enter focuses the pane"},
+	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
 	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (group row: its targets)"},
@@ -964,7 +940,7 @@ var helpKeys = [][2]string{
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (group row: its targets)"},
-	{"esc [ ]", "list: row to its group, group to all · [ ] ⇧↑⇧↓ jump groups"},
+	{"esc b [ ]", "list: esc backs out · b service's build log · [ ] ⇧↑⇧↓ jump groups"},
 	{"o G", "open the target's url / resume the live tail"},
 	{"p", "browse the scrollback (again or G goes live)"},
 	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
@@ -982,7 +958,7 @@ var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
 	"click a group scopes to its targets; click a batch lists its files",
 	"drag copies a range; shift-drag uses the terminal's selection",
-	"⚙ building  ◐ starting  ● run  ▲ unhealthy  ■ failed",
+	"⚙ building  ● starting (gray)  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off  ✱ unseen",
 }
 

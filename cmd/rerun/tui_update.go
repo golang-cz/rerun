@@ -336,6 +336,11 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openTarget(i)
 		}
 
+	case "b":
+		if r, ok := m.cursorRow(); ok && !r.header {
+			m.toggleBuildLog(r.target)
+		}
+
 	case "p":
 		m.toggleFreeze()
 
@@ -590,9 +595,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.cursor = row
 	m.paneFocus = false
 	m.liveSelect()
+	// The status cell opens the build log, and its clicks never start or stop the row.
+	if !r.header && m.statusHit(msg.X) && m.targets[r.target].buildShown() {
+		m.setScope(r.target, "", r.target)
+		return m, nil
+	}
 	// The second click of a pair starts or stops the row, keeping the selection.
 	double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
-	if double && !r.build {
+	if double {
 		m.toggleRow(r)
 		m.lastClick = -1 // a fast third click must not read as another double
 	} else {

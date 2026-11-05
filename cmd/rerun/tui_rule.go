@@ -101,7 +101,7 @@ func shortDur(d time.Duration) string {
 // buildFailedRule says whether the old run survived the failed build.
 func buildFailedRule(t *tuiTarget, ev event) sepLine {
 	// The hint sits near the title, so it survives a pane too narrow for the whole rule.
-	parts := []string{fmt.Sprintf("✗ %s build failed", t.spec.Name), "select ⚙ build for output"}
+	parts := []string{fmt.Sprintf("✗ %s build failed", t.spec.Name), "press b for output"}
 	if f := filesSummary(ev.files); f != "" {
 		parts = append(parts, f)
 	}

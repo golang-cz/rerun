@@ -38,7 +38,7 @@ func TestFailedFirstBuildShowsExitedNotRunning(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evBuildFailed, target: "api", err: errTest}})
 	tg := m.targets[0]
-	if tg.state != stateExited || m.status(tg) != "build failed" || tg.glyph() != "✗" {
+	if tg.state != stateExited || m.status(tg) != "✗ build" || tg.glyph() != "✗" {
 		t.Fatalf("state=%v status=%q glyph=%q, want exited build failed ✗", tg.state, m.status(tg), tg.glyph())
 	}
 	if rows := rawPane(m); len(rows) == 0 || !strings.Contains(rows[0], "nothing running") {
@@ -52,14 +52,14 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
-// A target with a health probe shows ◐ from its real evStarted, before any probe reports.
+// A target with a health probe shows ● from its real evStarted, before any probe reports.
 func TestStartedRunWithProbeShowsStarting(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.targets[0].spec.Health = "http://localhost:1/health"
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt}})
 	tg := m.targets[0]
-	if tg.health != healthStarting || tg.glyph() != "◐" {
-		t.Fatalf("health=%q glyph=%q, want starting ◐", tg.health, tg.glyph())
+	if tg.health != healthStarting || tg.glyph() != "●" {
+		t.Fatalf("health=%q glyph=%q, want starting ●", tg.health, tg.glyph())
 	}
 	m.targets[0].spec.Health = ""
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt.Add(time.Second)}})
