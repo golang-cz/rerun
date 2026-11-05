@@ -127,12 +127,12 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "missing cmd",
 			content: "api:\n  desc: x\n",
-			wantSub: []string{"api", "cmd is required"},
+			wantSub: []string{"api", "run is required"},
 		},
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, cmd, url, columns, group, open, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, url, columns, group, open, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown schema",
@@ -217,7 +217,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "whitespace cmd",
 			content: "api:\n  cmd: \"  \"\n",
-			wantSub: []string{`target "api"`, "cmd is required"},
+			wantSub: []string{`target "api"`, "run is required"},
 		},
 		{
 			name:    "column without expression",
@@ -337,7 +337,7 @@ func TestParseConfigErrorPositions(t *testing.T) {
 		{
 			name:    "cmd is required points at the target",
 			content: "api:\n  desc: x\n",
-			head:    `:1:1: target "api": cmd is required`,
+			head:    `:1:1: target "api": run is required`,
 			excerpt: []string{"  1 | api:", "    | ^^^"},
 		},
 	}
@@ -713,7 +713,10 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"desc":     "x",
 		"on":       "src",
 		"except":   "vendor",
+		"run":      "echo hi",
 		"cmd":      "echo hi",
+		"build":    "make",
+		"health":   "tcp://127.0.0.1:1",
 		"url":      "http://localhost:1",
 		"columns":  `["a {.b}"]`,
 		"group":    "backend",
@@ -732,14 +735,18 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		}
 		path := filepath.Join(t.TempDir(), ConfigFileName)
 		line := "  " + field + ": " + value
+		base := "  cmd: echo hi\n"
+		if field == "run" {
+			base = ""
+		}
 		if field == "cmd" {
-			line = "" // the base already writes cmd once
+			line = ""
 		}
 		prefix := ""
 		if field == "group" {
 			prefix = "groups:\n  backend:\n    columns: [\"a {.b}\"]\n"
 		}
-		writeFile(t, path, prefix+"api:\n  cmd: echo hi\n"+line+"\n")
+		writeFile(t, path, prefix+"api:\n"+base+line+"\n")
 
 		if _, err := ParseConfig(path); err != nil {
 			t.Errorf("field %q: ParseConfig = %v, want nil", field, err)
@@ -922,5 +929,27 @@ func TestParseConfigGroupKeyReadsSchemasBlock(t *testing.T) {
 	_, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
+	}
+}
+
+func TestParseConfigRunBuildHealthAndAliases(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "a:\n  run: go run .\n  build: go build ./...\n  health: http://localhost:1/up\nb:\n  cmd: echo old\n")
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := cfg.Find("a")
+	if a.Cmd != "go run ." || a.Build != "go build ./..." || a.Health != "http://localhost:1/up" {
+		t.Errorf("a = %+v", a)
+	}
+	if b, _ := cfg.Find("b"); b.Cmd != "echo old" || b.Build != "" {
+		t.Errorf("b = %+v", b)
+	}
+
+	writeFile(t, path, "a:\n  run: x\n  cmd: y\n")
+	_, err = ParseConfig(path)
+	if err == nil || !strings.Contains(err.Error(), `"run"`) || !strings.Contains(err.Error(), `"cmd"`) {
+		t.Errorf("both set: err = %v", err)
 	}
 }

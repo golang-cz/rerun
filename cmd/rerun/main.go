@@ -34,6 +34,9 @@ Everything after -- is the command, passed through verbatim.
 rerun.yml groups: a top-level groups: block shares columns, and a target names one
   with group: (older spelling: schemas and schema; use one spelling per file)
 
+rerun.yml target keys: run (older spelling: cmd), build, health, desc, on, except, url,
+  columns, group, open, selected, start, delay, cooldown, grace
+
 Flags:
   -delay <dur>      batch window before restarting a command (default 200ms)
   -cooldown <dur>   minimum time between restarts (default 0s)

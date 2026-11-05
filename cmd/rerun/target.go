@@ -431,6 +431,24 @@ type targetRunner struct {
 	// exited is closed when the current generation is reaped. Only the run
 	// goroutine reads it, so no lock is needed.
 	exited <-chan struct{}
+
+	// build is the build in flight, nil when none. Run goroutine only.
+	build *buildJob
+	// meta is what the next evStarted reports. Run goroutine only.
+	meta startMeta
+	// probes counts the health goroutines, so run can wait them out on return.
+	probes sync.WaitGroup
+	// healthCancel and healthDone belong to the live run's probe. Run goroutine only.
+	healthCancel func()
+	healthDone   chan struct{}
+}
+
+// startMeta is what a spawn reports about why it happened.
+type startMeta struct {
+	files    []string
+	buildDur time.Duration
+	prevUp   time.Duration
+	restart  bool
 }
 
 func newTargetRunner(target Target, s sink) *targetRunner {
@@ -525,6 +543,7 @@ func (r *targetRunner) startWatch(watcher *rerun.Watcher) <-chan rerun.ChangeSet
 func (r *targetRunner) run(ctx context.Context) error {
 	defer close(r.finished)
 	defer close(r.watchDone)
+	defer r.probes.Wait()
 
 	watcher, changes, err := r.rewatch()
 	if err != nil {
@@ -566,7 +585,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 			}
 			// A target switched to auto that never ran starts now.
 			if r.target.Start == startAuto && !wasAuto && !r.userStopped() && r.currentCmd() == nil {
-				r.spawn(ctx)
+				r.launch(ctx)
 			}
 			return
 		}
@@ -579,7 +598,9 @@ func (r *targetRunner) run(ctx context.Context) error {
 	// first generation back, for a change and for r.
 	if ctx.Err() == nil {
 		if !r.userStopped() && r.target.Start == startAuto {
-			if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
+			if r.target.Build != "" {
+				r.startBuild(ctx, nil)
+			} else if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 				return err
 			}
 		}
@@ -595,16 +616,22 @@ func (r *targetRunner) run(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
+			r.cancelBuild()
 			r.killCurrent(context.Background())
 			return nil
 
 		case <-r.retire:
 			// A target dropped from the config stops for good.
+			r.cancelBuild()
 			r.killCurrent(context.Background())
 			return nil
 
+		case res := <-r.buildResult():
+			r.finishBuild(ctx, res)
+
 		case changeSet, ok := <-changes:
 			if !ok {
+				r.cancelBuild()
 				r.killCurrent(context.Background())
 				return nil
 			}
@@ -646,6 +673,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 	case ctrlStop:
 		atomic.StoreInt32(&r.stopped, 1)
 		r.forgetCrashLoop()
+		r.cancelBuild()
 		r.killCurrent(ctx)
 
 	case ctrlStart:
@@ -654,7 +682,10 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		if cmd := r.currentCmd(); cmd != nil && !cmd.Exited() {
 			return
 		}
-		r.spawn(ctx)
+		if r.build != nil {
+			return
+		}
+		r.launch(ctx)
 
 	case ctrlReboot:
 		atomic.StoreInt32(&r.stopped, 0)
@@ -699,9 +730,16 @@ func (r *targetRunner) drainSpecs() {
 
 // restart bounces the current generation, respecting the cooldown.
 func (r *targetRunner) restart(ctx context.Context) {
+	if r.target.Build != "" {
+		r.startBuild(ctx, nil)
+		return
+	}
+	r.cancelBuild()
+	r.noteReplace(nil)
 	r.killCurrent(ctx)
 	r.waitCooldown(ctx)
 	if ctx.Err() != nil || r.retired() {
+		r.meta = startMeta{}
 		return
 	}
 	r.spawn(ctx)
@@ -720,10 +758,18 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 		return
 	}
 
+	if r.target.Build != "" {
+		r.reportChange(changeSet, true)
+		r.startBuild(ctx, changeSet.Files)
+		return
+	}
+
+	r.noteReplace(changeSet.Files)
 	r.killCurrent(ctx)
 
 	r.waitCooldown(ctx)
 	if ctx.Err() != nil || r.retired() {
+		r.meta = startMeta{}
 		return
 	}
 
@@ -809,6 +855,7 @@ func (r *targetRunner) reportChange(changeSet rerun.ChangeSet, restarts bool) {
 // run down.
 func (r *targetRunner) spawn(ctx context.Context) {
 	if !r.waitBackoff(ctx) {
+		r.meta = startMeta{}
 		return
 	}
 	if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
@@ -821,6 +868,7 @@ func (r *targetRunner) start(ctx context.Context) error {
 	var slot *startSlot
 	if r.gate != nil {
 		if r.stash != nil {
+			r.meta = startMeta{}
 			return errStartAborted // the run loop drains the stash first
 		}
 		release, abort, ok := r.gate.acquire(ctx, r.retire, r.ctrlCh, int(r.order.Load()), func() {
@@ -831,6 +879,7 @@ func (r *targetRunner) start(ctx context.Context) error {
 			if abort != nil {
 				r.stash = abort
 			}
+			r.meta = startMeta{}
 			return errStartAborted
 		}
 		slot = newStartSlot(release)
@@ -851,20 +900,28 @@ func (r *targetRunner) start(ctx context.Context) error {
 		if slot != nil {
 			slot.free()
 		}
+		r.meta = startMeta{}
 		return err
 	}
-
-	exited := r.watchGeneration(cmd, pw, slot)
 
 	r.mu.Lock()
 	r.cmd = cmd
 	r.lastStart = time.Now()
 	started := r.lastStart
 	r.mu.Unlock()
+
+	beginHealth, stopHealth := r.startHealth(ctx, started)
+	exited := r.watchGeneration(cmd, pw, slot, stopHealth)
 	r.selfExited = false
 
 	r.exited = exited
-	r.sink.emit(event{kind: evStarted, target: r.target.Name, at: started})
+	meta := r.meta
+	r.meta = startMeta{}
+	r.sink.emit(event{
+		kind: evStarted, target: r.target.Name, at: started,
+		files: meta.files, buildDur: meta.buildDur, prevUp: meta.prevUp, restart: meta.restart,
+	})
+	beginHealth()
 	return nil
 }
 
@@ -897,10 +954,11 @@ func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, err
 
 // watchGeneration closes the pipe writer once the generation is reaped, which
 // unblocks the readLines side.
-func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File, slot *startSlot) <-chan struct{} {
+func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File, slot *startSlot, stopHealth func()) <-chan struct{} {
 	exited := make(chan struct{})
 	go func() {
 		_ = cmd.WaitExit(context.Background())
+		stopHealth()
 		if slot != nil {
 			slot.free()
 		}
@@ -1044,6 +1102,7 @@ func (r *targetRunner) killCurrent(ctx context.Context) {
 	}
 	_ = cmd.Kill()
 	_ = cmd.WaitExit(ctx)
+	r.stopHealthProbe()
 }
 
 // waitCooldown holds a restart back until the cooldown since the last start.

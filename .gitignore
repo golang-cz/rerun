@@ -1,2 +1,4 @@
 bin
 dist
+cmd/rerun/rerun
+/rerun

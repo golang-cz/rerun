@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,20 +14,25 @@ import (
 type eventKind int
 
 const (
-	evOutput     eventKind = iota // one line of the target's own output
-	evChanged                     // a file-change batch restarted the target
-	evStarting                    // queued behind the start stagger, not spawned yet
-	evStarted                     // a new generation is live
-	evExited                      // a generation ended on its own
-	evBackoff                     // the next restart waits out a crash-loop backoff
-	evWatcherErr                  // the file watcher failed
-	evRunnerErr                   // rerun could not start a generation
-	evCleared                     // the screen clear the ad-hoc mode prints
-	evReconcile                   // a rerun.yml reload changed the target list
-	evNotice                      // rerun's own line about the config; err is set when a reload failed
-	evConfigErr                   // a rerun.yml reload did not load; err is the parser's full error
-	evConfigOK                    // a rerun.yml reload parsed, so any earlier config error is over
-	evLoop                        // a target looks like it is rewriting its own trigger file
+	evOutput         eventKind = iota // one line of the target's own output
+	evChanged                         // a file-change batch restarted the target
+	evStarting                        // queued behind the start stagger, not spawned yet
+	evStarted                         // a new generation is live
+	evExited                          // a generation ended on its own
+	evBackoff                         // the next restart waits out a crash-loop backoff
+	evWatcherErr                      // the file watcher failed
+	evRunnerErr                       // rerun could not start a generation
+	evCleared                         // the screen clear the ad-hoc mode prints
+	evReconcile                       // a rerun.yml reload changed the target list
+	evNotice                          // rerun's own line about the config; err is set when a reload failed
+	evConfigErr                       // a rerun.yml reload did not load; err is the parser's full error
+	evConfigOK                        // a rerun.yml reload parsed, so any earlier config error is over
+	evLoop                            // a target looks like it is rewriting its own trigger file
+	evBuildStarted                    // a build began; the old run keeps going meanwhile
+	evBuildFailed                     // a build failed; the old run, if any, is untouched
+	evBuildOK                         // a build passed; the swap to a new run follows
+	evHealth                          // the health probe changed state
+	evBuildCancelled                  // a build was dropped and no new build follows
 )
 
 // event is everything a target runner reports. The front-ends render it: the
@@ -52,6 +58,25 @@ type event struct {
 	restarts bool
 	// cfg is the reconciled target list behind evReconcile.
 	cfg *configChange
+
+	// files are the changed paths behind evStarted and evBuildStarted/Failed;
+	// empty on a first or manual start. They reuse change's keys, sorted.
+	files []string
+	// dur is the build's length on evBuildOK/evBuildFailed, and sinceStart on evHealth.
+	dur time.Duration
+	// buildDur is the build behind an evStarted, 0 when the target has no build.
+	buildDur time.Duration
+	// prevUp is how long the run an evStarted replaced had been up, 0 if none.
+	prevUp time.Duration
+	// restart is true on evStarted when it replaced a run, and on evExited when
+	// rerun itself stopped the run to swap it.
+	restart bool
+	// lines is the tail of a failed build's output, at most buildTailLines.
+	lines []string
+	// health is the new state behind evHealth.
+	health healthState
+	// runAt is the start time of the run an evHealth belongs to, matching that run's evStarted.at.
+	runAt time.Time
 }
 
 // configChange is a freshly reconciled target list. The TUI adopts it
@@ -112,6 +137,9 @@ func (s *plainSink) render(ev event) string {
 		return fmt.Sprintf("[%s] %d file%s changed (e.g. %s)\n", ev.target, ev.count, plural, ev.first)
 
 	case evExited:
+		if ev.restart {
+			return fmt.Sprintf("[%s] stopped for restart\n", ev.target)
+		}
 		if raw {
 			return fmt.Sprintf("rerun: exited (%s) — waiting for changes\n", ev.status)
 		}
@@ -129,6 +157,23 @@ func (s *plainSink) render(ev event) string {
 	case evLoop:
 		return fmt.Sprintf("rerun: loop suspected — %s restarted %d× in a row after %s changed; it may be writing it — add it to except\n", ev.target, loopCycles, ev.line)
 
+	case evBuildStarted:
+		return fmt.Sprintf("[%s] building (%s)\n", ev.target, fileCount(len(ev.files)))
+
+	case evBuildOK:
+		return fmt.Sprintf("[%s] build ok (%s)\n", ev.target, ev.dur.Round(time.Millisecond))
+
+	case evBuildFailed:
+		var b strings.Builder
+		fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, ev.dur.Round(time.Millisecond), ev.err)
+		for _, l := range ev.lines {
+			fmt.Fprintf(&b, "[%s] build: %s\n", ev.target, l)
+		}
+		return b.String()
+
+	case evHealth:
+		return fmt.Sprintf("[%s] health: %s (%s after start)\n", ev.target, ev.health, ev.dur.Round(time.Millisecond))
+
 	case evCleared:
 		if raw {
 			return clearTerminal + "\n"
@@ -144,6 +189,13 @@ func (s *plainSink) render(ev event) string {
 	}
 
 	return ""
+}
+
+func fileCount(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
 }
 
 // label is the target's identity in rerun's own messages.

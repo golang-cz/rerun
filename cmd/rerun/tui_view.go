@@ -761,13 +761,6 @@ func (m *tuiModel) copyHintActive() bool {
 }
 
 // fileCount renders `1 file` or `3 files`.
-func fileCount(n int) string {
-	if n == 1 {
-		return "1 file"
-	}
-	return fmt.Sprintf("%d files", n)
-}
-
 // titleLine is the right pane's first row: the value filter chips, then, for a
 // target row, its state, how many files its last change batch held, and its
 // command. The state replaces the uptime whenever the row is not running; an

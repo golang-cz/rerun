@@ -51,7 +51,12 @@ type Target struct {
 	Desc   string
 	On     []string
 	Except []string
-	Cmd    string
+	// Cmd is the `run:` command, or the older `cmd:` spelling.
+	Cmd string
+	// Build, when set, runs before each (re)start and gates the swap to a new run.
+	Build string
+	// Health is an http(s):// URL, a tcp://host:port, or a shell command.
+	Health string
 	URL    string
 	// Columns are the effective columns: the target's own, else its schema's.
 	Columns []Column
@@ -403,7 +408,7 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "cmd", "url", "columns", "group", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "open", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string][]Column) (Target, error) {
 	node = deref(node)
@@ -422,6 +427,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: duplicate field %q", name, field))
 		}
 		seen[field] = true
+		if seen["run"] && seen["cmd"] {
+			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"run\" and \"cmd\" are set; use one", name))
+		}
 		if seen["group"] && seen["schema"] {
 			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"group\" and \"schema\" are set; use one", name))
 		}
@@ -445,14 +453,19 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Except = list
 			}
 
-		case "cmd", "url":
+		case "run", "cmd", "build", "health", "url":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			if field == "cmd" {
+			switch field {
+			case "run", "cmd":
 				target.Cmd = s
-			} else {
+			case "build":
+				target.Build = s
+			case "health":
+				target.Health = s
+			default:
 				target.URL = s
 			}
 
@@ -526,7 +539,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		target.Columns = slices.Clone(schemas[target.Schema])
 	}
 	if strings.TrimSpace(target.Cmd) == "" {
-		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: cmd is required", name))
+		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: run is required", name))
 	}
 	return target, nil
 }

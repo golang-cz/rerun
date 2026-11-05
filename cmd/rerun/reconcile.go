@@ -50,7 +50,7 @@ func diffTargets(old, new []Target) []reconcileAction {
 		switch {
 		case !ok:
 			actions = append(actions, reconcileAction{name: t.Name, kind: recAdd})
-		case prev.Cmd != t.Cmd:
+		case prev.Cmd != t.Cmd || prev.Build != t.Build || prev.Health != t.Health:
 			actions = append(actions, reconcileAction{name: t.Name, kind: recRestart})
 		case watchSpecDiffers(prev, t):
 			actions = append(actions, reconcileAction{name: t.Name, kind: recRewatch})
@@ -250,7 +250,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 		} else {
 			prev := oldByName[spec.Name]
 			switch {
-			case prev.Cmd != spec.Cmd:
+			case prev.Cmd != spec.Cmd || prev.Build != spec.Build || prev.Health != spec.Health:
 				if !r.controlSpec(ctrlSpec, spec) {
 					stale = append(stale, spec.Name)
 				}
