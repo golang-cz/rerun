@@ -198,12 +198,12 @@ func TestBuildingStatusCountsElapsed(t *testing.T) {
 	tg.state = stateRunning
 	tg.building = true
 	tg.buildStart = restartAt.Add(-4 * time.Second)
-	if got := m.status(tg); got != "⚙ 4s" {
-		t.Fatalf("status = %q, want ⚙ 4s", got)
+	if got := m.status(tg); got != "4s ⚙" {
+		t.Fatalf("status = %q, want 4s ⚙", got)
 	}
 	m.now = m.now.Add(2 * time.Second)
-	if got := m.status(tg); got != "⚙ 6s" {
-		t.Fatalf("after 2s status = %q, want ⚙ 6s", got)
+	if got := m.status(tg); got != "6s ⚙" {
+		t.Fatalf("after 2s status = %q, want 6s ⚙", got)
 	}
 }
 

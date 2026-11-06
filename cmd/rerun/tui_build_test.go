@@ -77,12 +77,12 @@ func TestBuildStatusTextPerState(t *testing.T) {
 		t.Fatalf("idle row = %q, want the uptime", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "⚙ 4s") {
-		t.Fatalf("building row = %q, want the run mark and ⚙ 4s", got)
+	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "4s ⚙") {
+		t.Fatalf("building row = %q, want the run mark and 4s ⚙", got)
 	}
 	m.now = buildAt.Add(64 * time.Second)
-	if got := row(); !strings.HasSuffix(got, "⚙ 1m04s") {
-		t.Fatalf("long build row = %q, want ⚙ 1m04s", got)
+	if got := row(); !strings.HasSuffix(got, "1m04s ⚙") {
+		t.Fatalf("long build row = %q, want 1m04s ⚙", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	if got := row(); !strings.HasSuffix(got, "✗ build") {
@@ -101,10 +101,31 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 	long := leftLineRaw(m, 0)
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	failed := leftLineRaw(m, 0)
-	for want, line := range map[string]string{"⚙ 1m04s": long, "✗ build": failed} {
+	for want, line := range map[string]string{"1m04s ⚙": long, "✗ build": failed} {
 		if displayWidth(line) != leftW || statusCell(line) != want {
 			t.Fatalf("row = %q, want status %q in the %d-cell column", line, want, leftW)
 		}
+	}
+}
+
+// The duration must start in the same cell whether the gear shows or not.
+func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.targets[0].lastStart = buildAt
+	m.now = buildAt.Add(4 * time.Second)
+	leftW, _ := m.layoutWidths()
+	durCol := func() int {
+		line := leftLineRaw(m, 0)
+		idx := strings.Index(line, "4s")
+		if idx < 0 {
+			t.Fatalf("row = %q, want the 4s duration", line)
+		}
+		return displayWidth(line[:idx])
+	}
+	idle := durCol()
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	if building := durCol(); building != idle || idle != leftW-statusW {
+		t.Fatalf("duration column: idle = %d, building = %d, want both %d", idle, building, leftW-statusW)
 	}
 }
 
@@ -117,8 +138,8 @@ func TestBuildFailedStatusHoldsUntilNextSuccessOrStart(t *testing.T) {
 		t.Fatalf("status after a stop = %q, want ✗ build until the next build", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got := m.status(tg); !strings.HasPrefix(got, "⚙") {
-		t.Fatalf("status on the next build start = %q, want ⚙", got)
+	if got := m.status(tg); !strings.HasSuffix(got, "⚙") {
+		t.Fatalf("status on the next build start = %q, want a trailing ⚙", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second), buildStart("api", buildAt), buildOK("api", time.Second)})
 	if got := m.status(tg); strings.Contains(got, "build") {

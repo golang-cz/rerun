@@ -1294,9 +1294,10 @@ func (m *tuiModel) pruneCells() {
 }
 
 // status is the row's second column: uptime while running, what happened after.
+// The gear trails: the column is left-aligned, so the duration never moves.
 func (m *tuiModel) status(t *tuiTarget) string {
 	if t.building {
-		return "⚙ " + fmtDur(m.now.Sub(t.buildStart))
+		return fmtDur(m.now.Sub(t.buildStart)) + " ⚙"
 	}
 	if t.buildFailed {
 		return "✗ build"
