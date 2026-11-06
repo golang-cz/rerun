@@ -10,13 +10,13 @@ func TestFmtDur(t *testing.T) {
 		d    time.Duration
 		want string
 	}{
-		{-time.Second, "<1s"},
-		{0, "<1s"},
-		{40 * time.Millisecond, "<1s"},
-		{200 * time.Millisecond, "<1s"},
-		{800 * time.Millisecond, "<1s"},
-		{950 * time.Millisecond, "<1s"},
-		{999 * time.Millisecond, "<1s"},
+		{-time.Second, "0s"},
+		{0, "0s"},
+		{40 * time.Millisecond, "0s"},
+		{200 * time.Millisecond, "0s"},
+		{800 * time.Millisecond, "0s"},
+		{950 * time.Millisecond, "0s"},
+		{999 * time.Millisecond, "0s"},
 		{1 * time.Second, "1s"},
 		{2400 * time.Millisecond, "2s"},
 		{59 * time.Second, "59s"},

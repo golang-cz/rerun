@@ -173,7 +173,7 @@ func TestFeedLineNamesFileCountAndTargets(t *testing.T) {
 	if want := "fs · last 1m"; !strings.HasPrefix(got[0], want) {
 		t.Fatalf("header = %q, want the %q title", got[0], want)
 	}
-	if want := "  <1s  apps/api/rpc/users.go +2  → omsx-api, backoffice"; got[1] != want {
+	if want := "   0s  apps/api/rpc/users.go +2  → omsx-api, backoffice"; got[1] != want {
 		t.Fatalf("line = %q, want %q", got[1], want)
 	}
 }
@@ -187,7 +187,7 @@ func TestFeedLineTruncatesTargetsWithAnEllipsis(t *testing.T) {
 	}
 
 	got := drawerAt(m, 30)
-	if want := "  <1s  a.go  → omsx-api, back…"; got[1] != want {
+	if want := "   0s  a.go  → omsx-api, back…"; got[1] != want {
 		t.Fatalf("line = %q, want %q", got[1], want)
 	}
 	if line := m.leftLine(m.height-2-len(m.layout.drawer)+1, 30); displayWidth(line) != 30 {
@@ -439,7 +439,7 @@ func TestFeedPathCutsFromTheLeftKeepingTheFileName(t *testing.T) {
 	})
 
 	line := drawerAt(m, 32)[1]
-	if !strings.HasPrefix(line, "  <1s  …") || !strings.HasSuffix(line, "users.go +1  → omsx-api") {
+	if !strings.HasPrefix(line, "   0s  …") || !strings.HasSuffix(line, "users.go +1  → omsx-api") {
 		t.Fatalf("line = %q, want the path cut from its left with the file name kept", line)
 	}
 }
@@ -454,7 +454,7 @@ func TestFeedCreatedDirectoryHeadsItsFiles(t *testing.T) {
 		"pkg/api/b.go": fsnotify.Write,
 	})
 
-	if got := drawerOf(m)[1]; got != "  <1s  pkg/api/ +2  → web" {
+	if got := drawerOf(m)[1]; got != "   0s  pkg/api/ +2  → web" {
 		t.Fatalf("batch line = %q, want the directory with a trailing slash", got)
 	}
 	press(m, "tab", "enter")

@@ -12,7 +12,7 @@ func fmtDur(d time.Duration) string {
 		d = 0
 	}
 	if d < time.Second {
-		return "<1s"
+		return "0s"
 	}
 	secs := int(d / time.Second)
 	switch {

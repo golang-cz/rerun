@@ -1011,8 +1011,8 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 
 	// The first run takes the row to the ordinary running state.
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: m.now}})
-	if got := m.status(m.targets[0]); got != "<1s" {
-		t.Errorf("status after the first run = %q, want <1s", got)
+	if got := m.status(m.targets[0]); got != "0s" {
+		t.Errorf("status after the first run = %q, want 0s", got)
 	}
 }
 
@@ -1356,8 +1356,8 @@ func TestStartingAndStartedEventsMoveTheRow(t *testing.T) {
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state after started = %v, want running", m.targets[0].state)
 	}
-	if got := m.status(m.targets[0]); got != "<1s" {
-		t.Fatalf("status after started = %q, want <1s", got)
+	if got := m.status(m.targets[0]); got != "0s" {
+		t.Fatalf("status after started = %q, want 0s", got)
 	}
 }
 
