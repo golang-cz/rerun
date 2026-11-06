@@ -79,7 +79,7 @@ type drawerRow struct {
 // recordFeed folds one change batch into the feed and returns the batch's id, or 0
 // for an empty batch. A change within feedJoin of the newest batch's first event
 // joins it, so one save of one file is one line.
-func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time) int {
+func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) int {
 	if len(cs.Files) == 0 {
 		return 0
 	}
@@ -89,7 +89,7 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time) int {
 	}
 	b := &m.feed[len(m.feed)-1]
 	for path := range cs.Files {
-		key := m.feedPath(path)
+		key := m.feedPath(path, owner)
 		b.files[key] = mergeOp(b.files[key], opGlyph(cs.Ops[path]))
 		if cs.Ops[path].Has(fsnotify.Create) && isDirPath(path) {
 			b.dirs[key] = true
@@ -152,7 +152,7 @@ func (m *tuiModel) recordConfigFeed(at time.Time) {
 	if m.group.configPath == "" {
 		return
 	}
-	key := m.feedPath(m.group.configPath)
+	key := m.feedPath(m.group.configPath, Target{})
 	for i := range m.feed {
 		b := &m.feed[i]
 		if _, ok := b.files[key]; !ok || absDuration(at.Sub(b.at)) > configJoin {
@@ -174,11 +174,14 @@ func (m *tuiModel) trimFeed() {
 	}
 }
 
-// feedPath keys a changed file relative to the rerun.yml dir, so every target
-// that watches it names it the same way.
-func (m *tuiModel) feedPath(path string) string {
+// feedPath keys a changed file relative to its owner's dir, with an import's
+// section name in front, so a target's files never read as `../` headers.
+func (m *tuiModel) feedPath(path string, owner Target) string {
 	clean := filepath.Clean(path)
 	cfg := m.group.configPath
+	if owner.Dir != "" {
+		cfg = filepath.Join(owner.Dir, ConfigFileName)
+	}
 	if cfg == "" {
 		return filepath.ToSlash(clean)
 	}
@@ -193,6 +196,9 @@ func (m *tuiModel) feedPath(path string) string {
 	rel, err := filepath.Rel(base, abs)
 	if err != nil {
 		return filepath.ToSlash(clean)
+	}
+	if owner.Import != "" {
+		return owner.Import + "/" + filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(rel)
 }

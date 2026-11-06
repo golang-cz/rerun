@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -233,6 +234,8 @@ type targetGroup struct {
 	mu      sync.Mutex
 	targets []Target
 	runners []*targetRunner
+	// missing is the optional imports whose file is absent at the last load.
+	missing []missingImport
 	closing bool
 
 	// configPath is the rerun.yml this group reloads from; "" keeps the config
@@ -541,11 +544,39 @@ func (r *targetRunner) startWatch(watcher *rerun.Watcher) <-chan rerun.ChangeSet
 	if len(on) == 0 {
 		on = []string{"./"}
 	}
-	watcher.Add(on...)
+	watcher.Add(inDir(r.target.Dir, on)...)
 	if len(r.target.Except) > 0 {
-		watcher.Ignore(r.target.Except...)
+		watcher.Ignore(exceptPaths(r.target.Dir, r.target.Except)...)
 	}
 	return watcher.Watch(r.target.Delay)
+}
+
+// inDir resolves relative paths against the defining file's dir, so on: and
+// except: mean the same from any working directory. An empty dir keeps them as written.
+func inDir(dir string, paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		if dir == "" || filepath.IsAbs(p) {
+			out[i] = p
+		} else {
+			out[i] = filepath.Join(dir, p)
+		}
+	}
+	return out
+}
+
+// exceptPaths resolves except: entries. A glob with no "/" stays as written, since
+// the watcher matches it against any trailing path segments.
+func exceptPaths(dir string, paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		if strings.ContainsAny(p, "*?[") && !strings.Contains(p, "/") {
+			out[i] = p
+			continue
+		}
+		out[i] = inDir(dir, []string{p})[0]
+	}
+	return out
 }
 
 func (r *targetRunner) run(ctx context.Context) error {
@@ -971,7 +1002,7 @@ func (r *targetRunner) start(ctx context.Context) error {
 	)
 	if r.raw() {
 		// The ad-hoc command is passed through raw: no pipe, no prefixing.
-		cmd, err = rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace, rerun.WithStdout(r.out))
+		cmd, err = rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace, rerun.WithDir(r.target.Dir), rerun.WithStdout(r.out))
 	} else {
 		cmd, pw, err = r.startPiped(slot)
 	}
@@ -1020,7 +1051,7 @@ func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, err
 	defer devNull.Close()
 
 	cmd, err := rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace,
-		rerun.WithStdin(devNull), rerun.WithStdout(pw), rerun.WithStderr(pw))
+		rerun.WithDir(r.target.Dir), rerun.WithStdin(devNull), rerun.WithStdout(pw), rerun.WithStderr(pw))
 	if err != nil {
 		_ = pw.Close()
 		_ = pr.Close()

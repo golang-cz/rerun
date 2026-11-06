@@ -25,7 +25,7 @@ func TestHTTPProbeStatusRange(t *testing.T) {
 		w.WriteHeader(int(code.Load()))
 	}))
 	defer srv.Close()
-	probe := newProbe(srv.URL)
+	probe := newProbe("", srv.URL)
 	for c, healthy := range map[int32]bool{200: true, 204: true, 302: true, 399: true, 400: false, 404: false, 500: false} {
 		code.Store(c)
 		if err := probe(context.Background()); (err == nil) != healthy {
@@ -39,7 +39,7 @@ func TestTCPProbe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := newProbe("tcp://" + ln.Addr().String())
+	probe := newProbe("", "tcp://"+ln.Addr().String())
 	if err := probe(context.Background()); err != nil {
 		t.Errorf("open port: %v", err)
 	}
@@ -50,16 +50,16 @@ func TestTCPProbe(t *testing.T) {
 }
 
 func TestCommandProbeExitCodesAndTimeout(t *testing.T) {
-	if err := newProbe("exit 0")(context.Background()); err != nil {
+	if err := newProbe("", "exit 0")(context.Background()); err != nil {
 		t.Errorf("exit 0: %v", err)
 	}
-	if err := newProbe("exit 2")(context.Background()); err == nil {
+	if err := newProbe("", "exit 2")(context.Background()); err == nil {
 		t.Error("exit 2 reported healthy")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	if err := newProbe("sleep 30")(ctx); err == nil {
+	if err := newProbe("", "sleep 30")(ctx); err == nil {
 		t.Error("timed-out command reported healthy")
 	}
 	if time.Since(start) > 3*time.Second {

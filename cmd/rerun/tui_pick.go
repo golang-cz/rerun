@@ -217,7 +217,8 @@ func (m *tuiModel) saveColumns() {
 	var failed []colEdit
 	var firstErr error
 	for _, e := range m.edits {
-		if err := writeColumns(path, e); err != nil {
+		file, local := m.columnsHome(e)
+		if err := writeColumns(file, local); err != nil {
 			failed = append(failed, e)
 			if firstErr == nil {
 				firstErr = err
@@ -239,6 +240,19 @@ func (m *tuiModel) targetDirty(t *tuiTarget) bool {
 		return true
 	}
 	return t.spec.Schema != "" && !t.spec.ownColumns && m.editIndex(colNode{schema: true, name: t.spec.Schema}) >= 0
+}
+
+// columnsHome is the file that defines an edit's node, with the node named as that file writes it.
+func (m *tuiModel) columnsHome(e colEdit) (string, colEdit) {
+	for _, t := range m.targets {
+		if e.node.schema && t.spec.Schema == e.node.name && t.spec.SchemaFile != "" {
+			return t.spec.SchemaFile, colEdit{node: colNode{schema: true, name: t.spec.SchemaLocal}, cols: e.cols}
+		}
+		if !e.node.schema && t.spec.Name == e.node.name && t.spec.File != "" {
+			return t.spec.File, colEdit{node: colNode{name: t.spec.localName()}, cols: e.cols}
+		}
+	}
+	return m.group.configPath, e
 }
 
 // writeColumns writes one node's columns as `name {.expr}` entries.

@@ -31,14 +31,14 @@ var (
 
 type probeFunc func(ctx context.Context) error
 
-func newProbe(spec string) probeFunc {
+func newProbe(dir, spec string) probeFunc {
 	switch {
 	case strings.HasPrefix(spec, "http://"), strings.HasPrefix(spec, "https://"):
 		return httpProbe(spec)
 	case strings.HasPrefix(spec, "tcp://"):
 		return tcpProbe(strings.TrimPrefix(spec, "tcp://"))
 	default:
-		return commandProbe(spec)
+		return commandProbe(dir, spec)
 	}
 }
 
@@ -78,7 +78,7 @@ func tcpProbe(addr string) probeFunc {
 
 // commandProbe runs the shell command in rerun's own dir and env, which the
 // target's run command shares. A timeout kills its whole process group.
-func commandProbe(script string) probeFunc {
+func commandProbe(dir, script string) probeFunc {
 	return func(ctx context.Context) error {
 		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		if err != nil {
@@ -86,7 +86,7 @@ func commandProbe(script string) probeFunc {
 		}
 		defer devNull.Close()
 		cmd, err := rerun.StartCommand([]string{script}, time.Second,
-			rerun.WithStdin(devNull), rerun.WithStdout(devNull), rerun.WithStderr(devNull))
+			rerun.WithDir(dir), rerun.WithStdin(devNull), rerun.WithStdout(devNull), rerun.WithStderr(devNull))
 		if err != nil {
 			return err
 		}

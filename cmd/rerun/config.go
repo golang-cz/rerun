@@ -88,11 +88,40 @@ type Target struct {
 	Selected bool
 	// Open asks rerun to open URL in the browser on the first start.
 	Open bool
+	// Dir is the defining file's directory: the base for run, build, health and on:.
+	Dir string
+	// File is the rerun.yml that defines the target; column writes go there.
+	File string
+	// Import is the import group the target came from, or "" for the root file.
+	Import string
+	// SchemaFile and SchemaLocal locate Schema's definition: its file and its name in that file.
+	SchemaFile  string
+	SchemaLocal string
+}
+
+// localName is the target's name as its own file writes it, without the import prefix.
+func (t Target) localName() string {
+	if t.Import == "" {
+		return t.Name
+	}
+	return strings.TrimPrefix(t.Name, t.Import+"/")
+}
+
+// missingImport is an optional import whose file does not exist yet.
+type missingImport struct {
+	Group string
+	Path  string
 }
 
 type Config struct {
 	Path    string
 	Targets []Target
+	// Files is every rerun.yml read, the root first.
+	Files []string
+	// Missing lists the optional imports whose file is absent.
+	Missing []missingImport
+	// Notices are warnings that do not stop the config from loading.
+	Notices []string
 }
 
 func (c *Config) Names() []string {
@@ -248,69 +277,123 @@ func nodeSpan(node *yaml.Node) int {
 	return len(node.Value)
 }
 
+// ParseConfig reads a rerun.yml and every file its imports pull in.
 func ParseConfig(path string) (*Config, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	src, root, err := parseConfigBytes(path, data)
+	if err != nil {
+		return nil, err
+	}
 
+	file, err := parseFileBody(src, root, abs)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}}
+	if imports := mappingValue(root, importsKey); imports != nil {
+		if err := cfg.parseImports(src, imports, abs, file.schemas); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(cfg.Targets) == 0 && len(cfg.Missing) == 0 {
+		return nil, src.at(root, nodeSpan(root), "no targets defined")
+	}
+	return cfg, nil
+}
+
+// parseConfigBytes parses one rerun.yml and returns its top-level mapping.
+func parseConfigBytes(path string, data []byte) (*configSource, *yaml.Node, error) {
 	src := newConfigSource(path, data)
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("%s: %s", path, cleanYAMLError(err))
+		return nil, nil, fmt.Errorf("%s: %s", path, cleanYAMLError(err))
 	}
 
 	root := &doc
 	if root.Kind == yaml.DocumentNode {
 		if len(root.Content) == 0 {
-			return nil, src.at(nil, 0, "no targets defined")
+			return nil, nil, src.at(nil, 0, "no targets defined")
 		}
 		root = root.Content[0]
 	}
 	root = deref(root)
 	if root.Kind == 0 || (root.Kind == yaml.ScalarNode && root.Tag == "!!null") {
-		return nil, src.at(nil, 0, "no targets defined")
+		return nil, nil, src.at(nil, 0, "no targets defined")
 	}
 	if root.Kind != yaml.MappingNode {
-		return nil, src.at(root, nodeSpan(root), "expected a mapping of target names")
+		return nil, nil, src.at(root, nodeSpan(root), "expected a mapping of target names")
 	}
 	if len(root.Content) == 0 {
-		return nil, src.at(root, nodeSpan(root), "no targets defined")
+		return nil, nil, src.at(root, nodeSpan(root), "no targets defined")
 	}
+	return src, root, nil
+}
 
-	cfg := &Config{Path: path}
+// parsedFile is one file's own targets and groups, before imports are merged in.
+type parsedFile struct {
+	targets []Target
+	schemas map[string][]Column
+}
+
+// parseFileBody reads a file's groups and targets under the names the file writes.
+func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile, error) {
 	schemas, err := parseSchemas(src, root)
 	if err != nil {
-		return nil, err
+		return parsedFile{}, err
 	}
 
+	var out parsedFile
+	out.schemas = schemas
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key, value := deref(root.Content[i]), deref(root.Content[i+1])
 		if key.Kind != yaml.ScalarNode {
-			return nil, src.at(key, 1, "target names must be strings")
+			return parsedFile{}, src.at(key, 1, "target names must be strings")
 		}
 		name := key.Value
 		if seen[name] {
-			return nil, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
+			return parsedFile{}, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
 		}
 		seen[name] = true
-		if name == groupsBlock.block || name == schemasBlock.block {
+		if name == importsKey && value.Kind != yaml.SequenceNode && !(value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
+			return parsedFile{}, src.at(key, len(name), "`imports` is reserved; rename the target")
+		}
+		if name == groupsBlock.block || name == schemasBlock.block || name == importsKey {
 			continue
 		}
 
 		target, err := parseTarget(src, name, key, value, schemas)
 		if err != nil {
-			return nil, err
+			return parsedFile{}, err
 		}
-		cfg.Targets = append(cfg.Targets, target)
+		target.File = file
+		target.Dir = filepath.Dir(file)
+		if target.Schema != "" {
+			target.SchemaFile = file
+			target.SchemaLocal = target.Schema
+		}
+		out.targets = append(out.targets, target)
 	}
+	return out, nil
+}
 
-	if len(cfg.Targets) == 0 {
-		return nil, src.at(root, nodeSpan(root), "no targets defined")
+// mappingValue is the value node of key in a mapping, or nil.
+func mappingValue(root *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if k := deref(root.Content[i]); k.Kind == yaml.ScalarNode && k.Value == key {
+			return deref(root.Content[i+1])
+		}
 	}
-	return cfg, nil
+	return nil
 }
 
 // groupBlock is one spelling of the top-level group block and of the target key

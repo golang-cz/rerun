@@ -24,10 +24,10 @@ const buildLogCap = 2000
 // chatty target cannot force a redraw per line.
 const maxEventBatch = 256
 
-// runTUI runs the targets behind the bubbletea TUI. configPath is the
-// rerun.yml the run reloads itself from; "" turns the config watch off. It
-// returns 0 after a graceful quit and 130 when a second signal forced the kill.
-func runTUI(targets []Target, configPath string, signals <-chan os.Signal) int {
+// runTUI runs the targets behind the bubbletea TUI. cfg is the rerun.yml the
+// run reloads itself from. It returns 0 after a graceful quit and 130 when a
+// second signal forced the kill.
+func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	signals, stopSignals := signalChannel(signals)
 	defer stopSignals()
 	// Runs after shutdownTargets; bubbletea restores before children are killed.
@@ -35,7 +35,11 @@ func runTUI(targets []Target, configPath string, signals <-chan os.Signal) int {
 	defer tty.restore()
 
 	model := newTUI(targets)
-	model.group.configPath = configPath
+	model.group.configPath = cfg.Path
+	model.missing = cfg.Missing
+	for _, n := range cfg.Notices {
+		model.group.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
+	}
 	model.group.start()
 
 	program := tea.NewProgram(model,
@@ -177,8 +181,10 @@ type tuiTarget struct {
 // tuiModel is the whole screen: the target list on the left, the stream on
 // the right.
 type tuiModel struct {
-	group  *targetGroup
-	events <-chan event
+	group *targetGroup
+	// missing is the optional imports whose file is absent, drawn after the list.
+	missing []missingImport
+	events  <-chan event
 	// stop is closed once bubbletea has released the terminal, which retires
 	// every pending event reader.
 	stop chan struct{}
@@ -725,7 +731,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		at := eventTime(ev, m.now)
 		t.lastChange = ev.change
 		t.restartBatch = 0
-		if id := m.recordFeed(ev.change, at); ev.restarts {
+		if id := m.recordFeed(ev.change, at, t.spec); ev.restarts {
 			t.restartBatch = id
 		}
 
@@ -867,6 +873,7 @@ func (m *tuiModel) applyEvent(ev event) {
 // row keeps its stream and its mute across a reload; only a name that just
 // appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
+	m.missing = c.missing
 	old := m.targets
 	buildName := ""
 	if m.buildView >= 0 && m.buildView < len(old) {

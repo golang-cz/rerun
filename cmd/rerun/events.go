@@ -92,6 +92,8 @@ type configChange struct {
 	// stopped is true for a target that must not be running: `selected: false`
 	// in the config, a target the user stopped, or one added under a solo.
 	stopped []bool
+	// missing is the optional imports whose file is absent, shown as dim rows.
+	missing []missingImport
 }
 
 // sink is the front-end a target runner writes its events to.

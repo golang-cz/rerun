@@ -145,7 +145,7 @@ func (r *targetRunner) startBuild(ctx context.Context, files map[string]struct{}
 	}
 	defer devNull.Close()
 	cmd, err := rerun.StartCommand([]string{r.target.Build}, r.target.Grace,
-		rerun.WithStdin(devNull), rerun.WithStdout(buf), rerun.WithStderr(buf))
+		rerun.WithDir(r.target.Dir), rerun.WithStdin(devNull), rerun.WithStdout(buf), rerun.WithStderr(buf))
 	if err != nil {
 		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: sorted, err: err})
 		return
@@ -263,7 +263,7 @@ func (r *targetRunner) startHealth(ctx context.Context, started time.Time) (begi
 	}
 	hctx, cancel := context.WithCancel(ctx)
 	name := r.target.Name
-	probe := newProbe(r.target.Health)
+	probe := newProbe(r.target.Dir, r.target.Health)
 	done := make(chan struct{})
 	r.healthCancel, r.healthDone = cancel, done
 	begin = func() {

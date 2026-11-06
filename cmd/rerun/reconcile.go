@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"gopkg.in/yaml.v3"
 )
 
 // configDebounce is how long a config write must settle before the reload:
@@ -122,8 +124,7 @@ func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// watchConfig reloads the config whenever the file changes. Its watcher is its
-// own: a config write is rerun's business, not a target's watched change.
+// watchConfig reloads the config whenever the root file or an import changes.
 func (g *targetGroup) watchConfig(path string) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -132,13 +133,13 @@ func (g *targetGroup) watchConfig(path string) {
 	}
 	defer watcher.Close()
 
-	clean := filepath.Clean(path)
-	// The directory, not the file: an editor that swaps the file in with a
-	// rename would otherwise leave the watch pointing at the old inode.
-	if err := watcher.Add(filepath.Dir(clean)); err != nil {
-		g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
-		return
+	clean := path
+	if abs, err := filepath.Abs(path); err == nil {
+		clean = abs
 	}
+	w := &configWatch{watcher: watcher, dirs: map[string]bool{}, sink: g.sink}
+	cfg, _ := ParseConfig(clean)
+	w.syncAfter(clean, cfg)
 
 	var timer *time.Timer
 	var timeoutC <-chan time.Time
@@ -157,7 +158,7 @@ func (g *targetGroup) watchConfig(path string) {
 			if !ok {
 				return
 			}
-			if filepath.Clean(ev.Name) != clean {
+			if !w.interesting(filepath.Clean(ev.Name)) {
 				continue
 			}
 			if ev.Op&fsnotify.Chmod == fsnotify.Chmod {
@@ -185,21 +186,137 @@ func (g *targetGroup) watchConfig(path string) {
 			g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 
 		case <-timeoutC:
-			g.reload(clean)
+			// A failed parse still watches the imports: one that is half written reloads on its next write.
+			// Dirs added by this sync may hold a file written before its watch existed, so reload once more.
+			if w.syncAfter(clean, g.reload(clean)) {
+				w.syncAfter(clean, g.reload(clean))
+			}
 		}
 	}
 }
 
+// configWatch holds the dirs the config watcher watches: a file's dir, or an absent import's nearest existing dir.
+type configWatch struct {
+	watcher *fsnotify.Watcher
+	sink    sink
+	dirs    map[string]bool
+	// known and absent are the last synced inputs; files is the same paths as a set.
+	known  []string
+	files  map[string]bool
+	absent []missingImport
+}
+
+// sync makes the watched dirs match the files and the absent imports.
+func (w *configWatch) sync(files []string, missing []missingImport) (added bool) {
+	w.files = make(map[string]bool, len(files))
+	want := make(map[string]bool)
+	for _, f := range files {
+		f = filepath.Clean(f)
+		w.files[f] = true
+		want[nearestDir(filepath.Dir(f))] = true
+	}
+	w.known, w.absent = files, missing
+	for _, m := range missing {
+		want[nearestDir(filepath.Dir(filepath.Clean(m.Path)))] = true
+	}
+
+	for dir := range want {
+		if w.dirs[dir] {
+			continue
+		}
+		if err := w.watcher.Add(dir); err != nil {
+			w.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
+			continue
+		}
+		w.dirs[dir] = true
+		added = true
+	}
+	for dir := range w.dirs {
+		if !want[dir] {
+			_ = w.watcher.Remove(dir)
+			delete(w.dirs, dir)
+		}
+	}
+	return added
+}
+
+// syncAfter watches what a load read; a failed load, cfg nil, also watches the root's import paths.
+func (w *configWatch) syncAfter(root string, cfg *Config) (added bool) {
+	if cfg != nil {
+		return w.sync(cfg.Files, cfg.Missing)
+	}
+	files := append(append([]string{root}, w.known...), importedPaths(root)...)
+	return w.sync(slices.Compact(slices.Sorted(slices.Values(files))), w.absent)
+}
+
+// importedPaths lists the root file's import paths, read apart from the full parse.
+func importedPaths(root string) []string {
+	data, err := os.ReadFile(root)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Imports []struct {
+			Path string `yaml:"path"`
+		} `yaml:"imports"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	var out []string
+	for _, imp := range doc.Imports {
+		if abs, err := resolveImportPath(filepath.Dir(root), imp.Path); err == nil {
+			out = append(out, abs)
+		}
+	}
+	return out
+}
+
+// interesting reports whether an event on name can change the config.
+func (w *configWatch) interesting(name string) bool {
+	if w.files[name] {
+		return true
+	}
+	for _, m := range w.absent {
+		p := filepath.Clean(m.Path)
+		if p == name || strings.HasPrefix(p, name+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// nearestDir is dir, or its closest ancestor that exists.
+func nearestDir(dir string) string {
+	for {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
+}
+
 // reload parses the config again and reconciles the running targets with it. A
-// config that does not parse leaves every running target untouched.
-func (g *targetGroup) reload(path string) {
+// reload returns the parsed config, or nil when it did not load.
+func (g *targetGroup) reload(path string) *Config {
 	cfg, err := ParseConfig(path)
 	if err != nil {
 		g.sink.emit(event{kind: evConfigErr, line: configErrorLine(err), err: err})
-		return
+		return nil
 	}
 	g.sink.emit(event{kind: evConfigOK})
+	for _, n := range cfg.Notices {
+		g.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
+	}
+	g.mu.Lock()
+	g.missing = cfg.Missing
+	g.mu.Unlock()
 	g.applyConfig(cfg.Targets)
+	return cfg
 }
 
 // applyConfig reconciles the running targets with a freshly parsed list: added
@@ -281,6 +398,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 
 	g.targets = fresh
 	g.runners = runners
+	missing := g.missing
 	g.mu.Unlock()
 
 	line := reconcileSummary(actions)
@@ -292,6 +410,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 			targets: fresh,
 			runners: runners,
 			stopped: stopped,
+			missing: missing,
 		},
 	})
 

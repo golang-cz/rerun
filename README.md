@@ -182,6 +182,31 @@ group is a config error. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
+#### Imports
+
+A `rerun.yml` can pull in another project's `rerun.yml` with the reserved
+top-level `imports:` key:
+
+```yaml
+imports:
+  - path: ../bpn-api/rerun.yml   # relative to this file; ~ expands
+    group: bpn-api               # the section name; defaults to the file's dir name
+    optional: true               # a missing file is skipped until it appears
+    groups: [backend]            # import only these groups of that file
+
+api:
+  cmd: make run
+```
+
+- An imported target runs from its own file's dir. It shows under its `group` section as `bpn-api/api`.
+- The imported file's groups get the prefix too: `bpn-api/backend`.
+- A group in this file with the import's name gives every imported target its columns.
+- A missing optional import shows one dim `bpn-api (not found)` row until its file appears.
+- Saving an imported file reloads the config. Column picks save into the file that defines the target or group.
+- An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.
+- The same file imported twice loads once. A file that imports itself is an error.
+- An unknown import key is an error. A file with a top-level `services:` key (docker compose) is not supported yet.
+
 #### Reloading
 
 rerun watches `rerun.yml` itself, so saving it applies the change without

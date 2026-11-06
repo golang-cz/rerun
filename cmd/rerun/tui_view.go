@@ -217,9 +217,9 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	nameW := 1
 	for _, t := range m.targets {
 		w := displayWidth(t.spec.Name)
-		if t.spec.Schema != "" {
-			w += 2 // a member's name sits under its schema header's indent
-			nameW = max(nameW, displayWidth(t.spec.Schema))
+		if g := groupOf(t); g != ungrouped {
+			w += 2 // a member's name sits under its group header's indent
+			nameW = max(nameW, displayWidth(groupLabel(g)))
 		}
 		nameW = max(nameW, w)
 	}
@@ -280,7 +280,7 @@ func (m *tuiModel) listOffset() int {
 	if m.cursor >= visible {
 		offset = m.cursor - visible + 1
 	}
-	return min(offset, max(0, m.listLen()-visible))
+	return min(offset, max(0, m.listLen()+len(m.missing)-visible))
 }
 
 // inDrawer reports whether a screen row is inside the drawer, and which of its
@@ -387,6 +387,9 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	}
 	r, ok := m.listRowAt(m.layout.offset + y)
 	if !ok {
+		if i := m.layout.offset + y - m.listLen(); i >= 0 && i < len(m.missing) {
+			return m.missingLine(m.missing[i], leftW)
+		}
 		return strings.Repeat(" ", leftW)
 	}
 	if r.header {
@@ -487,6 +490,11 @@ func ellipsizeLeft(s string, w int) string {
 		return s
 	}
 	return "…" + ansi.TruncateLeft(s, displayWidth(s)-(w-1), "")
+}
+
+// missingLine draws an absent optional import below the list; it is no list row, so the cursor skips it.
+func (m *tuiModel) missingLine(mi missingImport, leftW int) string {
+	return renderSegs([]seg{{text: truncate(mi.Group+" (not found)", leftW)}}, m.styles.muted, leftW)
 }
 
 func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {

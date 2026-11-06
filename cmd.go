@@ -54,6 +54,15 @@ func WithStdout(w io.Writer) Option {
 	return func(cmd *exec.Cmd) { cmd.Stdout = w }
 }
 
+// WithDir runs the child in dir. An empty dir keeps the process's working directory.
+func WithDir(dir string) Option {
+	return func(cmd *exec.Cmd) {
+		if dir != "" {
+			cmd.Dir = dir
+		}
+	}
+}
+
 // WithStdin feeds the child's stdin from r instead of the terminal.
 func WithStdin(r io.Reader) Option {
 	return func(cmd *exec.Cmd) { cmd.Stdin = r }

@@ -96,7 +96,7 @@ func runConfigMode(args Args) int {
 			fmt.Fprintf(os.Stderr, "rerun: %v\n", noCmdHint)
 			return 1
 		}
-		return startTargets(resolveTargets(cfg, args), cfg.Path)
+		return startTargets(resolveTargets(cfg, args), cfg)
 	}
 
 	cfg, err := LoadConfig(".")
@@ -113,7 +113,7 @@ func runConfigMode(args Args) int {
 		}
 	}
 
-	return startTargets(resolveTargets(cfg, args), cfg.Path)
+	return startTargets(resolveTargets(cfg, args), cfg)
 }
 
 // resolveTargets keeps every rerun.yml target in the list: named targets are
@@ -144,15 +144,21 @@ func containsName(names []string, name string) bool {
 }
 
 // startTargets runs the targets: behind the TUI on a terminal, as plain
-// prefixed output everywhere else (pipes, CI, ad-hoc). configPath is the
-// rerun.yml the run reloads itself from; "" turns the config watch off.
-func startTargets(targets []Target, configPath string) int {
+// prefixed output everywhere else (pipes, CI, ad-hoc). cfg is the rerun.yml the
+// run reloads itself from.
+func startTargets(targets []Target, cfg *Config) int {
 	// The TUI needs a terminal on both ends, so a redirected stdin keeps the
 	// plain path instead of failing to switch the terminal to raw mode.
 	if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
-		return runTUI(targets, configPath, nil)
+		return runTUI(targets, cfg, nil)
 	}
-	return runTargets(targets, os.Stdout, configPath, nil)
+	for _, n := range cfg.Notices {
+		fmt.Fprintf(os.Stderr, "rerun: %s\n", n)
+	}
+	for _, m := range cfg.Missing {
+		fmt.Fprintf(os.Stderr, "rerun: import %s: not found, skipped\n", m.Path)
+	}
+	return runTargets(targets, os.Stdout, cfg.Path, nil)
 }
 
 func allKnown(cfg *Config, names []string) bool {

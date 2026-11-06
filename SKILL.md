@@ -99,6 +99,22 @@ names a muted row (`muted`). `tab` focuses it, `j/k` move, `enter`
 lists a batch's files, `esc` closes. A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.
 
+### Imports: other projects' rerun.yml
+
+A `rerun.yml` can list other rerun files under `imports:`, one map per file:
+
+```yaml
+imports:
+  - path: ../bpn-api/rerun.yml   # relative to this file
+    group: bpn-api               # section name and target prefix; default: the dir name
+    optional: true               # skip the file while it is missing
+    groups: [backend]            # only these groups of that file
+```
+
+Imported targets run from their own dir, and their names read `bpn-api/api`.
+The import's `path` is required. Unknown keys are errors. An `imports:` key in an
+imported file is ignored. A `services:` file (docker compose) is rejected for now.
+
 ## Building rerun.yml
 
 Flat top-level map, one entry per target (Makefile-like). `run` (older spelling: `cmd`) is required;

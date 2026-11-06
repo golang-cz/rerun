@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -271,5 +272,21 @@ func TestWithStdinFeedsChild(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out.String()); got != "got:hi" {
 		t.Fatalf("output = %q, want %q", got, "got:hi")
+	}
+}
+
+func TestWithDirSetsTheChildWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	out := &bytes.Buffer{}
+	cmd, err := StartCommand([]string{"pwd -P"}, time.Second, WithDir(dir), WithStdout(out))
+	if err != nil {
+		t.Fatalf("StartCommand: %v", err)
+	}
+	if err := cmd.WaitExit(nil); err != nil {
+		t.Fatalf("WaitExit: %v", err)
+	}
+	want, _ := filepath.EvalSymlinks(dir)
+	if got := strings.TrimSpace(out.String()); got != want {
+		t.Fatalf("child cwd = %q, want %q", got, want)
 	}
 }

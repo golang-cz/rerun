@@ -4,10 +4,14 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // ungrouped keys the trailing default header; NUL keeps it apart from any config name.
 const ungrouped = "\x00default"
+
+// importKeyPrefix keys an import's section, apart from the schema of the same name.
+const importKeyPrefix = "\x00import:"
 
 // listRow is one list line: a group header, or a target, indented under its group.
 type listRow struct {
@@ -18,31 +22,34 @@ type listRow struct {
 	indent  bool
 }
 
-// groupTargets makes each schema's members contiguous and puts ungrouped targets last.
+// groupTargets makes each group's members contiguous and puts ungrouped targets last.
 func groupTargets(rows []*tuiTarget) {
 	rank := map[string]int{}
 	for _, t := range rows {
-		if s := t.spec.Schema; s != "" {
-			if _, ok := rank[s]; !ok {
-				rank[s] = len(rank)
+		if k := groupOf(t); k != ungrouped {
+			if _, ok := rank[k]; !ok {
+				rank[k] = len(rank)
 			}
 		}
 	}
 	key := func(t *tuiTarget) int {
-		if t.spec.Schema == "" {
-			return len(rank)
+		if k := groupOf(t); k != ungrouped {
+			return rank[k]
 		}
-		return rank[t.spec.Schema]
+		return len(rank)
 	}
 	slices.SortStableFunc(rows, func(a, b *tuiTarget) int { return cmp.Compare(key(a), key(b)) })
 }
 
-// groupOf is the group key a target lists under: its schema, or ungrouped.
+// groupOf is the key a target lists under: its schema, else its import's section.
 func groupOf(t *tuiTarget) string {
-	if t.spec.Schema == "" {
-		return ungrouped
+	switch {
+	case t.spec.Schema != "":
+		return t.spec.Schema
+	case t.spec.Import != "":
+		return importKeyPrefix + t.spec.Import
 	}
-	return t.spec.Schema
+	return ungrouped
 }
 
 // groupLabel is the name a group shows as in the list, chips, and bottom line.
@@ -50,13 +57,13 @@ func groupLabel(key string) string {
 	if key == ungrouped {
 		return "(no group)"
 	}
-	return key
+	return strings.TrimPrefix(key, importKeyPrefix)
 }
 
 // hasGroups reports whether any target has a group. Without one the list stays flat.
 func (m *tuiModel) hasGroups() bool {
 	for _, t := range m.targets {
-		if t.spec.Schema != "" {
+		if groupOf(t) != ungrouped {
 			return true
 		}
 	}
