@@ -234,8 +234,7 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 func (r *targetRunner) noteReplace(files map[string]struct{}) {
 	r.meta.files = sortedFiles(files)
 	r.meta.restart, r.meta.prevUp, r.meta.buildDur = false, 0, 0
-	cmd := r.currentCmd()
-	if cmd == nil || cmd.Exited() {
+	if !r.be.Running() {
 		return
 	}
 	r.mu.Lock()
@@ -254,37 +253,4 @@ func sortedFiles(set map[string]struct{}) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-// begin runs after evStarted so no evHealth can precede its run.
-func (r *targetRunner) startHealth(ctx context.Context, started time.Time) (begin, stop func()) {
-	if r.target.Health == "" {
-		return func() {}, func() {}
-	}
-	hctx, cancel := context.WithCancel(ctx)
-	name := r.target.Name
-	probe := newProbe(r.target.Dir, r.target.Health)
-	done := make(chan struct{})
-	r.healthCancel, r.healthDone = cancel, done
-	begin = func() {
-		r.probes.Add(1)
-		go func() {
-			defer r.probes.Done()
-			defer close(done)
-			monitorHealth(hctx, probe, started, func(state healthState, at time.Time, since time.Duration) {
-				r.sink.emit(event{kind: evHealth, target: name, health: state, at: at, runAt: started, dur: since})
-			})
-		}()
-	}
-	return begin, cancel
-}
-
-// stopHealthProbe waits out the previous run's probe before the next start.
-func (r *targetRunner) stopHealthProbe() {
-	if r.healthCancel == nil {
-		return
-	}
-	r.healthCancel()
-	<-r.healthDone
-	r.healthCancel, r.healthDone = nil, nil
 }

@@ -34,6 +34,7 @@ const (
 	evHealth                          // the health probe changed state
 	evBuildCancelled                  // a build was dropped and no new build follows
 	evBuildOutput                     // one line of a build's own output, streamed as it arrives
+	evStopped                         // a compose service went down because someone stopped it
 )
 
 // event is everything a target runner reports. The front-ends render it: the
@@ -178,6 +179,9 @@ func (s *plainSink) render(ev event) string {
 
 	case evHealth:
 		return fmt.Sprintf("[%s] health: %s (%s after start)\n", ev.target, ev.health, ev.dur.Round(time.Millisecond))
+
+	case evStopped:
+		return fmt.Sprintf("[%s] stopped\n", ev.target)
 
 	case evCleared:
 		if raw {

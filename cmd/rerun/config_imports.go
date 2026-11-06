@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -17,7 +18,7 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "groups"}
+var importFields = []string{"path", "group", "optional", "groups", "services", "profiles"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
@@ -25,9 +26,14 @@ type importSpec struct {
 	group     string
 	optional  bool
 	groups    []string
+	services  []string
+	profiles  []string
 	pathNode  *yaml.Node
 	groupNode *yaml.Node
 	groupsRef *yaml.Node
+	// servicesRef and profilesRef locate the compose-only keys, for errors on rerun files.
+	servicesRef *yaml.Node
+	profilesRef *yaml.Node
 }
 
 // parseImports merges the root file's imports into cfg; a root group named like an import gives its targets columns.
@@ -45,6 +51,18 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 	names := map[string]bool{}
 	for _, t := range cfg.Targets {
 		names[t.Name] = true
+	}
+	// claim reserves a group name for this import, or reports the clash.
+	claim := func(spec importSpec, group string) error {
+		if seenGroups[group] {
+			node := spec.groupNode
+			if node == nil {
+				node = spec.pathNode
+			}
+			return src.at(node, nodeSpan(node), fmt.Sprintf("duplicate import group %q; set group: on one of them", group))
+		}
+		seenGroups[group] = true
+		return nil
 	}
 
 	for _, item := range node.Content {
@@ -67,20 +85,17 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			continue
 		}
 		seenFiles[canon] = spec.groups
-		if spec.group == "" {
+		// A compose import's default group is its project name, known only after docker reads the file.
+		explicitGroup := spec.group != ""
+		if !explicitGroup {
 			spec.group = filepath.Base(filepath.Dir(abs))
 		}
-		if seenGroups[spec.group] {
-			node := spec.groupNode
-			if node == nil {
-				node = spec.pathNode
-			}
-			return src.at(node, nodeSpan(node), fmt.Sprintf("duplicate import group %q; set group: on one of them", spec.group))
-		}
-		seenGroups[spec.group] = true
 
 		data, err := os.ReadFile(abs)
 		if errors.Is(err, fs.ErrNotExist) {
+			if err := claim(spec, spec.group); err != nil {
+				return err
+			}
 			if spec.optional {
 				cfg.Missing = append(cfg.Missing, missingImport{Group: spec.group, Path: abs})
 				continue
@@ -95,30 +110,62 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		if err != nil {
 			return err
 		}
-		if mappingValue(iroot, "services") != nil {
-			return src.at(spec.pathNode, nodeSpan(spec.pathNode), "compose imports not supported yet")
-		}
-		if mappingValue(iroot, importsKey) != nil {
-			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: imports are one level deep; the imports key here is ignored", abs))
-		}
-		cfg.Files = append(cfg.Files, abs)
-		if canon != abs && isSymlink(abs) {
-			cfg.Files = append(cfg.Files, canon)
-		}
 
-		file, err := parseFileBody(isrc, iroot, abs)
-		if err != nil {
-			return err
-		}
-		if len(spec.groups) > 0 {
-			for _, g := range spec.groups {
-				if _, ok := file.schemas[g]; !ok {
-					return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: unknown group %q", spec.path, g))
+		var targets []Target
+		if mappingValue(iroot, "services") != nil {
+			if spec.groupsRef != nil {
+				return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
+			}
+			project, services, err := resolveComposeImport(spec, abs)
+			if errors.Is(err, errNoDocker) && spec.optional {
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
+				continue
+			}
+			if err != nil {
+				return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: %v", spec.path, err))
+			}
+			if !explicitGroup {
+				spec.group = project
+			}
+			if err := claim(spec, spec.group); err != nil {
+				return err
+			}
+			cfg.Files = append(cfg.Files, abs)
+			targets = composeTargets(abs, project, services, spec.profiles)
+		} else {
+			if spec.servicesRef != nil || spec.profilesRef != nil {
+				ref := spec.servicesRef
+				if ref == nil {
+					ref = spec.profilesRef
+				}
+				return src.at(ref, nodeSpan(ref), fmt.Sprintf("import %q: services and profiles apply to compose files; this file is a rerun file", spec.path))
+			}
+			if err := claim(spec, spec.group); err != nil {
+				return err
+			}
+			if mappingValue(iroot, importsKey) != nil {
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: imports are one level deep; the imports key here is ignored", abs))
+			}
+			cfg.Files = append(cfg.Files, abs)
+			if canon != abs && isSymlink(abs) {
+				cfg.Files = append(cfg.Files, canon)
+			}
+
+			file, err := parseFileBody(isrc, iroot, abs)
+			if err != nil {
+				return err
+			}
+			if len(spec.groups) > 0 {
+				for _, g := range spec.groups {
+					if _, ok := file.schemas[g]; !ok {
+						return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: unknown group %q", spec.path, g))
+					}
 				}
 			}
+			targets = file.targets
 		}
 
-		for _, t := range file.targets {
+		for _, t := range targets {
 			if len(spec.groups) > 0 && !slices.Contains(spec.groups, t.Schema) {
 				continue
 			}
@@ -143,6 +190,35 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		}
 	}
 	return nil
+}
+
+// errNoDocker is returned when a compose import needs the docker CLI and it is not on PATH.
+var errNoDocker = errors.New("docker not found on PATH")
+
+// resolveComposeImport reads a compose file's project name and services through docker.
+func resolveComposeImport(spec importSpec, abs string) (string, []string, error) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return "", nil, errNoDocker
+	}
+	return resolveCompose(abs, spec.profiles, spec.services)
+}
+
+// composeTargets makes one compose target per service. They never watch or build, so they start on r only.
+func composeTargets(file, project string, services, profiles []string) []Target {
+	dir := filepath.Dir(file)
+	out := make([]Target, 0, len(services))
+	for _, svc := range services {
+		out = append(out, Target{
+			Name:     svc,
+			Kind:     composeKind,
+			Selected: true,
+			Start:    startManual,
+			Dir:      dir,
+			File:     file,
+			Compose:  &composeTarget{File: file, Project: project, Service: svc, Profiles: profiles},
+		})
+	}
+	return out
 }
 
 // parseImportSpec reads one `imports:` entry, a map with a path and optional keys.
@@ -188,6 +264,17 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				return spec, err
 			}
 			spec.groups, spec.groupsRef = list, value
+
+		case "services", "profiles":
+			list, _, err := stringOrList(src, "import", field, value)
+			if err != nil {
+				return spec, err
+			}
+			if field == "services" {
+				spec.services, spec.servicesRef = list, value
+			} else {
+				spec.profiles, spec.profilesRef = list, value
+			}
 
 		default:
 			e := src.at(key, len(field), fmt.Sprintf("import: unknown field %q", field))

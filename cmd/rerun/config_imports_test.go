@@ -157,12 +157,6 @@ func TestParseImports(t *testing.T) {
 			wantErr: `unknown field "frob"`,
 		},
 		{
-			name:    "a compose file is rejected for now",
-			root:    "imports:\n  - path: ../devbox/docker-compose.yml\n",
-			files:   map[string]string{"devbox/docker-compose.yml": "services:\n  postgres:\n    image: postgres\n"},
-			wantErr: "compose imports not supported yet",
-		},
-		{
 			name: "a same-named group fills only targets with no group of their own",
 			root: "groups:\n  bpn:\n    columns: [\"root {.r}\"]\n\nimports:\n  - path: ../bpn/rerun.yml\n",
 			files: map[string]string{"bpn/rerun.yml": "groups:\n  backend:\n    columns: [\"level {.level}\"]\n\n" +

@@ -90,6 +90,10 @@ type Target struct {
 	Open bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
 	Dir string
+	// Kind is "compose" for a docker-compose service, or "" for a process.
+	Kind string
+	// Compose is the service a compose target runs; nil for a process.
+	Compose *composeTarget
 	// File is the rerun.yml that defines the target; column writes go there.
 	File string
 	// Import is the import group the target came from, or "" for the root file.

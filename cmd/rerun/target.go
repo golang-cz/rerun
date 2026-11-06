@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -396,9 +394,8 @@ type ctrlMsg struct {
 type targetRunner struct {
 	target Target
 	sink   sink
-	// out receives the ad-hoc command's output directly. Nil for sinks that
-	// render output themselves.
-	out io.Writer
+	// be runs the target: the process, or the compose service.
+	be backend
 
 	ctrlCh   chan ctrlMsg
 	finished chan struct{}
@@ -433,7 +430,6 @@ type targetRunner struct {
 	lastBuildStart, lastBuildEnd time.Time
 
 	mu        sync.Mutex
-	cmd       rerun.Command
 	lastStart time.Time
 	stopping  int32
 	// stopped is the user's stop: the target stays down until space or r.
@@ -449,9 +445,6 @@ type targetRunner struct {
 	meta startMeta
 	// probes counts the health goroutines, so run can wait them out on return.
 	probes sync.WaitGroup
-	// healthCancel and healthDone belong to the live run's probe. Run goroutine only.
-	healthCancel func()
-	healthDone   chan struct{}
 }
 
 // startMeta is what a spawn reports about why it happened.
@@ -471,9 +464,7 @@ func newTargetRunner(target Target, s sink) *targetRunner {
 		retire:    make(chan struct{}),
 		watchDone: make(chan struct{}),
 	}
-	if w, ok := s.(interface{ writer() io.Writer }); ok {
-		r.out = w.writer()
-	}
+	r.be = newBackend(target, s, &r.probes)
 	// An unselected target starts off: it stays down until space or r.
 	if !target.Selected {
 		atomic.StoreInt32(&r.stopped, 1)
@@ -583,6 +574,14 @@ func (r *targetRunner) run(ctx context.Context) error {
 	defer close(r.finished)
 	defer close(r.watchDone)
 	defer r.probes.Wait()
+	// The backend's own goroutines (compose events) end with the run, before the wait above.
+	serveCtx, cancelServe := context.WithCancel(ctx)
+	defer cancelServe()
+	r.probes.Add(1)
+	go func() {
+		defer r.probes.Done()
+		r.be.Serve(serveCtx, r.sink.emit)
+	}()
 
 	watcher, changes, err := r.rewatch()
 	if err != nil {
@@ -656,13 +655,13 @@ func (r *targetRunner) run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			r.cancelBuild()
-			r.killCurrent(context.Background())
+			r.be.Release(context.Background())
 			return nil
 
 		case <-r.retire:
 			// A target dropped from the config stops for good.
 			r.cancelBuild()
-			r.killCurrent(context.Background())
+			r.be.Release(context.Background())
 			return nil
 
 		case res := <-r.buildResult():
@@ -671,7 +670,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 		case changeSet, ok := <-changes:
 			if !ok {
 				r.cancelBuild()
-				r.killCurrent(context.Background())
+				r.be.Release(context.Background())
 				return nil
 			}
 			r.handleChange(ctx, changeSet)
@@ -719,7 +718,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		atomic.StoreInt32(&r.stopped, 0)
 		r.forgetCrashLoop()
 		r.clearLoop()
-		if cmd := r.currentCmd(); cmd != nil && !cmd.Exited() {
+		if r.be.Running() {
 			return
 		}
 		if r.build != nil {
@@ -742,8 +741,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		// never surprises a stopped target into running, and a manual target
 		// only ever starts on r. An onchange target waits for its
 		// change just the same.
-		cmd := r.currentCmd()
-		running := cmd != nil && !cmd.Exited()
+		running := r.be.Running()
 		if !r.userStopped() && (r.target.Start == startAuto || running) {
 			r.restart(ctx)
 		}
@@ -772,6 +770,10 @@ func (r *targetRunner) drainSpecs() {
 
 // restart bounces the current generation, respecting the cooldown.
 func (r *targetRunner) restart(ctx context.Context) {
+	if rs, ok := r.be.(restarter); ok {
+		rs.Restart(ctx)
+		return
+	}
 	if r.target.Build != "" {
 		r.startBuild(ctx, nil)
 		return
@@ -995,109 +997,35 @@ func (r *targetRunner) start(ctx context.Context) error {
 		slot = newStartSlot(release)
 	}
 
-	var (
-		cmd rerun.Command
-		pw  *os.File
-		err error
-	)
-	if r.raw() {
-		// The ad-hoc command is passed through raw: no pipe, no prefixing.
-		cmd, err = rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace, rerun.WithDir(r.target.Dir), rerun.WithStdout(r.out))
-	} else {
-		cmd, pw, err = r.startPiped(slot)
-	}
+	exited, err := r.be.Start(ctx, r.target, slot, r.announce)
 	if err != nil {
-		if slot != nil {
-			slot.free()
-		}
 		r.meta = startMeta{}
 		return err
 	}
+	r.exited = exited
+	if _, ok := r.be.(*processBackend); !ok {
+		// Without an announce, a backend's own start event reports the run, so the runner resets its state here.
+		r.mu.Lock()
+		r.lastStart = time.Now()
+		r.mu.Unlock()
+		r.meta = startMeta{}
+	}
+	return nil
+}
 
+// announce reports a generation that just came up, as the backend starts its health probe.
+func (r *targetRunner) announce(started time.Time) {
 	r.mu.Lock()
-	r.cmd = cmd
-	r.lastStart = time.Now()
-	started := r.lastStart
+	r.lastStart = started
 	r.mu.Unlock()
-
-	beginHealth, stopHealth := r.startHealth(ctx, started)
-	exited := r.watchGeneration(cmd, pw, slot, stopHealth)
 	r.selfExited = false
 
-	r.exited = exited
 	meta := r.meta
 	r.meta = startMeta{}
 	r.sink.emit(event{
 		kind: evStarted, target: r.target.Name, at: started,
 		files: meta.files, buildDur: meta.buildDur, prevUp: meta.prevUp, restart: meta.restart,
 	})
-	beginHealth()
-	return nil
-}
-
-// startPiped spawns a generation whose output is reported line by line.
-func (r *targetRunner) startPiped(slot *startSlot) (rerun.Command, *os.File, error) {
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return nil, nil, err
-	}
-	// Keeps children from reading keys meant for the TUI or leaving the tty raw.
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		_ = pw.Close()
-		_ = pr.Close()
-		return nil, nil, err
-	}
-	defer devNull.Close()
-
-	cmd, err := rerun.StartCommand([]string{r.target.Cmd}, r.target.Grace,
-		rerun.WithDir(r.target.Dir), rerun.WithStdin(devNull), rerun.WithStdout(pw), rerun.WithStderr(pw))
-	if err != nil {
-		_ = pw.Close()
-		_ = pr.Close()
-		return nil, nil, err
-	}
-
-	go r.readLines(pr, r.target.Name, slot)
-	return cmd, pw, nil
-}
-
-// watchGeneration closes the pipe writer once the generation is reaped, which
-// unblocks the readLines side.
-func (r *targetRunner) watchGeneration(cmd rerun.Command, pw *os.File, slot *startSlot, stopHealth func()) <-chan struct{} {
-	exited := make(chan struct{})
-	go func() {
-		_ = cmd.WaitExit(context.Background())
-		stopHealth()
-		if slot != nil {
-			slot.free()
-		}
-		if pw != nil {
-			_ = pw.Close()
-		}
-		close(exited)
-	}()
-	return exited
-}
-
-func (r *targetRunner) readLines(pr *os.File, name string, slot *startSlot) {
-	defer pr.Close()
-
-	scanner := bufio.NewScanner(pr)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	first := slot != nil
-	for scanner.Scan() {
-		if first {
-			slot.free() // the target is talking; it no longer needs the start slot
-			first = false
-		}
-		line := scanner.Text()
-		r.sink.emit(event{kind: evOutput, target: name, line: line})
-	}
-	// A line past the cap ends the read, so say so instead of going quiet.
-	if err := scanner.Err(); err != nil {
-		r.sink.emit(event{kind: evOutput, target: name, line: fmt.Sprintf("rerun: reading output: %v", err)})
-	}
 }
 
 func (r *targetRunner) reportExit() {
@@ -1106,12 +1034,10 @@ func (r *targetRunner) reportExit() {
 		return
 	}
 
-	cmd := r.currentCmd()
-	if cmd == nil {
+	code, err, ok := r.be.ExitState()
+	if !ok {
 		return
 	}
-
-	code, err := cmd.ExitState()
 
 	r.mu.Lock()
 	r.lastRun = time.Since(r.lastStart)
@@ -1204,17 +1130,6 @@ func (r *targetRunner) waitDelay(ctx context.Context, d time.Duration) bool {
 // command is the only nameless target.
 func (r *targetRunner) raw() bool { return r.target.Name == "" }
 
-// killCurrent stops the current generation, waiting the grace period.
-func (r *targetRunner) killCurrent(ctx context.Context) {
-	cmd := r.currentCmd()
-	if cmd == nil || cmd.Exited() {
-		return
-	}
-	_ = cmd.Kill()
-	_ = cmd.WaitExit(ctx)
-	r.stopHealthProbe()
-}
-
 // waitCooldown holds a restart back until the cooldown since the last start.
 func (r *targetRunner) waitCooldown(ctx context.Context) {
 	if r.target.Cooldown <= 0 {
@@ -1253,26 +1168,25 @@ func (r *targetRunner) markStopping() {
 	atomic.StoreInt32(&r.stopping, 1)
 }
 
+// killCurrent stops the current generation, waiting the grace period.
+func (r *targetRunner) killCurrent(ctx context.Context) {
+	r.be.Stop(ctx)
+}
+
 func (r *targetRunner) stop() {
-	cmd := r.currentCmd()
-	if cmd == nil {
-		return
-	}
-	_ = cmd.Kill()
+	r.be.Kill(false)
 }
 
 func (r *targetRunner) force() {
-	cmd := r.currentCmd()
-	if cmd == nil {
-		return
-	}
-	_ = cmd.KillForce()
+	r.be.Kill(true)
 }
 
+// currentCmd is the live process handle, or nil when the target is not a process.
 func (r *targetRunner) currentCmd() rerun.Command {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.cmd
+	if p, ok := r.be.(*processBackend); ok {
+		return p.current()
+	}
+	return nil
 }
 
 const (

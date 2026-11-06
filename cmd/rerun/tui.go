@@ -848,6 +848,13 @@ func (m *tuiModel) applyEvent(ev event) {
 		m.addRule(i, exitRule(t, ev, m.now))
 		t.runStarted = false
 
+	case evStopped:
+		// Someone stopped the service outside rerun, so it reads as stopped, not exited.
+		t.state = stateStopped
+		t.exitLabel = ""
+		t.restartBatch = 0
+		t.runStarted = false
+
 	case evWatcherErr:
 		m.showNotice(fmt.Sprintf("rerun: %s: watcher error: %v", t.spec.Name, ev.err), true)
 

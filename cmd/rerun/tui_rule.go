@@ -180,6 +180,9 @@ func (m *tuiModel) ruleRow(seq int) (int, bool) {
 
 func exitRule(t *tuiTarget, ev event, now time.Time) sepLine {
 	status := exitStatus(ev.code, ev.err)
+	if ev.status == "oom" {
+		status = "oom"
+	}
 	dur := ""
 	if t.runStarted && !t.lastStart.IsZero() {
 		d := eventTime(ev, now).Sub(t.lastStart)

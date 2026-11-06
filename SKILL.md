@@ -113,7 +113,26 @@ imports:
 
 Imported targets run from their own dir, and their names read `bpn-api/api`.
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
-imported file is ignored. A `services:` file (docker compose) is rejected for now.
+imported file is ignored. A compose file is imported as its services. See Docker Compose below.
+
+### Docker Compose: a compose file's services
+
+An import of a file with a top-level `services:` key makes each service a target:
+
+```yaml
+imports:
+  - path: ../devops/devbox/docker-compose.yml
+    group: devbox           # default: the compose project name
+    optional: true
+    services: [postgres]    # default: every service
+    profiles: [debug]
+```
+
+- Services show as `devbox/postgres`, with state, exit, restart and health rules.
+- Space starts or stops a service. `r` restarts it. Services never watch files or build.
+- State comes from `docker events` and `docker compose ps`. Logs come from `docker logs -f`.
+- Quitting rerun leaves the containers running.
+- Needs the `docker` CLI on PATH. `groups:` is an error on a compose import.
 
 ## Building rerun.yml
 

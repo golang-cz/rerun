@@ -205,7 +205,29 @@ api:
 - Saving an imported file reloads the config. Column picks save into the file that defines the target or group.
 - An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.
 - The same file imported twice loads once. A file that imports itself is an error.
-- An unknown import key is an error. A file with a top-level `services:` key (docker compose) is not supported yet.
+- An unknown import key is an error. A compose file is imported as its services. See Docker Compose below.
+
+#### Docker Compose
+
+An import of a file with a top-level `services:` key turns each service into a target:
+
+```yaml
+imports:
+  - path: ../devops/devbox/docker-compose.yml
+    group: devbox                    # default: the compose project name
+    optional: true
+    services: [postgres, redis]      # default: every service
+    profiles: [debug]                # compose profiles to activate
+```
+
+- A service shows as `devbox/postgres`, with the state, `▶ started`, `✗ exited 137`, `↻ restarted` and health marks.
+- `space` starts or stops a service. `r` restarts it.
+- Services have no file watching and no build. `docker compose watch` covers that.
+- rerun reads container state from `docker events`, and reconciles with `docker compose ps` after every reconnect.
+- Logs come from `docker logs -f`. Quitting rerun leaves the containers running.
+- If docker stops answering, the footer shows `docker unreachable, retrying`.
+- The `docker` CLI must be on PATH. A required import without it is an error. An optional one is skipped with a notice.
+- `groups:` is an error on a compose import. `services:` and `profiles:` are errors on a rerun import.
 
 #### Reloading
 
