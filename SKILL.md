@@ -67,7 +67,7 @@ Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
 targets. `o` open the url. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
-the longest target so messages start in a fixed column. The pane's top line is
+the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 

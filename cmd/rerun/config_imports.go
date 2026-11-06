@@ -37,7 +37,7 @@ type importSpec struct {
 }
 
 // parseImports merges the root file's imports into cfg; a root group named like an import gives its targets columns.
-func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string][]Column) error {
+func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string]groupDef) error {
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
 		return nil
 	}
@@ -184,11 +184,16 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				t.Schema = spec.group + "/" + t.Schema
 				t.Sub = t.Schema
 			}
-			if rootCols, ok := rootSchemas[spec.group]; ok && !t.ownColumns && !inFileGroup {
-				t.Schema = spec.group
-				t.SchemaFile = rootFile
-				t.SchemaLocal = spec.group
-				t.Columns = slices.Clone(rootCols)
+			if root, ok := rootSchemas[spec.group]; ok && !inFileGroup {
+				if t.Muted == nil {
+					t.Muted = root.muted
+				}
+				if !t.ownColumns {
+					t.Schema = spec.group
+					t.SchemaFile = rootFile
+					t.SchemaLocal = spec.group
+					t.Columns = slices.Clone(root.columns)
+				}
 			}
 			cfg.Targets = append(cfg.Targets, t)
 		}

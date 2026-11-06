@@ -88,6 +88,8 @@ type Target struct {
 	Selected bool
 	// Open asks rerun to open URL in the browser on the first start.
 	Open bool
+	// Muted is the `muted:` value, or nil when unset so the group's value can fill in.
+	Muted *bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
 	Dir string
 	// Kind is "compose" for a docker-compose service, or "" for a process.
@@ -106,6 +108,9 @@ type Target struct {
 	SchemaFile  string
 	SchemaLocal string
 }
+
+// mutedAtStart is the stream state a row starts in: its `muted:` value, else unmuted.
+func (t Target) mutedAtStart() bool { return t.Muted != nil && *t.Muted }
 
 // section is the import whose list section the target lists under, or "".
 func (t Target) section() string {
@@ -357,7 +362,13 @@ func parseConfigBytes(path string, data []byte) (*configSource, *yaml.Node, erro
 // parsedFile is one file's own targets and groups, before imports are merged in.
 type parsedFile struct {
 	targets []Target
-	schemas map[string][]Column
+	schemas map[string]groupDef
+}
+
+// groupDef is one `groups:` entry: its columns, and the `muted:` its members start with.
+type groupDef struct {
+	columns []Column
+	muted   *bool
 }
 
 // parseFileBody reads a file's groups and targets under the names the file writes.
@@ -425,13 +436,13 @@ var (
 )
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns"}
+var schemaFields = []string{"columns", "muted"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
-// columns. The two spellings cannot both appear. A null block is an empty one,
+// group. The two spellings cannot both appear. A null block is an empty one,
 // and a group with no columns, null or `{}`, is valid.
-func parseSchemas(src *configSource, root *yaml.Node) (map[string][]Column, error) {
-	schemas := make(map[string][]Column)
+func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, error) {
+	schemas := make(map[string]groupDef)
 	var kw groupBlock
 	found := false
 	for i := 0; i+1 < len(root.Content); i += 2 {
@@ -467,33 +478,33 @@ func parseSchemas(src *configSource, root *yaml.Node) (map[string][]Column, erro
 			if _, ok := schemas[name]; ok {
 				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate %s %q", kw.field, name))
 			}
-			cols, err := parseSchema(src, kw, name, value)
+			def, err := parseSchema(src, kw, name, value)
 			if err != nil {
 				return nil, err
 			}
-			schemas[name] = cols
+			schemas[name] = def
 		}
 	}
 	return schemas, nil
 }
 
-func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node) ([]Column, error) {
+func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node) (groupDef, error) {
 	node = deref(node)
 	owner := fmt.Sprintf("%s %q", kw.field, name)
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
-		return nil, nil
+		return groupDef{}, nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: expected a mapping of fields", owner))
+		return groupDef{}, src.at(node, nodeSpan(node), fmt.Sprintf("%s: expected a mapping of fields", owner))
 	}
 
-	var cols []Column
+	var def groupDef
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
 		field := key.Value
 		if seen[field] {
-			return nil, src.at(key, len(field), fmt.Sprintf("%s: duplicate field %q", owner, field))
+			return groupDef{}, src.at(key, len(field), fmt.Sprintf("%s: duplicate field %q", owner, field))
 		}
 		seen[field] = true
 
@@ -501,26 +512,33 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 		case "columns":
 			parsed, err := parseColumnList(src, owner, field, deref(node.Content[i+1]))
 			if err != nil {
-				return nil, err
+				return groupDef{}, err
 			}
-			cols = parsed
+			def.columns = parsed
+
+		case "muted":
+			b, err := boolField(src, name, field, deref(node.Content[i+1]))
+			if err != nil {
+				return groupDef{}, err
+			}
+			def.muted = &b
 
 		default:
 			e := src.at(key, len(field), fmt.Sprintf("%s: unknown field %q", owner, field))
 			e.note = "fields: " + strings.Join(schemaFields, ", ")
-			return nil, e
+			return groupDef{}, e
 		}
 	}
 
-	return cols, nil
+	return def, nil
 }
 
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "muted", "open", "selected", "start", "delay", "cooldown", "grace"}
 
-func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string][]Column) (Target, error) {
+func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
 	if node.Kind != yaml.MappingNode {
 		return Target{}, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: expected a mapping of fields", name))
@@ -613,6 +631,13 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: expected auto, onchange, or manual, got %q", name, field, s))
 			}
 
+		case "muted":
+			b, err := boolField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			target.Muted = &b
+
 		case "open", "selected":
 			b, err := boolField(src, name, field, value)
 			if err != nil {
@@ -645,8 +670,14 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		}
 	}
 
-	if target.Schema != "" && !seen["columns"] {
-		target.Columns = slices.Clone(schemas[target.Schema])
+	if target.Schema != "" {
+		group := schemas[target.Schema]
+		if !seen["columns"] {
+			target.Columns = slices.Clone(group.columns)
+		}
+		if target.Muted == nil {
+			target.Muted = group.muted
+		}
 	}
 	if strings.TrimSpace(target.Cmd) == "" {
 		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: run is required", name))

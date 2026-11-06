@@ -399,6 +399,7 @@ func newTUI(targets []Target) *tuiModel {
 			state:     initialState(target),
 			exitCode:  -1,
 			lastStart: m.now,
+			muted:     target.mutedAtStart(),
 		}
 		m.targets = append(m.targets, row)
 	}
@@ -912,7 +913,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	for i, spec := range c.targets {
 		row, known := byName[spec.Name]
 		if !known {
-			row = &tuiTarget{runner: c.runners[i], state: initialState(spec), exitCode: -1, lastStart: m.now}
+			row = &tuiTarget{runner: c.runners[i], state: initialState(spec), exitCode: -1, lastStart: m.now, muted: spec.mutedAtStart()}
 			if i < len(c.stopped) && c.stopped[i] && row.state == stateRunning {
 				row.state = stateOff // the group holds it down until space or r
 			}

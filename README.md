@@ -70,6 +70,7 @@ column. The pane's top line shows the cursor row's state, uptime, how many files
 last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
+A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it.
 The bottom-left footer reads `? help`. The fs drawer
 at the bottom of the left column is a feed of recent change batches, newest
 first. A batch is every change within 150ms of its first event, so one save
@@ -151,6 +152,7 @@ Each top-level key is one target. Fields:
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
+| `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
@@ -181,7 +183,8 @@ omsx-api:
 ```
 
 A target's own `columns` wins over its group's. A `group:` that names no
-group is a config error. A group may be empty (`webapps: {}`). `schemas:` and
+group is a config error. A group's `muted: true` starts its members muted, and a
+target's own `muted: false` overrides it. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
