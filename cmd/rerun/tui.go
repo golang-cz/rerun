@@ -1286,7 +1286,7 @@ func uptime(d time.Duration) string {
 // status is the row's second column: uptime while running, what happened after.
 func (m *tuiModel) status(t *tuiTarget) string {
 	if t.building {
-		return "⚙ " + shortDur(max(0, m.now.Sub(t.buildStart)))
+		return "⚙ " + buildDur(max(0, m.now.Sub(t.buildStart)))
 	}
 	if t.buildFailed {
 		return "✗ build"

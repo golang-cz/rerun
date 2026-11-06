@@ -81,8 +81,8 @@ func TestBuildStatusTextPerState(t *testing.T) {
 		t.Fatalf("building row = %q, want the run mark and ⚙ 4s", got)
 	}
 	m.now = buildAt.Add(64 * time.Second)
-	if got := row(); !strings.HasSuffix(got, "⚙ 1m4s") {
-		t.Fatalf("long build row = %q, want ⚙ 1m4s", got)
+	if got := row(); !strings.HasSuffix(got, "⚙ 1m04s") {
+		t.Fatalf("long build row = %q, want ⚙ 1m04s", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	if got := row(); !strings.HasSuffix(got, "✗ build") {
@@ -101,7 +101,7 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 	long := leftLineRaw(m, 0)
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	failed := leftLineRaw(m, 0)
-	for want, line := range map[string]string{"⚙ 1m4s": long, "✗ build": failed} {
+	for want, line := range map[string]string{"⚙ 1m04s": long, "✗ build": failed} {
 		if displayWidth(line) != leftW || statusCell(line) != want {
 			t.Fatalf("row = %q, want status %q in the %d-cell column", line, want, leftW)
 		}

@@ -94,7 +94,7 @@ func (r *restartRule) label(maxW int, grouped bool) string {
 		segs = append(segs, f)
 	}
 	if r.built > 0 {
-		segs = append(segs, "built "+shortDur(r.built))
+		segs = append(segs, "built "+buildDur(r.built))
 	}
 	if r.upFor > 0 {
 		segs = append(segs, "was up "+shortDur(r.upFor))

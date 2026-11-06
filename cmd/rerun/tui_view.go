@@ -805,7 +805,7 @@ func (m *tuiModel) titleLine(w int) string {
 		if t.state == stateRunning && !t.lastStart.IsZero() {
 			parts = []string{"running", "since " + t.lastStart.Format("15:04:05")}
 			if t.lastBuild > 0 {
-				parts = append(parts, "built "+shortDur(t.lastBuild))
+				parts = append(parts, "built "+buildDur(t.lastBuild))
 			}
 		}
 		parts = append(parts, fileCount(len(t.lastChange.Files)), oneLine(t.spec.Cmd))
