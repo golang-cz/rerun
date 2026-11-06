@@ -70,7 +70,7 @@ column. The pane's top line shows the cursor row's state, uptime, how many files
 last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
-A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it.
+A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `hide: true` starts its header folded; `→` or a click expands it. Folding is a start state; a reload keeps your fold for groups already shown.
 The bottom-left footer reads `? help`. The fs drawer
 at the bottom of the left column is a feed of recent change batches, newest
 first. A batch is every change within 150ms of its first event, so one save
@@ -153,6 +153,7 @@ Each top-level key is one target. Fields:
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
 | `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
+| `hide` | start the stream muted, like `muted`; a group's `hide` also starts its header folded. Own `muted` wins over `hide`, and `muted: false` overrides both. `hide: false` overrides a group's `hide: true` |
 | `open` | open `url` in the browser once at startup (default false) |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
@@ -184,7 +185,7 @@ omsx-api:
 
 A target's own `columns` wins over its group's. A `group:` that names no
 group is a config error. A group's `muted: true` starts its members muted, and a
-target's own `muted: false` overrides it. A group may be empty (`webapps: {}`). `schemas:` and
+target's own `muted: false` overrides it. A group's `hide: true` mutes its members the same way and starts the group's header folded. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
@@ -198,6 +199,7 @@ imports:
   - path: ../bpn-api/rerun.yml   # relative to this file; ~ expands
     group: bpn-api               # the section name; defaults to the file's dir name
     optional: true               # a missing file is skipped until it appears
+    hide: true                   # start its targets muted and its section folded
     groups: [backend]            # import only these groups of that file
 
 api:
@@ -207,6 +209,7 @@ api:
 - An imported target runs from its own file's dir. It shows under its `group` section as `bpn-api/api`.
 - The imported file's groups get the prefix too: `bpn-api/backend`.
 - A group in this file with the import's name gives every imported target its columns.
+- An import's `hide: true` mutes its targets and folds its section. It is the outermost level: the target's own `muted` or `hide`, and a group's `muted` or `hide`, still win.
 - A missing optional import shows one dim `bpn-api (not found)` row until its file appears.
 - Saving an imported file reloads the config. Column picks save into the file that defines the target or group.
 - An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.

@@ -404,6 +404,7 @@ func newTUI(targets []Target) *tuiModel {
 		m.targets = append(m.targets, row)
 	}
 	groupTargets(m.targets)
+	m.seedCollapsed(nil)
 	for _, t := range m.targets {
 		m.prefixW = max(m.prefixW, displayWidth(t.spec.Name))
 	}
@@ -894,8 +895,12 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.missing = c.missing
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
+	known := make(map[string]bool, len(old))
 	for _, t := range old {
 		byName[t.spec.Name] = t
+		if k := foldKey(t.spec); k != "" {
+			known[k] = true
+		}
 	}
 
 	// The cursor and selection follow their row by name: a reload reorders rows.
@@ -911,8 +916,8 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 
 	rows := make([]*tuiTarget, 0, len(c.targets))
 	for i, spec := range c.targets {
-		row, known := byName[spec.Name]
-		if !known {
+		row, exists := byName[spec.Name]
+		if !exists {
 			row = &tuiTarget{runner: c.runners[i], state: initialState(spec), exitCode: -1, lastStart: m.now, muted: spec.mutedAtStart()}
 			if i < len(c.stopped) && c.stopped[i] && row.state == stateRunning {
 				row.state = stateOff // the group holds it down until space or r
@@ -945,6 +950,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	}
 
 	m.targets = rows
+	m.seedCollapsed(known)
 	m.applyEdits()
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
@@ -955,11 +961,16 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		m.schemaSel = schema
 	}
 	m.cursor = min(m.cursor, max(0, m.listLen()-1))
+	found := false
 	for i, r := range m.listRows() {
 		if m.rowKey(r) == cursorKey {
-			m.cursor = i
+			m.cursor, found = i, true
 			break
 		}
+	}
+	// The seeded folds may have just hidden the cursor's row; follow it to the header that hides it.
+	if i := m.foldingHeader(cursorKey); !found && i >= 0 {
+		m.cursor = i
 	}
 	m.prefixW = 0
 	for _, row := range rows {

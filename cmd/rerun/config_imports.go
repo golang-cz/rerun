@@ -18,13 +18,14 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "groups", "services", "profiles"}
+var importFields = []string{"path", "group", "optional", "hide", "groups", "services", "profiles"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
 	path      string
 	group     string
 	optional  bool
+	hide      bool
 	groups    []string
 	services  []string
 	profiles  []string
@@ -188,11 +189,26 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if t.Muted == nil {
 					t.Muted = root.muted
 				}
+				if t.Muted == nil && root.hide {
+					muted := true
+					t.Muted = &muted
+				}
+				if root.hide {
+					t.GroupHide = true
+				}
 				if !t.ownColumns {
 					t.Schema = spec.group
 					t.SchemaFile = rootFile
 					t.SchemaLocal = spec.group
 					t.Columns = slices.Clone(root.columns)
+				}
+			}
+			// The import's hide is the outermost level: it only applies where nothing above set muted.
+			if spec.hide {
+				t.GroupHide, t.ImportHide = true, true
+				if t.Muted == nil {
+					muted := true
+					t.Muted = &muted
 				}
 			}
 			cfg.Targets = append(cfg.Targets, t)
@@ -282,7 +298,7 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				spec.group, spec.groupNode = strings.TrimSpace(value.Value), value
 			}
 
-		case "optional":
+		case "optional", "hide":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
 			}
@@ -290,7 +306,11 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			if err != nil {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
 			}
-			spec.optional = b
+			if field == "optional" {
+				spec.optional = b
+			} else {
+				spec.hide = b
+			}
 
 		case "groups":
 			list, _, err := stringOrList(src, "import", field, value)

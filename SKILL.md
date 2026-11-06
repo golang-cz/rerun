@@ -67,7 +67,7 @@ Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
 targets. `o` open the url. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
-the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted. The pane's top line is
+the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `hide: true` also folds its header. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. Folding is a start state; a reload keeps your fold for groups already shown. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
@@ -113,10 +113,12 @@ imports:
   - path: ../bpn-api/rerun.yml   # relative to this file
     group: bpn-api               # section name and target prefix; default: the dir name
     optional: true               # skip the file while it is missing
+    hide: true                   # start its targets muted and its section folded
     groups: [backend]            # only these groups of that file
 ```
 
 Imported targets run from their own dir, and their names read `bpn-api/api`.
+An import's `hide: true` mutes its targets and folds its section. Its own `muted` or `hide` and a group's still win.
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
 imported file is ignored. A compose file is imported as its services. See Docker Compose below.
 

@@ -156,3 +156,131 @@ func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 		t.Fatalf("rows after folding backend = %d, want 6", got)
 	}
 }
+
+func TestHiddenImportSectionStartsCollapsed(t *testing.T) {
+	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n\ngroups:\n  bpn:\n    hide: true\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	if got, want := nestedRows(m), []string{"▸bpn"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+func TestRootGroupFoldsImportWhenTargetNamesIt(t *testing.T) {
+	f := newImportFixture(t,
+		"groups:\n  bpn:\n    hide: true\nimports:\n  - path: ../bpn/rerun.yml\nlocal:\n  group: bpn\n  run: echo hi\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	if got, want := nestedRows(m), []string{"▸bpn"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+func TestImportedGroupHideFoldsOnItsSubKey(t *testing.T) {
+	f := newImportFixture(t,
+		"imports:\n  - path: ../bpn/rerun.yml\n",
+		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    hide: true\ntools-api:\n  group: tools\n  run: echo api\nweb:\n  run: echo web\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	if !m.collapsed["bpn/tools"] {
+		t.Fatalf("collapsed = %v, want bpn/tools folded", m.collapsed)
+	}
+	want := []string{"▾bpn", " ▸tools", " ▾all", "  web"}
+	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestImportedTargetHideFalseUnmutesUnderFoldedGroup(t *testing.T) {
+	f := newImportFixture(t,
+		"groups:\n  bpn:\n    hide: true\nimports:\n  - path: ../bpn/rerun.yml\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  hide: false\n  run: echo api\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	if got, want := nestedRows(m), []string{"▸bpn"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	if m.targets[0].muted {
+		t.Fatalf("api muted, want unmuted by its own hide: false")
+	}
+}
+
+func TestHeaderKey(t *testing.T) {
+	cases := []struct {
+		name string
+		t    Target
+		want string
+	}{
+		{"ungrouped target", Target{Name: "web"}, ""},
+		{"root group", Target{Name: "web", Schema: "ops"}, "ops"},
+		{"import target without a sub-group", Target{Name: "bpn/api", Import: "bpn"}, importKeyPrefix + "bpn"},
+		{"import target in a sub-group", Target{Name: "bpn/api", Import: "bpn", Sub: "bpn/tools"}, "bpn/tools"},
+		{"group of an import without a sub-group", Target{Name: "api", GroupImport: "bpn"}, importKeyPrefix + "bpn"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := headerKey(tt.t); got != tt.want {
+				t.Fatalf("headerKey = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReloadFoldingTheCursorRowMovesCursorToHeader(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.cursor = 1 // api
+	api := target("api")
+	api.Schema, api.GroupHide = "ops", true
+	m.rebuildRows(&configChange{targets: []Target{target("web"), api}})
+	r, ok := m.cursorRow()
+	if !ok || !r.header || r.schema != "ops" {
+		t.Fatalf("cursor on %+v, want the collapsed ops header", r)
+	}
+}
+
+func TestImportHideFoldsSectionNotSubGroup(t *testing.T) {
+	f := newImportFixture(t,
+		"imports:\n  - path: ../bpn/rerun.yml\n    hide: true\n",
+		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    hide: false\ntools-api:\n  group: tools\n  run: echo api\nweb:\n  run: echo web\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	if !m.collapsed[importKeyPrefix+"bpn"] {
+		t.Fatalf("collapsed = %v, want the bpn section folded", m.collapsed)
+	}
+	if got, want := nestedRows(m), []string{"▸bpn"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestImportHideReloadKeepsUserUnfold(t *testing.T) {
+	f := newImportFixture(t,
+		"imports:\n  - path: ../bpn/rerun.yml\n    hide: true\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModel(t, cfg.Targets...)
+	m.collapsed[importKeyPrefix+"bpn"] = false
+	m.rebuildRows(&configChange{targets: cfg.Targets})
+	if m.collapsed[importKeyPrefix+"bpn"] {
+		t.Fatalf("reload re-folded the bpn section the user opened")
+	}
+}

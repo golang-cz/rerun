@@ -132,7 +132,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, url, columns, group, muted, open, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, url, columns, group, muted, hide, open, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown schema",
@@ -162,7 +162,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field inside a schema",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
-			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, muted"},
+			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, muted, hide"},
 		},
 		{
 			name:    "schemas with no targets",
@@ -332,7 +332,7 @@ func TestParseConfigErrorPositions(t *testing.T) {
 			name:    "unknown field inside a schema points at the key",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
 			head:    `:4:5: schema "backend": unknown field "bogus"`,
-			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, muted"},
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, muted, hide"},
 		},
 		{
 			name:    "cmd is required points at the target",
@@ -721,6 +721,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"columns":  `["a {.b}"]`,
 		"group":    "backend",
 		"muted":    "true",
+		"hide":     "true",
 		"open":     "true",
 		"selected": "false",
 		"start":    "onchange",

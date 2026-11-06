@@ -296,6 +296,67 @@ func (m *tuiModel) treeRight() bool {
 	return true
 }
 
+// headerKey is the list header a target's group draws, or "" when it draws none.
+func headerKey(t Target) string {
+	if t.section() == "" {
+		return t.Schema
+	}
+	if t.Sub == "" {
+		return importKeyPrefix + t.section()
+	}
+	return t.Sub
+}
+
+// foldKey is the header a target's `hide:` folds: its import section when the import hides.
+func foldKey(t Target) string {
+	if t.ImportHide {
+		return importKeyPrefix + t.section()
+	}
+	return headerKey(t)
+}
+
+// Seed only unknown groups so a reload keeps the user's fold state.
+func (m *tuiModel) seedCollapsed(known map[string]bool) {
+	for _, t := range m.targets {
+		k := foldKey(t.spec)
+		if !t.spec.GroupHide || k == "" || known[k] {
+			continue
+		}
+		if m.collapsed == nil {
+			m.collapsed = map[string]bool{}
+		}
+		m.collapsed[k] = true
+	}
+}
+
+// foldingHeader is the listed header that hides the row key names, or -1; enclosingHeader needs a listed row.
+func (m *tuiModel) foldingHeader(key string) int {
+	rows := m.allRows()
+	at := -1
+	for i, r := range rows {
+		if m.rowKey(r) == key {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return -1
+	}
+	fold, depth := "", rows[at].depth
+	for i := at - 1; i >= 0 && depth > 0; i-- {
+		if r := rows[i]; r.header && r.depth < depth {
+			depth = r.depth
+			if m.collapsed[r.schema] {
+				fold = r.schema
+			}
+		}
+	}
+	if fold == "" {
+		return -1
+	}
+	return m.indexOfKey("schema:" + fold)
+}
+
 // toggleCollapse folds or unfolds the header at idx. A cursor the fold hides moves to the header.
 func (m *tuiModel) toggleCollapse(idx int) {
 	r, ok := m.listRowAt(idx)

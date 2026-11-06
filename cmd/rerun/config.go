@@ -90,6 +90,10 @@ type Target struct {
 	Open bool
 	// Muted is the `muted:` value, or nil when unset so the group's value can fill in.
 	Muted *bool
+	// GroupHide is set when the target's group is `hide: true`: its list header starts folded.
+	GroupHide bool
+	// ImportHide is set when the target's import is `hide: true`: the import section folds, not its sub-group.
+	ImportHide bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
 	Dir string
 	// Kind is "compose" for a docker-compose service, or "" for a process.
@@ -365,10 +369,11 @@ type parsedFile struct {
 	schemas map[string]groupDef
 }
 
-// groupDef is one `groups:` entry: its columns, and the `muted:` its members start with.
+// groupDef is one `groups:` entry: its columns, and the `muted:` and `hide:` its members start with.
 type groupDef struct {
 	columns []Column
 	muted   *bool
+	hide    bool
 }
 
 // parseFileBody reads a file's groups and targets under the names the file writes.
@@ -436,7 +441,7 @@ var (
 )
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "muted"}
+var schemaFields = []string{"columns", "muted", "hide"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
@@ -523,6 +528,13 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 			}
 			def.muted = &b
 
+		case "hide":
+			b, err := boolField(src, name, field, deref(node.Content[i+1]))
+			if err != nil {
+				return groupDef{}, err
+			}
+			def.hide = b
+
 		default:
 			e := src.at(key, len(field), fmt.Sprintf("%s: unknown field %q", owner, field))
 			e.note = "fields: " + strings.Join(schemaFields, ", ")
@@ -536,7 +548,7 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "muted", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "muted", "hide", "open", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
@@ -547,6 +559,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 	owner := fmt.Sprintf("target %q", name)
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
+	var hide *bool
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
 		field := key.Value
@@ -638,6 +651,13 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			}
 			target.Muted = &b
 
+		case "hide":
+			b, err := boolField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			hide = &b
+
 		case "open", "selected":
 			b, err := boolField(src, name, field, value)
 			if err != nil {
@@ -670,6 +690,10 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		}
 	}
 
+	// Own muted beats own hide, and both beat the group's muted and hide.
+	if target.Muted == nil && hide != nil {
+		target.Muted = hide
+	}
 	if target.Schema != "" {
 		group := schemas[target.Schema]
 		if !seen["columns"] {
@@ -678,6 +702,11 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		if target.Muted == nil {
 			target.Muted = group.muted
 		}
+		if target.Muted == nil && group.hide {
+			muted := true
+			target.Muted = &muted
+		}
+		target.GroupHide = group.hide
 	}
 	if strings.TrimSpace(target.Cmd) == "" {
 		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: run is required", name))
