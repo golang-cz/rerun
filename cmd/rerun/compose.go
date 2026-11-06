@@ -43,14 +43,18 @@ type composeTarget struct {
 // composeArgs prefixes a docker compose subcommand with this target's file and profiles.
 func (c *composeTarget) composeArgs(args ...string) []string {
 	out := []string{"compose", "-f", c.File}
+	// Compose hides profile-gated services unless a profile is named; `*` names them all.
+	if len(c.Profiles) == 0 {
+		out = append(out, "--profile", "*")
+	}
 	for _, p := range c.Profiles {
 		out = append(out, "--profile", p)
 	}
 	return append(out, args...)
 }
 
-// resolveCompose asks docker compose for the project name and the services a file defines.
-func resolveCompose(file string, profiles, services []string) (project string, names []string, err error) {
+// resolveCompose asks docker compose for the project name, the services a file defines, and each one's profiles.
+func resolveCompose(file string, profiles, services []string) (project string, names []string, profilesOf map[string][]string, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), composeResolveTimeout)
 	defer cancel()
 	ct := &composeTarget{File: file, Profiles: profiles}
@@ -60,31 +64,38 @@ func resolveCompose(file string, profiles, services []string) (project string, n
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", nil, fmt.Errorf("docker compose config: no answer after %s", composeResolveTimeout)
+		return "", nil, nil, fmt.Errorf("docker compose config: no answer after %s", composeResolveTimeout)
 	}
 	if err != nil {
-		return "", nil, fmt.Errorf("docker compose config: %s", firstLineOr(stderr.String(), err))
+		return "", nil, nil, fmt.Errorf("docker compose config: %s", firstLineOr(stderr.String(), err))
 	}
 
 	var cfg struct {
-		Name     string                     `json:"name"`
-		Services map[string]json.RawMessage `json:"services"`
+		Name     string `json:"name"`
+		Services map[string]struct {
+			Profiles []string `json:"profiles"`
+		} `json:"services"`
 	}
 	if err := json.Unmarshal(out, &cfg); err != nil {
-		return "", nil, fmt.Errorf("docker compose config: %w", err)
+		return "", nil, nil, fmt.Errorf("docker compose config: %w", err)
 	}
 
 	all := make([]string, 0, len(cfg.Services))
-	for name := range cfg.Services {
+	profilesOf = map[string][]string{}
+	for name, svc := range cfg.Services {
 		all = append(all, name)
+		profilesOf[name] = svc.Profiles
 	}
 	slices.Sort(all)
 	if len(services) == 0 {
-		return cfg.Name, all, nil
+		return cfg.Name, all, profilesOf, nil
 	}
 	for _, s := range services {
 		if _, ok := cfg.Services[s]; !ok {
-			return "", nil, fmt.Errorf("unknown service %q (not defined, or excluded by profiles)", s)
+			if len(profiles) == 0 {
+				return "", nil, nil, fmt.Errorf("unknown service %q (not defined)", s)
+			}
+			return "", nil, nil, fmt.Errorf("unknown service %q (not defined, or excluded by profiles)", s)
 		}
 	}
 	var keep []string
@@ -93,7 +104,7 @@ func resolveCompose(file string, profiles, services []string) (project string, n
 			keep = append(keep, s)
 		}
 	}
-	return cfg.Name, keep, nil
+	return cfg.Name, keep, profilesOf, nil
 }
 
 func firstLineOr(text string, fallback error) string {

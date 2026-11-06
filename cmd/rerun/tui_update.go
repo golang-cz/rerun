@@ -58,6 +58,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearSelection()
 		// Re-slice the pane for the new width and re-clamp paneCol.
 		m.vpDirty = true
+		// A rule's cut and its expansion depend on the width, so the rows are redone too.
+		m.dispDirty = true
 		return m, nil
 
 	case tickMsg:
@@ -198,6 +200,10 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.paneFocus:
 			m.paneFocus = false
 		default:
+			if !m.follow {
+				m.goLive()
+				break
+			}
 			before := m.scopeState()
 			m.escList()
 			if m.scopeState() == before && len(m.barChips()) > 0 {
@@ -252,10 +258,15 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.paneFocus = false
 			}
+		} else if m.listFocused() {
+			m.treeLeft()
 		}
 
 	case "right":
 		if !m.paneFocus {
+			if m.listFocused() && m.treeRight() {
+				break
+			}
 			m.paneFocus = true
 			m.drawerFocus = false
 		} else {
@@ -335,19 +346,6 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if i := m.cursorTarget(); i >= 0 {
 			m.openTarget(i)
 		}
-
-	case "b":
-		if r, ok := m.cursorRow(); ok && !r.header {
-			m.toggleBuildLog(r.target)
-		}
-
-	case "p":
-		m.toggleFreeze()
-
-	case "G":
-		m.follow = true
-		m.pending = 0
-		m.vp.GotoBottom()
 
 	case "pgup", "ctrl+u":
 		m.scrollUp(max(1, m.vp.Height/2))
@@ -466,15 +464,11 @@ func (m *tuiModel) toggleTarget(i int) {
 	m.startTarget(i)
 }
 
-// toggleFreeze stops the pane where it is, or resumes the live tail.
-func (m *tuiModel) toggleFreeze() {
-	if m.follow {
-		m.pauseTail()
-		return
-	}
-	m.vp.GotoBottom()
+// Clears the pending count with the tail, so the ↓ N new marker goes too.
+func (m *tuiModel) goLive() {
 	m.follow = true
 	m.pending = 0
+	m.vp.GotoBottom()
 }
 
 // scrollUp freezes the tail: new lines collect behind the `↓ N new` marker.
@@ -591,15 +585,15 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	r, _ := m.listRowAt(row)
+	// The arrow cell folds a header; its name cell selects it as before.
+	if r.header && msg.X == 2*r.depth {
+		m.toggleCollapse(row)
+		return m, nil
+	}
 
 	m.cursor = row
 	m.paneFocus = false
 	m.liveSelect()
-	// The status cell opens the build log, and its clicks never start or stop the row.
-	if !r.header && m.statusHit(msg.X) && m.targets[r.target].buildShown() {
-		m.setScope(r.target, "", r.target)
-		return m, nil
-	}
 	// The second click of a pair starts or stops the row, keeping the selection.
 	double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
 	if double {

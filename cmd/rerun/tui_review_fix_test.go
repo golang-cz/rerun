@@ -41,8 +41,9 @@ func TestFailedFirstBuildShowsExitedNotRunning(t *testing.T) {
 	if tg.state != stateExited || m.status(tg) != "✗ build" || tg.glyph() != "✗" {
 		t.Fatalf("state=%v status=%q glyph=%q, want exited build failed ✗", tg.state, m.status(tg), tg.glyph())
 	}
-	if rows := rawPane(m); len(rows) == 0 || !strings.Contains(rows[0], "nothing running") {
-		t.Fatalf("rule = %q, want nothing running", rows)
+	m.View()
+	if rows := m.paneLines(); len(rows) == 0 || !strings.Contains(strings.Join(rows, "\n"), "nothing running") {
+		t.Fatalf("pane = %q, want the rule's nothing running row", rows)
 	}
 }
 

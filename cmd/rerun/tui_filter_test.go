@@ -481,7 +481,7 @@ func TestFilterShrinkClampsFrozenYOffset(t *testing.T) {
 		addLines(m, "web", fmt.Sprintf("bb-%d", i))
 	}
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 	m.scrollUp(25)
 	if m.vp.YOffset != 16 {
 		t.Fatalf("YOffset = %d, want 16 before the shrink", m.vp.YOffset)

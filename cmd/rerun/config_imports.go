@@ -116,7 +116,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			if spec.groupsRef != nil {
 				return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
 			}
-			project, services, err := resolveComposeImport(spec, abs)
+			project, services, profilesOf, err := resolveComposeImport(spec, abs)
 			if errors.Is(err, errNoDocker) && spec.optional {
 				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
 				continue
@@ -131,7 +131,10 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				return err
 			}
 			cfg.Files = append(cfg.Files, abs)
-			targets = composeTargets(abs, project, services, spec.profiles)
+			if len(services) == 0 {
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: no services in %s", spec.path, abs))
+			}
+			targets = composeTargets(abs, spec.group, project, services, spec.profiles, profilesOf)
 		} else {
 			if spec.servicesRef != nil || spec.profilesRef != nil {
 				ref := spec.servicesRef
@@ -179,6 +182,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			inFileGroup := t.Schema != ""
 			if inFileGroup {
 				t.Schema = spec.group + "/" + t.Schema
+				t.Sub = t.Schema
 			}
 			if rootCols, ok := rootSchemas[spec.group]; ok && !t.ownColumns && !inFileGroup {
 				t.Schema = spec.group
@@ -189,6 +193,17 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			cfg.Targets = append(cfg.Targets, t)
 		}
 	}
+	loaded := map[string]bool{}
+	for _, t := range cfg.Targets {
+		if t.Import != "" {
+			loaded[t.Import] = true
+		}
+	}
+	for i := range cfg.Targets {
+		if t := &cfg.Targets[i]; t.Import == "" && loaded[t.Schema] {
+			t.GroupImport = t.Schema
+		}
+	}
 	return nil
 }
 
@@ -196,19 +211,19 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 var errNoDocker = errors.New("docker not found on PATH")
 
 // resolveComposeImport reads a compose file's project name and services through docker.
-func resolveComposeImport(spec importSpec, abs string) (string, []string, error) {
+func resolveComposeImport(spec importSpec, abs string) (string, []string, map[string][]string, error) {
 	if _, err := exec.LookPath("docker"); err != nil {
-		return "", nil, errNoDocker
+		return "", nil, nil, errNoDocker
 	}
 	return resolveCompose(abs, spec.profiles, spec.services)
 }
 
 // composeTargets makes one compose target per service. They never watch or build, so they start on r only.
-func composeTargets(file, project string, services, profiles []string) []Target {
+func composeTargets(file, group, project string, services, profiles []string, profilesOf map[string][]string) []Target {
 	dir := filepath.Dir(file)
 	out := make([]Target, 0, len(services))
 	for _, svc := range services {
-		out = append(out, Target{
+		t := Target{
 			Name:     svc,
 			Kind:     composeKind,
 			Selected: true,
@@ -216,9 +231,23 @@ func composeTargets(file, project string, services, profiles []string) []Target 
 			Dir:      dir,
 			File:     file,
 			Compose:  &composeTarget{File: file, Project: project, Service: svc, Profiles: profiles},
-		})
+		}
+		if p := listProfile(profilesOf[svc], profiles); p != "" {
+			t.Sub = group + "/" + p
+		}
+		out = append(out, t)
 	}
 	return out
+}
+
+// listProfile is the profile a service groups under: its first one the import names, else its first.
+func listProfile(svcProfiles, filter []string) string {
+	for _, p := range svcProfiles {
+		if len(filter) == 0 || slices.Contains(filter, p) {
+			return p
+		}
+	}
+	return ""
 }
 
 // parseImportSpec reads one `imports:` entry, a map with a path and optional keys.

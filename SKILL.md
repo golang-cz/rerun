@@ -65,16 +65,21 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `enter` focuses the pane. The cursor row narrows the pane to its target or
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
-targets. `o` open the url, `G` live output. The right pane is always the merged stream; the cursor row
+targets. `o` open the url. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
+Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
+becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click the icon or
+`+N more`, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
+pane cuts it short.
+
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
 it. The pane cursor (a reverse-video line) starts on the newest line; `↑/↓` move it when
-the pane is focused, and moving it off the live tail pauses the tail (`G` resumes).
+the pane is focused, and moving it off the live tail pauses the tail (`end` resumes).
 `enter` acts on the cursor line, and a non-JSON line gets a hint instead. Opening a block
 pauses the tail and keeps the block in view. Expanded keys are underlined and scalar
 values tinted. The first expansion of a session shows the click hint.
@@ -83,7 +88,7 @@ schema, else the target the pane shows), and a click on a scalar adds a `.path =
 (ANDed with `v`; `×` or `backspace` removes it). With the pane focused and the cursor on
 an expanded key or scalar row, `a` adds the key and `f` adds the value chip, as the
 clicks do. A table header column name is inert; only the `×` after it removes that
-column. A schema or target whose columns are unsaved shows a `*` in its marker column, two cells after its name; a `✱` there marks hidden output. Picks are
+column. A schema or target whose columns are unsaved shows a `*` in its marker column, two cells after its name. Picks are
 unsaved until `ctrl+s` writes them with the rerun.yml column writer; the footer shows
 `unsaved columns · ctrl+s save`, and the quit modal says so too. A target with a schema
 and no columns of its own writes its schema. A `columns:` list that a YAML alias uses elsewhere

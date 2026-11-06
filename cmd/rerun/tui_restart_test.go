@@ -120,8 +120,8 @@ func TestFirstStartRuleNamesItsBuild(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt, buildDur: 6 * time.Second}})
 	m.View()
-	if rules := rawRules(m); len(rules) != 1 || rules[0] != "▶ api started 15:04:05 · built 6s" {
-		t.Fatalf("rules = %q, want the first start with its build", rules)
+	if rules := rawRules(m); len(rules) != 1 || !strings.HasPrefix(rules[0], "▶ api started 15:04:05") || strings.Contains(rules[0], "built") {
+		t.Fatalf("rules = %q, want the first start without its build", rules)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 	cases := []struct {
 		name  string
 		state procState
-		tail  string
+		note  string
 	}{
 		{"old run still up", stateRunning, "still running the old build"},
 		{"nothing running", stateOff, "nothing running"},
@@ -143,10 +143,12 @@ func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 				lines: []string{"boom \x1b[31mred", "second"}}})
 			m.View()
 
-			want := "✗ api build failed · press b for output · a.go +1 · " + c.tail
-			raw := rawPane(m)
-			if len(raw) != 1 || raw[0] != want {
-				t.Fatalf("pane = %q, want only the rule %q", raw, want)
+			want := "✗ api build failed · a.go +1 more"
+			if got := buildRuleTexts(m); len(got) != 1 || got[0] != want {
+				t.Fatalf("rule = %q, want %q", got, want)
+			}
+			if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, c.note) {
+				t.Fatalf("pane = %q, want the note %q under the rule", rows, c.note)
 			}
 		})
 	}
@@ -251,7 +253,7 @@ func TestRestartDoesNotJumpWhenScrolledUpOrGrouped(t *testing.T) {
 	m.View()
 	m.cursor = 0
 	m.liveSelect()
-	press(m, "p") // freezes the tail, as a scroll does
+	m.pauseTail() // freezes the tail, as a scroll does
 	m.scrollUp(5)
 	m.View()
 	before := m.vp.YOffset

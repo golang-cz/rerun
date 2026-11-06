@@ -129,7 +129,7 @@ func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 	if m.pending != 10 {
 		t.Fatalf("pending = %d, want 10", m.pending)
 	}
-	if got := strings.TrimRight(lines[len(lines)-1], " "); got != "↓ 10 new · scrollback (p/G)" {
+	if got := strings.TrimRight(lines[len(lines)-1], " "); got != "↓ 10 new · scrollback · esc live" {
 		t.Fatalf("the paused pane's last line = %q, want the marker and chip", got)
 	}
 }
@@ -182,14 +182,14 @@ func TestScrollUpWithScrollbackStillFreezes(t *testing.T) {
 	}
 }
 
-// G resumes the live tail from the frozen state.
-func TestGResumesLiveTailAfterFreeze(t *testing.T) {
+// esc resumes the live tail from the frozen state.
+func TestEscResumesLiveTailAfterFreeze(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
 	m.View()
 	m.scrollUp(5)
 
-	press(m, "G")
+	press(m, "esc")
 	m.applyEvents(streamEvents("web", "new", 5).events)
 
 	if !m.follow || m.pending != 0 {

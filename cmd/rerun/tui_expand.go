@@ -55,6 +55,9 @@ type blockKey struct{ seq, base int }
 const blockCacheCap = 64
 
 func (m *tuiModel) expansionRows(raw int) []dispRow {
+	if !m.visibleObj[raw] {
+		return m.sepRows(raw)
+	}
 	k := blockKey{m.visibleSeq[raw], m.prefixW + 2}
 	if rows, ok := m.blockCache[k]; ok {
 		return rows
@@ -67,14 +70,36 @@ func (m *tuiModel) expansionRows(raw int) []dispRow {
 	return rows
 }
 
+// sepRows is a rule's expansion: its build rows, or the command a cut-short started rule hides.
+func (m *tuiModel) sepRows(raw int) []dispRow {
+	s := m.visibleSep[raw]
+	if !s.expandable(m.vp.Width) {
+		return nil
+	}
+	lines := []string{s.full}
+	if s.build != nil {
+		lines = s.build.expansion()
+	}
+	rows := make([]dispRow, len(lines))
+	for k, line := range lines {
+		rows[k] = dispRow{sub: k, text: spaces(4) + line}
+	}
+	return rows
+}
+
+// expandable reports whether a shown line opens: a JSON object, or a rule with something under it.
+func (m *tuiModel) expandable(raw int) bool {
+	return m.visibleObj[raw] || m.visibleSep[raw].expandable(m.vp.Width)
+}
+
 func (m *tuiModel) addDisp(r dispRow) {
 	m.disp = append(m.disp, r)
 	m.dispText = append(m.dispText, r.text)
 }
 
-// toggleExpand opens or closes a JSON line's block, keyed by its sequence number; opening pauses the tail.
+// Keyed by seq so an expansion survives a re-filter; opening pauses the tail.
 func (m *tuiModel) toggleExpand(raw int) {
-	if !m.visibleObj[raw] {
+	if !m.expandable(raw) {
 		return
 	}
 	seq := m.visibleSeq[raw]
@@ -82,7 +107,7 @@ func (m *tuiModel) toggleExpand(raw int) {
 	if opening {
 		m.pauseTail()
 		m.expanded[seq] = true
-		if !m.hintedExpand {
+		if m.visibleObj[raw] && !m.hintedExpand {
 			m.hintedExpand = true
 			m.showHint("click a key (a) to add a column · click a value (f) to filter")
 		}
@@ -196,12 +221,7 @@ func (m *tuiModel) toggleCursorExpand() {
 	if m.paneLen() == 0 {
 		return
 	}
-	raw := m.rowInfo(m.paneCursorRow()).raw
-	if !m.visibleObj[raw] {
-		m.showHint("the cursor line is not a JSON object")
-		return
-	}
-	m.toggleExpand(raw)
+	m.toggleExpand(m.rowInfo(m.paneCursorRow()).raw)
 }
 
 // cursorField is the expansion row under the cursor, or nil on a shown line.
@@ -267,6 +287,8 @@ func (m *tuiModel) clickPane(x, y int) {
 	r := m.rowInfo(row)
 	switch {
 	case r.sub < 0 && r.obj && px >= m.vp.Width-markW:
+		m.toggleExpand(r.raw)
+	case r.sub < 0 && !r.obj && m.visibleSep[r.raw].hit(px+m.paneCol, m.vp.Width):
 		m.toggleExpand(r.raw)
 	case r.field != nil && inSpan(r.field.keyX, px+m.paneCol):
 		m.pickKey(r.field)

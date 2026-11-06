@@ -291,7 +291,6 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 	m.cursor = 0        // web
 	m.applyScope(1, "") // api
 	m.targets[0].muted = true
-	m.targets[0].unseen = true
 
 	web, api := m.targets[0], m.targets[1]
 	worker := newTargetRunner(recTarget("worker", "worker"), &recordingSink{})
@@ -312,7 +311,7 @@ func TestReconcileRebuildsRowsByName(t *testing.T) {
 	if m.cursor != 1 || m.solo != 0 {
 		t.Fatalf("cursor = %d solo = %d, want web selected and api soloed", m.cursor, m.solo)
 	}
-	if !web.muted || !web.unseen {
+	if !web.muted {
 		t.Error("the reload dropped a row's mute state")
 	}
 	if m.prefixW != len("worker") {

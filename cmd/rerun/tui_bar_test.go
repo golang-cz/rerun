@@ -245,13 +245,13 @@ func TestDefaultHeaderOnlyWhenSomeTargetHasAGroup(t *testing.T) {
 
 	mixed := groupedModel(t)
 	names := listNames(mixed)
-	if names[len(names)-2] != "▾(no group)" || names[len(names)-1] != "web" {
+	if names[len(names)-2] != "▾all" || names[len(names)-1] != "web" {
 		t.Fatalf("mixed list = %v, want web under a trailing default header", names)
 	}
 
 	allGrouped := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("db", "data"))
 	for _, n := range listNames(allGrouped) {
-		if n == "▾(no group)" {
+		if n == "▾all" {
 			t.Fatalf("all-grouped list has a default header: %v", listNames(allGrouped))
 		}
 	}

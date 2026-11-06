@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -45,18 +46,6 @@ func listLabels(m *tuiModel) []string {
 		out = append(out, m.targets[r.target].spec.Name)
 	}
 	return out
-}
-
-// openBuildLog selects a target's row and presses b.
-func openBuildLog(m *tuiModel, name string) {
-	for i, r := range m.listRows() {
-		if !r.header && m.targets[r.target].spec.Name == name {
-			m.cursor = i
-			break
-		}
-	}
-	m.liveSelect()
-	press(m, "b")
 }
 
 // leftLineRaw is one left-column line, unstripped of its trailing blanks.
@@ -172,141 +161,6 @@ func TestRunColorsPerState(t *testing.T) {
 	}
 }
 
-func TestClickingTheStatusOpensTheBuildLog(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	m.View()
-	leftW, _ := m.layoutWidths()
-	m.Update(mouse(leftW-2, 0, false))
-
-	if m.buildView != 0 {
-		t.Fatalf("buildView = %d after the status click, want api", m.buildView)
-	}
-	if got := rawPane(m); got[len(got)-1] != "compiling" {
-		t.Fatalf("pane = %q, want the build log", got)
-	}
-	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (building)") {
-		t.Fatalf("title = %q", title)
-	}
-}
-
-func TestBKeyOpensAndClosesTheBuildLog(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}, {kind: evOutput, target: "api", line: "server up"}})
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-
-	press(m, "b")
-	if m.buildView != 0 || m.solo != 0 {
-		t.Fatalf("b left buildView=%d solo=%d, want the api build log", m.buildView, m.solo)
-	}
-	press(m, "b")
-	if m.buildView != -1 || m.solo != 0 {
-		t.Fatalf("second b left buildView=%d, want the service log", m.buildView)
-	}
-	press(m, "b")
-	press(m, "esc")
-	if m.buildView != -1 || m.solo != 0 {
-		t.Fatalf("esc left buildView=%d solo=%d, want the api service log", m.buildView, m.solo)
-	}
-	for _, line := range rawPane(m) {
-		if line == "compiling" {
-			t.Fatalf("service log holds build output: %q", rawPane(m))
-		}
-	}
-}
-
-func TestMovingTheCursorLeavesTheBuildLog(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	openBuildLog(m, "api")
-	press(m, "down")
-	if m.buildView != -1 || m.solo != 1 {
-		t.Fatalf("moving to web left buildView=%d solo=%d", m.buildView, m.solo)
-	}
-}
-
-func TestBuildLogTitleNamesTheState(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	title := func() string { return ansi.Strip(m.titleLine(80)) }
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	openBuildLog(m, "api")
-	if got := title(); !strings.Contains(got, "api · build log (building)") {
-		t.Fatalf("building title = %q", got)
-	}
-	m.applyEvents([]event{buildFail("api", time.Second)})
-	if got := title(); !strings.Contains(got, "api · build log (failed)") {
-		t.Fatalf("failed title = %q", got)
-	}
-	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
-	if got := title(); !strings.Contains(got, "api · build log (done)") {
-		t.Fatalf("done title = %q", got)
-	}
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	m.stopTarget(0)
-	if got := title(); !strings.Contains(got, "api · build log (cancelled)") {
-		t.Fatalf("cancelled title = %q", got)
-	}
-}
-
-func TestBuildLogStaysUntilTheCursorMoves(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	openBuildLog(m, "api")
-	m.applyEvents([]event{buildOK("api", time.Second)})
-
-	if r, _ := m.cursorRow(); r.header || m.targets[r.target].spec.Name != "api" {
-		t.Fatalf("cursor on %+v after success, want the api row", r)
-	}
-	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (done)") {
-		t.Fatalf("title = %q, want the finished build log", title)
-	}
-	started := "⚙ api build started " + buildAt.Format("15:04:05")
-	if got := rawPane(m); len(got) != 3 || got[0] != started || got[1] != "compiling" || got[2] != "✓ api build ok · 1s" {
-		t.Fatalf("pane after success = %q, want the build log kept", got)
-	}
-	press(m, "down")
-	if m.buildView != -1 {
-		t.Fatalf("buildView = %d after the cursor moved, want -1", m.buildView)
-	}
-}
-
-func TestStoppedBuildLogSaysCancelled(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"), target("web"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	openBuildLog(m, "api")
-	m.stopTarget(0)
-
-	if r, _ := m.cursorRow(); r.header || m.targets[r.target].spec.Name != "api" {
-		t.Fatalf("cursor on %+v after stop, want the api row", r)
-	}
-	if title := ansi.Strip(m.titleLine(80)); !strings.Contains(title, "api · build log (cancelled)") {
-		t.Fatalf("title = %q, want it to say cancelled", title)
-	}
-}
-
-func TestFailedRuleHintPointsAtB(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
-	if got := rawPane(m); len(got) != 1 || !strings.Contains(got[0], "press b for output") {
-		t.Fatalf("service pane = %q, want the failure rule with the b hint", got)
-	}
-}
-
-func TestBuildOutputStreamsLiveIntoItsView(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	openBuildLog(m, "api")
-
-	m.applyEvents([]event{buildOut("api", buildAt, "step \x1b[31m1")})
-	if got := rawPane(m); got[len(got)-1] != "step [31m1" {
-		t.Fatalf("first line not shown live: %q", got)
-	}
-	m.applyEvents([]event{buildOut("api", buildAt, "step 2")})
-	if got := rawPane(m); got[len(got)-1] != "step 2" {
-		t.Fatalf("second line not shown live: %q", got)
-	}
-}
-
 func TestBuildOutputNeverMixesIntoTheServiceStream(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{
@@ -329,61 +183,6 @@ func TestBuildOutputNeverMixesIntoTheServiceStream(t *testing.T) {
 	}
 }
 
-func TestFailedBuildKeepsRuleInBothViews(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{
-		buildStart("api", buildAt),
-		buildOut("api", buildAt, "boom"),
-		buildFail("api", 6*time.Second),
-	})
-	openBuildLog(m, "api")
-	if got := rawPane(m); got[len(got)-1] != "✗ api build failed · 6s" || got[len(got)-2] != "boom" {
-		t.Fatalf("build view = %q, want the boom line then the failure rule", got)
-	}
-}
-
-func TestNewBuildStartsWithRuleAndKeepsHistory(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	first := buildAt
-	second := buildAt.Add(time.Minute)
-	m.applyEvents([]event{
-		buildStart("api", first),
-		buildOut("api", first, "old line"),
-		buildFail("api", time.Second),
-	})
-	openBuildLog(m, "api")
-	m.applyEvents([]event{buildStart("api", second, "/x/a.go")})
-
-	got := rawPane(m)
-	oldAt, newAt := -1, -1
-	for i, line := range got {
-		switch {
-		case line == "old line":
-			oldAt = i
-		case strings.HasPrefix(line, "⚙ api build started "+second.Format("15:04:05")+" · a.go"):
-			newAt = i
-		}
-	}
-	if oldAt < 0 || newAt < 0 || oldAt > newAt {
-		t.Fatalf("build view = %q, want the old line kept above the new rule", got)
-	}
-	if m.pinSeq == 0 {
-		t.Fatal("the new build's rule is not pinned to the top")
-	}
-}
-
-func TestLinesFromAReplacedBuildAreDropped(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildStart("api", buildAt.Add(time.Minute))})
-	openBuildLog(m, "api")
-	m.applyEvents([]event{buildOut("api", buildAt, "stale")})
-	for _, line := range rawPane(m) {
-		if line == "stale" {
-			t.Fatalf("a line from the replaced build reached the view: %q", rawPane(m))
-		}
-	}
-}
-
 func TestLongBuildLeavesServiceLinesIntact(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "api", line: "server up"}})
@@ -397,11 +196,11 @@ func TestLongBuildLeavesServiceLinesIntact(t *testing.T) {
 	m.liveSelect()
 	m.applyEvents([]event{{kind: evOutput, target: "api", line: "still serving"}})
 	got := rawPane(m)
-	if len(got) != 2 || got[0] != "server up" || got[1] != "still serving" {
-		t.Fatalf("service pane after a 5000-line build holds %d lines, first %q", len(got), got[0])
+	if len(got) != 3 || got[0] != "server up" || got[2] != "still serving" || !strings.HasPrefix(got[1], "⚙ api building") {
+		t.Fatalf("service pane after a 5000-line build = %q, want the rule between the service lines", got)
 	}
-	if n := len(m.buildLog["api"]); n != buildLogCap {
-		t.Fatalf("build log holds %d lines, want the cap %d", n, buildLogCap)
+	if n := len(m.targets[0].buildRule.out); n != buildLogCap {
+		t.Fatalf("build output holds %d lines, want the cap %d", n, buildLogCap)
 	}
 }
 
@@ -474,5 +273,345 @@ func TestStartingAndStoppedDifferByShape(t *testing.T) {
 	stopped := tg.glyph()
 	if starting != "●" || stopped != "○" {
 		t.Fatalf("starting draws %q and stopped %q, want a filled ● and a hollow ○", starting, stopped)
+	}
+}
+
+// buildRuleTexts is each build rule's raw text in the stream, in order.
+func buildRuleTexts(m *tuiModel) []string {
+	var out []string
+	for _, ml := range m.merged {
+		if ml.sep.build != nil {
+			out = append(out, ml.text)
+		}
+	}
+	return out
+}
+
+func buildRuleSeq(m *tuiModel) int {
+	for _, ml := range m.merged {
+		if ml.sep.build != nil {
+			return ml.seq
+		}
+	}
+	return -1
+}
+
+func TestBuildRuleUpdatesInPlace(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go"), buildOut("api", buildAt, "compiling")})
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api building · a.go +1 more" {
+		t.Fatalf("building rule = %q, want one rule", got)
+	}
+	m.applyEvents([]event{buildOK("api", 500*time.Millisecond)})
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 500ms · a.go +1 more" {
+		t.Fatalf("rule after the build = %q, want it rewritten in place", got)
+	}
+	if len(m.merged) != 1 {
+		t.Fatalf("stream holds %d lines, want the one rule", len(m.merged))
+	}
+}
+
+func TestBuildRuleCollapsedWhileBuilding(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.View()
+	if seq := buildRuleSeq(m); m.expanded[seq] || m.paneLen() != 1 {
+		t.Fatalf("building rule expanded=%v with %d rows, want collapsed to one row", m.expanded[seq], m.paneLen())
+	}
+}
+
+func TestBuildFailureAutoExpandsItsRule(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{
+		buildStart("api", buildAt, "/x/a.go"),
+		buildOut("api", buildAt, "boom"),
+		{kind: evBuildFailed, target: "api", dur: 6 * time.Second, code: 2, files: []string{"/x/a.go"}},
+	})
+	m.View()
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "✗ api build failed · exit 2 · a.go" {
+		t.Fatalf("failed rule = %q", got)
+	}
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a failed build's rule is collapsed, want it open")
+	}
+	rows := strings.Join(m.paneLines(), "\n")
+	if !strings.Contains(rows, "boom") || !strings.Contains(rows, "nothing running") {
+		t.Fatalf("failed rule shows %q, want its output and the run state", rows)
+	}
+}
+
+func TestEnterTogglesBuildRule(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling"), buildOK("api", time.Second)})
+	press(m, "right", "enter")
+	if !m.expanded[buildRuleSeq(m)] || m.paneLen() < 2 {
+		t.Fatalf("enter did not open the build rule: expanded=%v rows=%d", m.expanded, m.paneLen())
+	}
+	press(m, "enter")
+	if len(m.expanded) != 0 {
+		t.Fatal("second enter did not close the build rule")
+	}
+}
+
+func TestClickOnBuildIconTogglesRule(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.View()
+	row := m.paneCursorRow()
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a click on the build icon did not open the rule")
+	}
+}
+
+func TestClickOnMoreOpensFileList(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go")})
+	m.View()
+	s := m.visibleSep[0]
+	end := displayWidth("── " + s.label)
+	if s.more != "+2 more" || !s.hit(end-2, m.vp.Width) || s.hit(end-10, m.vp.Width) {
+		t.Fatalf("hit spans wrong for %q", s.label)
+	}
+	row := m.paneCursorRow()
+	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset)
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "/x/c.go") {
+		t.Fatalf("file list not shown after +2 more: %q", rows)
+	}
+}
+
+func TestLongStartedCommandExpandsToFullText(t *testing.T) {
+	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
+	tg := target("api")
+	tg.Cmd = long
+	m := newTestModel(t, tg)
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
+	m.View()
+	row := m.paneCursorRow()
+	if !m.expandable(row) {
+		t.Fatal("a cut-short command is not expandable")
+	}
+	m.toggleExpand(row)
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
+		t.Fatalf("expansion lacks the full command: %q", rows)
+	}
+}
+
+func TestShortStartedCommandIsNotExpandable(t *testing.T) {
+	tg := target("api")
+	tg.Cmd = "echo hi"
+	m := newTestModel(t, tg)
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
+	m.View()
+	row := m.paneCursorRow()
+	if m.expandable(row) {
+		t.Fatal("an uncut command shows an expand affordance")
+	}
+	press(m, "right", "enter")
+	if len(m.expanded) != 0 {
+		t.Fatal("enter expanded a line with nothing under it")
+	}
+}
+
+func TestReplacedBuildRuleSaysReplaced(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildStart("api", buildAt.Add(time.Minute))})
+	got := buildRuleTexts(m)
+	if len(got) != 2 || got[0] != "⚙ api build replaced" || got[1] != "⚙ api building" {
+		t.Fatalf("rules = %q, want the old one replaced and the new one building", got)
+	}
+}
+
+func TestCancelledBuildRuleSaysCancelled(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), {kind: evBuildCancelled, target: "api"}})
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api build cancelled" {
+		t.Fatalf("rule = %q, want it to read cancelled", got)
+	}
+}
+
+func TestBKeyNoLongerDoesAnything(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.View()
+	before := len(m.merged)
+	press(m, "b")
+	if m.solo != -1 || m.paneFocus || len(m.expanded) != 0 || len(m.merged) != before {
+		t.Fatalf("b changed the view: solo=%d paneFocus=%v expanded=%v", m.solo, m.paneFocus, m.expanded)
+	}
+}
+
+// Only a failed build and the latest build keep their output across many rebuilds.
+func TestRebuildsKeepOnlyLatestAndFailedOutput(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	for n := 0; n < 50; n++ {
+		at := buildAt.Add(time.Duration(n) * time.Minute)
+		evs := []event{buildStart("api", at)}
+		for k := 0; k < 300; k++ {
+			evs = append(evs, buildOut("api", at, "line"))
+		}
+		if n%10 == 0 {
+			evs = append(evs, event{kind: evBuildFailed, target: "api", dur: time.Second, code: 1})
+		} else {
+			evs = append(evs, buildOK("api", time.Second))
+		}
+		m.applyEvents(evs)
+	}
+	recs, lines := 0, 0
+	for _, ml := range m.merged {
+		if ml.sep.build != nil && len(ml.sep.build.out) > 0 {
+			recs++
+			lines += len(ml.sep.build.out)
+		}
+	}
+	// Five failed builds plus the latest passed one keep output.
+	if recs != 6 || lines != 6*buildLogCap {
+		t.Fatalf("retained %d records with %d lines, want 6 records with %d lines", recs, lines, 6*buildLogCap)
+	}
+}
+
+func TestResizeRedrawsCutRule(t *testing.T) {
+	tg := target("api")
+	tg.Cmd = "go run " + strings.Repeat("x", 200)
+	m := newTestModel(t, tg)
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
+	m.View()
+	raw := m.rowInfo(m.paneLen() - 1).raw
+	if !m.expandable(raw) {
+		t.Fatal("a cut command is not expandable")
+	}
+	m.toggleExpand(raw)
+	if m.paneLen() < 2 {
+		t.Fatal("expansion did not open")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
+	m.View()
+	if m.paneLen() != 1 {
+		t.Fatalf("widening left %d rows, want the expansion gone", m.paneLen())
+	}
+}
+
+func TestResizeNarrowingMakesRuleExpandable(t *testing.T) {
+	tg := target("api")
+	tg.Cmd = "echo hi"
+	m := newTestModel(t, tg)
+	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
+	m.View()
+	raw := m.rowInfo(m.paneLen() - 1).raw
+	if m.expandable(raw) {
+		t.Fatal("a short command is expandable on a wide pane")
+	}
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	m.View()
+	if !m.expandable(raw) {
+		t.Fatal("narrowing did not make the cut command expandable")
+	}
+}
+
+func TestExpansionDropsWhenRuleScrollsOut(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), {kind: evBuildFailed, target: "api", code: 1}})
+	seq := buildRuleSeq(m)
+	if !m.expanded[seq] {
+		t.Fatal("failed rule is not expanded")
+	}
+	flood := make([]event, 0, lineCap+5)
+	for k := 0; k < lineCap+5; k++ {
+		flood = append(flood, event{kind: evOutput, target: "api", line: "svc"})
+	}
+	m.applyEvents(flood)
+	if len(m.expanded) != 0 {
+		t.Fatalf("expanded keeps %d keys after its rule scrolled out", len(m.expanded))
+	}
+}
+
+func TestBuildEventsAfterScrollOutDoNotLeakExpansion(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	flood := make([]event, 0, lineCap+5)
+	for k := 0; k < lineCap+5; k++ {
+		flood = append(flood, event{kind: evOutput, target: "api", line: "svc"})
+	}
+	m.applyEvents(flood)
+	m.applyEvents([]event{{kind: evBuildFailed, target: "api", code: 1}, buildOK("api", time.Second)})
+	if len(m.expanded) != 0 {
+		t.Fatalf("expanded holds %d keys for a rule no longer in the stream", len(m.expanded))
+	}
+}
+
+func TestLateOutputAfterCancelIsIgnored(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "early"), {kind: evBuildCancelled, target: "api"}, buildOut("api", buildAt, "late")})
+	rec := m.targets[0].buildRule
+	if len(rec.out) != 1 || rec.out[0] != "early" {
+		t.Fatalf("output after cancel = %q, want only the early line", rec.out)
+	}
+}
+
+func TestRuleHitHonorsPaneOffset(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{
+		{kind: evOutput, target: "api", line: strings.Repeat("y", 160)},
+		buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go"),
+	})
+	m.View()
+	m.paneCol = 10
+	m.vpDirty = true
+	m.View()
+	if m.paneCol != 10 {
+		t.Fatalf("paneCol = %d, want the pan kept at 10", m.paneCol)
+	}
+	row := m.paneLen() - 1
+	s := m.visibleSep[m.rowInfo(row).raw]
+	end := displayWidth("── " + s.label)
+	// The more text sits at end-2 in the rule, so a press there is end-2-paneCol on screen.
+	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset)
+	if len(m.expanded) != 0 {
+		t.Fatal("a press at the unpanned more column opened the rule")
+	}
+	m.clickPane(m.layout.leftW+1+end-2-m.paneCol, m.titleHeight()+row-m.vp.YOffset)
+	if len(m.expanded) != 1 {
+		t.Fatal("a press on the panned more text did not open the rule")
+	}
+}
+
+func TestRuleHitNarrowPaneKeepsIconOnly(t *testing.T) {
+	rec := &buildRec{name: "api", phase: buildRunning, files: []string{"/x/a.go", "/x/b.go", "/x/c.go"}}
+	s := rec.sep()
+	end := displayWidth("── " + s.label)
+	const w = 12
+	if !s.hit(3, w) {
+		t.Fatal("the icon does not open a rule on a narrow pane")
+	}
+	if s.hit(end-2, w) {
+		t.Fatal("the +N more text is clickable though the label is cut")
+	}
+}
+
+func TestClickRuleWhileFiltered(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{
+		buildStart("api", buildAt, "/x/a.go", "/x/b.go"),
+		{kind: evOutput, target: "web", line: "web line"},
+	})
+	m.filters = []textFilter{{query: "building", keep: func(s string) bool { return strings.Contains(s, "building") }}}
+	m.paneSelDirty = true
+	m.View()
+	if !m.filterActive() {
+		t.Fatal("the filter is not active")
+	}
+	row := -1
+	for i := 0; i < m.paneLen(); i++ {
+		if r := m.rowInfo(i); r.sub < 0 && m.visibleSep[r.raw].build != nil {
+			row = i
+		}
+	}
+	if row < 0 {
+		t.Fatalf("the build rule is not in the filtered pane: %q", rawPane(m))
+	}
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a click on the rule's icon while filtered did not open it")
 	}
 }

@@ -12,6 +12,9 @@ import (
 // selectHint is the footer hint when a column pick has no node to write to.
 const selectHint = "select a schema or target to add columns"
 
+// listKeyHint is the footer hint when the selection is an import or its `all`, which name no schema.
+const listKeyHint = "select a group or target"
+
 // unsavedNotice is the footer while column picks are waiting for ctrl+s.
 const unsavedNotice = "unsaved columns · ctrl+s save"
 
@@ -47,6 +50,9 @@ type colEdit struct {
 // then the soloed target; a target with a schema and no columns of its own
 // writes its schema.
 func (m *tuiModel) pickNode() (colNode, bool) {
+	if m.listOnlyScope() {
+		return colNode{}, false
+	}
 	if m.schemaSel != "" && m.schemaSel != ungrouped {
 		return colNode{schema: true, name: m.schemaSel}, true
 	}
@@ -134,11 +140,24 @@ func (m *tuiModel) applyEdits() {
 	}
 }
 
+// listOnlyScope reports whether the selection is an import or its `all`, which name no schema to write.
+func (m *tuiModel) listOnlyScope() bool {
+	return strings.HasPrefix(m.schemaSel, importKeyPrefix) || strings.HasPrefix(m.schemaSel, allKeyPrefix)
+}
+
+// noNodeHint is the footer hint for a column action with no node to write to.
+func (m *tuiModel) noNodeHint() string {
+	if m.listOnlyScope() {
+		return listKeyHint
+	}
+	return selectHint
+}
+
 // pickKey adds a clicked JSON key as a column of the selection's node.
 func (m *tuiModel) pickKey(f *jsonField) {
 	node, ok := m.pickNode()
 	if !ok {
-		m.showHint(selectHint)
+		m.showHint(m.noNodeHint())
 		return
 	}
 	cols, ok := m.nodeColumns(node)
@@ -159,7 +178,7 @@ func (m *tuiModel) pickKey(f *jsonField) {
 func (m *tuiModel) removeColumn(j int) {
 	node, ok := m.pickNode()
 	if !ok {
-		m.showHint("select a schema or target to remove columns")
+		m.showHint(m.noNodeHint())
 		return
 	}
 	cols, ok := m.nodeColumns(node)

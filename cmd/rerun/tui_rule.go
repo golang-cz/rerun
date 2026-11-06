@@ -27,21 +27,44 @@ type sepLine struct {
 	tone  sepTone
 	// restart is set on a ↻ rule, whose text is cut to the pane width at view time.
 	restart *restartRule
-	// cmd is the target's command, shown on the rule only in a group view.
-	cmd string
+	// icon is the click target that expands the rule.
+	icon  string
+	build *buildRec
+	// more is the "+N more" suffix of label, a click target too.
+	more string
+	// full is the command a started rule expands to when its label cuts it short.
+	full string
 }
 
 func (s sepLine) isSep() bool { return s.label != "" || s.restart != nil }
 
-// text is the rule's label cut to fit a rule of width w. The command goes last, so it is cut first.
+// text is the rule's label cut to fit a rule of width w.
 func (s sepLine) text(w int, grouped bool) string {
 	if s.restart != nil {
 		return s.restart.label(max(0, w-4), grouped)
 	}
-	if grouped && s.cmd != "" {
-		return s.label + " · $ " + s.cmd
-	}
 	return s.label
+}
+
+// expandable reports whether the rule has anything under it at pane width w.
+func (s sepLine) expandable(w int) bool {
+	if s.build != nil {
+		return s.build.note != "" || len(s.build.files) > 1 || len(s.build.out) > 0
+	}
+	return s.full != "" && displayWidth("── "+s.label+" ") > w
+}
+
+// hit reports whether a press at pane cell px opens the rule: its icon, or its "+N more".
+func (s sepLine) hit(px, w int) bool {
+	if !s.expandable(w) {
+		return false
+	}
+	const lead = 3 // the "── " before the label
+	if px >= lead && px < lead+displayWidth(s.icon) {
+		return true
+	}
+	end := displayWidth("── " + s.label)
+	return s.more != "" && end+1 <= w && px >= end-displayWidth(s.more) && px < end
 }
 
 // raw is the rule's full text, kept as its pane line for copy and search.
@@ -108,34 +131,89 @@ func shortDur(d time.Duration) string {
 	return d.Round(100 * time.Millisecond).String()
 }
 
-// buildFailedRule says whether the old run survived the failed build.
-func buildFailedRule(t *tuiTarget, ev event) sepLine {
-	// The hint sits near the title, so it survives a pane too narrow for the whole rule.
-	parts := []string{fmt.Sprintf("✗ %s build failed", t.spec.Name), "press b for output"}
-	if f := filesSummary(ev.files); f != "" {
-		parts = append(parts, f)
-	}
-	if t.runStarted && t.state.up() {
-		parts = append(parts, "still running the old build")
-	} else {
-		parts = append(parts, "nothing running")
-	}
-	return sepLine{label: strings.Join(parts, " · "), tone: toneFail}
+type buildPhase uint8
+
+const (
+	buildRunning buildPhase = iota
+	buildPassed
+	buildBroke
+	// buildDropped is a build that a newer one replaced or a stop cancelled.
+	buildDropped
+)
+
+// One build keeps one rule, rewritten in place as the build moves on.
+type buildRec struct {
+	name   string
+	seq    int
+	files  []string
+	phase  buildPhase
+	dur    time.Duration
+	reason string
+	// note is the first row under a failed build: whether the old run survived.
+	note string
+	out  []string
 }
 
-func buildStartRule(name string, at time.Time, files []string) sepLine {
-	label := fmt.Sprintf("⚙ %s build started %s", name, at.Format("15:04:05"))
-	if f := filesSummary(files); f != "" {
-		label += " · " + f
+func (r *buildRec) sep() sepLine {
+	icon, head := "⚙", r.name
+	switch r.phase {
+	case buildRunning:
+		head += " building"
+	case buildPassed:
+		head += " built " + shortDur(r.dur)
+	case buildBroke:
+		icon, head = "✗", r.name+" build failed"
+		if r.reason != "" {
+			head += " · " + r.reason
+		}
+	case buildDropped:
+		head += " build " + r.reason
 	}
-	return sepLine{label: label}
+	label := icon + " " + head
+	s := sepLine{icon: icon, build: r, tone: toneNone}
+	if r.phase == buildBroke {
+		s.tone = toneFail
+	}
+	if len(r.files) > 0 {
+		label += " · " + filepath.Base(r.files[0])
+	}
+	if n := len(r.files) - 1; n > 0 {
+		s.more = fmt.Sprintf("+%d more", n)
+		label += " " + s.more
+	}
+	s.label = label
+	return s
 }
 
-func buildEndRule(name string, ok bool, dur time.Duration) sepLine {
-	if ok {
-		return sepLine{label: fmt.Sprintf("✓ %s build ok · %s", name, shortDur(dur)), tone: toneOK}
+func (r *buildRec) expansion() []string {
+	var rows []string
+	if r.note != "" {
+		rows = append(rows, r.note)
 	}
-	return sepLine{label: fmt.Sprintf("✗ %s build failed · %s", name, shortDur(dur)), tone: toneFail}
+	if len(r.files) > 1 {
+		rows = append(rows, r.files...)
+	}
+	return append(rows, r.out...)
+}
+
+func buildReason(ev event) string {
+	switch {
+	case ev.code > 0:
+		return fmt.Sprintf("exit %d", ev.code)
+	case ev.err != nil:
+		return ellipsize(oneLine(printable(ev.err.Error(), false)), 40)
+	}
+	return ""
+}
+
+// startedRule names the run and its command; a command too long for the pane expands to the full one.
+func startedRule(name string, at time.Time, cmd string) sepLine {
+	s := sepLine{icon: "▶", label: fmt.Sprintf("▶ %s started %s", name, at.Format("15:04:05"))}
+	if cmd != "" {
+		s.label += " · " + cmd
+		s.full = cmd
+	}
+	return s
 }
 
 // followTail pins the pane to the tail, or holds a restart rule at the top until output fills below it.

@@ -17,8 +17,8 @@ import (
 // swaps this for golang-cz/ringbuf.
 const lineCap = 10_000
 
-// buildLogCap bounds one target's build output, so a noisy build cannot evict service lines.
-const buildLogCap = 2000
+// Output under a build rule is capped at the tail a failed build keeps.
+const buildLogCap = buildTailLines
 
 // maxEventBatch is how many runner events one Update takes in at a time, so a
 // chatty target cannot force a redraw per line.
@@ -147,7 +147,6 @@ type tuiTarget struct {
 	backoffUntil time.Time
 
 	muted  bool
-	unseen bool
 	opened bool
 
 	// lastChange is the newest change batch the target reacted to, which the
@@ -162,8 +161,8 @@ type tuiTarget struct {
 	building    bool
 	buildStart  time.Time
 	buildFailed bool
-	// buildCancelled marks the build log of a build that was dropped, not finished.
-	buildCancelled bool
+	// buildRule is the target's latest build, whose rule and output the next build event updates.
+	buildRule *buildRec
 	// health is the live run's probe state; lastRule is the restart rule it may still complete.
 	health   healthState
 	lastRule *restartRule
@@ -298,6 +297,10 @@ type tuiModel struct {
 
 	// schemaSel is the group whose members the pane merges, or "" for none.
 	schemaSel string
+	// collapsed holds the list headers folded shut, by group key; it lives in memory only.
+	collapsed map[string]bool
+	// listTop is the list's first visible row; it moves only when the cursor leaves the window.
+	listTop int
 
 	// barFocus routes keys to the filter bar; barSel is its focused chip, or -1.
 	barFocus bool
@@ -305,10 +308,6 @@ type tuiModel struct {
 
 	// pinSeq is the restart rule the pane holds at its top, 0 for none.
 	pinSeq int
-	// buildView is the target whose build log the pane shows alone, or -1 for none.
-	buildView int
-	// buildLog is each target's build output by name, capped apart from merged so builds never evict service lines.
-	buildLog map[string][]mergedLine
 
 	// inputMode is the bar's open input and input its text; an open input owns every key.
 	inputMode int
@@ -373,8 +372,6 @@ func newTUI(targets []Target) *tuiModel {
 		version:    version,
 		buildTime:  buildTime,
 		solo:       -1,
-		buildView:  -1,
-		buildLog:   map[string][]mergedLine{},
 		follow:     true,
 		drawerOpen: true,
 		now:        time.Now(),
@@ -436,7 +433,7 @@ func (m *tuiModel) streamsTo(i int) bool {
 	case m.solo >= 0:
 		return m.solo == i
 	case m.schemaSel != "":
-		return groupOf(m.targets[i]) == m.schemaSel
+		return m.memberOf(i, m.schemaSel)
 	}
 	return true
 }
@@ -455,7 +452,6 @@ func (m *tuiModel) toggleMute(i int) {
 		return // muting the solo row is a no-op
 	}
 	t.muted = !t.muted
-	m.refreshUnseen()
 	m.mergedDirty = true
 	m.vpDirty = true
 	m.recomputeSearch(false)
@@ -463,16 +459,6 @@ func (m *tuiModel) toggleMute(i int) {
 		m.showNotice("muted "+t.spec.Name, false)
 	} else {
 		m.showNotice("unmuted "+t.spec.Name, false)
-	}
-}
-
-// refreshUnseen drops the badge from every row whose stream is in the pane
-// again. Muted and solo-hidden rows keep theirs: their lines are still out.
-func (m *tuiModel) refreshUnseen() {
-	for i, t := range m.targets {
-		if m.streamsTo(i) {
-			t.unseen = false
-		}
 	}
 }
 
@@ -493,10 +479,12 @@ func (m *tuiModel) showHint(text string) {
 	m.hintUntil = m.now.Add(hintDuration)
 }
 
-// cancelBuild drops a running build's flags; a build log left over from it reads cancelled.
+// cancelBuild drops a running build's flags, and its rule reads cancelled.
 func (m *tuiModel) cancelBuild(i int) {
 	t := m.targets[i]
-	t.buildCancelled = t.building
+	if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
+		m.dropBuild(rec, "cancelled")
+	}
 	m.setBuildState(i, false, t.buildFailed)
 }
 
@@ -564,7 +552,8 @@ func (m *tuiModel) addRule(i int, s sepLine) {
 	m.addRow(i, s.raw(), s)
 }
 
-func (m *tuiModel) addRow(i int, line string, sep sepLine) {
+// Returns the seq so a build rule can find itself to rewrite later.
+func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 	t := m.targets[i]
 	m.nextSeq++
 	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
@@ -575,43 +564,50 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) {
 	if len(m.cellBySeq) > 2*lineCap {
 		m.pruneCells()
 	}
-	if m.shows(i) {
+	if len(m.expanded) > 0 {
+		m.pruneExpanded()
+	}
+	if m.streamsTo(i) {
 		m.showLine(ml)
 		if !m.follow {
 			m.pending++ // only lines the pane actually holds
 		}
 	} else {
-		// Output the pane is not showing: muted, hidden by another solo, or a build log is scoped.
-		t.unseen = true
 		m.mergedDirty = true
 	}
 	m.vpDirty = true
+	return ml.seq
 }
 
-func (m *tuiModel) addBuildLine(i int, line string) {
-	m.addBuildRow(i, line, sepLine{})
+// The rule is in the stream before any output, so output always has a row to fold under.
+func (m *tuiModel) newBuildRule(i int, files []string) *buildRec {
+	rec := &buildRec{name: m.targets[i].spec.Name, files: files}
+	s := rec.sep()
+	rec.seq = m.addRow(i, s.raw(), s)
+	return rec
 }
 
-func (m *tuiModel) addBuildRule(i int, s sepLine) {
-	m.addBuildRow(i, s.raw(), s)
-}
-
-func (m *tuiModel) addBuildRow(i int, line string, sep sepLine) {
-	name := m.targets[i].spec.Name
-	m.nextSeq++
-	ml := mergedLine{target: i, name: name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
-	m.buildLog[name] = appendLimit(m.buildLog[name], ml, buildLogCap)
-	if m.buildView == i {
-		m.showLine(ml)
-		if !m.follow {
-			m.pending++
+// syncBuildRule rewrites a build's rule where it sits, so one build keeps one line.
+// It reports whether the rule is still in the stream.
+func (m *tuiModel) syncBuildRule(rec *buildRec) bool {
+	s := rec.sep()
+	found := false
+	for k := len(m.merged) - 1; k >= 0; k-- {
+		if m.merged[k].seq == rec.seq {
+			m.merged[k].text, m.merged[k].sep = s.raw(), s
+			found = true
+			break
 		}
 	}
+	m.mergedDirty = true
 	m.vpDirty = true
+	return found
 }
 
-func (m *tuiModel) shows(i int) bool {
-	return m.buildView < 0 && m.streamsTo(i)
+// A build that never finished reads as dropped, not stuck at building.
+func (m *tuiModel) dropBuild(rec *buildRec, reason string) {
+	rec.phase, rec.reason = buildDropped, reason
+	m.syncBuildRule(rec)
 }
 
 func (m *tuiModel) showLine(ml mergedLine) {
@@ -748,43 +744,63 @@ func (m *tuiModel) applyEvent(ev event) {
 
 	case evBuildStarted:
 		t.buildStart = eventTime(ev, m.now)
-		t.buildCancelled = false
 		m.setBuildState(i, true, false)
-		m.addBuildRule(i, buildStartRule(t.spec.Name, t.buildStart, ev.files))
-		// The new build's rule pins to the top, with the earlier builds kept above it.
-		if m.follow && m.buildView == i {
-			m.pinSeq = m.nextSeq
+		if old := t.buildRule; old != nil {
+			if old.phase == buildRunning {
+				m.dropBuild(old, "replaced")
+			}
+			// Only a failed build keeps its output; the latest one keeps its own.
+			if old.phase != buildBroke {
+				old.out = nil
+				m.dispDirty = true
+			}
 		}
+		t.buildRule = m.newBuildRule(i, ev.files)
 
 	case evBuildOutput:
 		// A line from a build that a newer one has replaced belongs to no shown build.
-		if ev.buildAt.Equal(t.buildStart) {
-			m.addBuildLine(i, printable(ev.line, false))
+		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
+			rec.out = appendLimit(rec.out, printable(ev.line, false), buildLogCap)
+			m.dispDirty = m.dispDirty || m.expanded[rec.seq]
+			m.vpDirty = true
 		}
 
 	case evBuildOK:
-		t.buildCancelled = false
 		if t.exitLabel == "build failed" {
 			t.exitLabel = ""
 		}
 		m.setBuildState(i, false, false)
-		m.addBuildRule(i, buildEndRule(t.spec.Name, true, ev.dur))
+		if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
+			rec.phase, rec.dur = buildPassed, ev.dur
+			m.syncBuildRule(rec)
+		}
 
 	case evBuildCancelled:
 		m.cancelBuild(i)
 
 	case evBuildFailed:
-		// The output was streamed as evBuildOutput; the service keeps only the failure rule.
+		// The failure opens its rule, so the reason and the output show without a click.
+		up := t.runStarted && t.state.up()
 		m.setBuildState(i, false, true)
 		t.restartBatch = 0
-		m.addRule(i, buildFailedRule(t, ev))
-		m.addBuildRule(i, buildEndRule(t.spec.Name, false, ev.dur))
-		if !(t.runStarted && t.state.up()) {
+		rec := t.buildRule
+		if rec == nil || rec.phase != buildRunning {
+			rec = m.newBuildRule(i, ev.files)
+			t.buildRule = rec
+		}
+		rec.phase, rec.reason = buildBroke, buildReason(ev)
+		rec.note = "nothing running"
+		if up {
+			rec.note = "still running the old build"
+		}
+		if m.syncBuildRule(rec) {
+			m.expanded[rec.seq] = true
+		}
+		if !up {
 			t.state = stateExited
 			t.exitCode = -1
 			t.exitLabel = "build failed"
 			t.lastRule = nil
-			t.unseen = true
 		}
 
 	case evHealth:
@@ -819,11 +835,7 @@ func (m *tuiModel) applyEvent(ev event) {
 			}
 		} else {
 			t.lastRule = nil
-			label := fmt.Sprintf("▶ %s started %s", t.spec.Name, eventTime(ev, m.now).Format("15:04:05"))
-			if ev.buildDur > 0 {
-				label += " · built " + shortDur(ev.buildDur)
-			}
-			m.addRule(i, sepLine{label: label, cmd: oneLine(t.spec.Cmd)})
+			m.addRule(i, startedRule(t.spec.Name, eventTime(ev, m.now), oneLine(t.spec.Cmd)))
 		}
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
@@ -844,7 +856,6 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.state = stateExited
 		t.exitCode = ev.code
 		t.exitLabel = exitLabel(ev.code, ev.err)
-		t.unseen = true
 		m.addRule(i, exitRule(t, ev, m.now))
 		t.runStarted = false
 
@@ -865,7 +876,6 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.restartBatch = 0
 		t.exitCode = -1
 		t.exitLabel = "exit error"
-		t.unseen = true
 		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
@@ -882,10 +892,6 @@ func (m *tuiModel) applyEvent(ev event) {
 func (m *tuiModel) rebuildRows(c *configChange) {
 	m.missing = c.missing
 	old := m.targets
-	buildName := ""
-	if m.buildView >= 0 && m.buildView < len(old) {
-		buildName = old[m.buildView].spec.Name
-	}
 	byName := make(map[string]*tuiTarget, len(old))
 	for _, t := range old {
 		byName[t.spec.Name] = t
@@ -942,15 +948,6 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
 		m.solo = j
-	}
-	m.buildView = -1
-	if j, ok := index[buildName]; ok && buildName != "" {
-		m.buildView = j
-	}
-	for name := range m.buildLog {
-		if _, ok := index[name]; !ok {
-			delete(m.buildLog, name)
-		}
 	}
 	m.schemaSel = ""
 	if schema != "" && m.hasGroups() && len(m.schemaMembers(schema)) > 0 {
@@ -1236,21 +1233,24 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleObj = m.visibleObj[:0]
 	m.visibleSep = m.visibleSep[:0]
 	m.visibleLvl = m.visibleLvl[:0]
-	if m.buildView >= 0 {
-		for _, line := range m.buildLog[m.targets[m.buildView].spec.Name] {
-			line.target = m.buildView
+	for _, line := range m.merged {
+		if m.streamsTo(line.target) {
 			m.showLine(line)
-		}
-	} else {
-		for _, line := range m.merged {
-			if m.streamsTo(line.target) {
-				m.showLine(line)
-			}
 		}
 	}
 	m.mergedDirty = false
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
 	m.dispDirty = true
+}
+
+// pruneExpanded forgets expansions whose line scrolled out of merged.
+func (m *tuiModel) pruneExpanded() {
+	oldest := m.merged[0].seq
+	for seq := range m.expanded {
+		if seq < oldest {
+			delete(m.expanded, seq)
+		}
+	}
 }
 
 // Drops entries for lines that scrolled out, so streaming cannot grow the map.
@@ -1263,11 +1263,6 @@ func (m *tuiModel) pruneCells() {
 	}
 	for _, line := range m.merged {
 		keep(line)
-	}
-	for _, lines := range m.buildLog {
-		for _, line := range lines {
-			keep(line)
-		}
 	}
 	m.cellBySeq = live
 }

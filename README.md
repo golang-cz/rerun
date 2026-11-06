@@ -29,11 +29,11 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
-live tail, `esc` returns to the list), `space` start/stop, `r` reboot, `t`
+live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot, `t`
 toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
-On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url, `G` resume the live tail, `p` browse the
-scrollback, `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
+On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url. Scrolling up browses the
+scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` or `v` filters the pane (each filter is a chip; a leading `.` runs a yq expression per JSON line);
 `ctrl+f` finds in it (`n`/`N` step matches); `esc` never clears filters or find, `backspace` removes the last chip; `c` toggles the columns
 table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
@@ -45,6 +45,10 @@ newest line pauses the tail. Expanded keys are underlined and values tinted. Wit
 cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `.path == value`
 chip. In an expanded block, click a key to add it as a column of the
 selection: the selected schema, else the target the pane shows, else a hint says to select one.
+Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
+becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click the icon or
+`+N more`, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
+pane cuts it short.
 Click a scalar value to add a `.path == value` chip to the pane header. Chips AND together
 with `v`; click a chip's `×`, or press `backspace` with the pane focused, to remove one.
 Click the `×` after a column name in the table header to remove that column; a click on
@@ -56,7 +60,7 @@ terminal forwards it.
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
 a batch in the fs drawer to list its files, and a click on a schema header to select
 its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
-(`p`, `G`, or `↓ N new` resume). Shift-drag uses the terminal's own selection.
+(`esc` or `↓ N new` resumes). Shift-drag uses the terminal's own selection.
 Targets with a `group:` are listed under a `▾ name` header that counts
 its running members; targets without one follow. The right pane is always the
 merged stream; clicking a row narrows it to one target, and selecting a schema to its
@@ -65,8 +69,7 @@ line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's state, uptime, how many files its
 last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
-Each row keeps two marker cells after its name: `*` for unsaved columns and `✱` for
-hidden output. Muting a target posts a footer notice (`muted api`).
+Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 The bottom-left footer reads `? help`. The fs drawer
 at the bottom of the left column is a feed of recent change batches, newest
 first. A batch is every change within 150ms of its first event, so one save

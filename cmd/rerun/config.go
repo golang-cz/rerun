@@ -98,9 +98,21 @@ type Target struct {
 	File string
 	// Import is the import group the target came from, or "" for the root file.
 	Import string
+	// Sub is the sub-group a list shows inside an import: the imported file's group or a compose profile, prefixed with the import name; "" for none.
+	Sub string
+	// GroupImport is the import a root target's group names, so it lists in that import's section.
+	GroupImport string
 	// SchemaFile and SchemaLocal locate Schema's definition: its file and its name in that file.
 	SchemaFile  string
 	SchemaLocal string
+}
+
+// section is the import whose list section the target lists under, or "".
+func (t Target) section() string {
+	if t.Import != "" {
+		return t.Import
+	}
+	return t.GroupImport
 }
 
 // localName is the target's name as its own file writes it, without the import prefix.

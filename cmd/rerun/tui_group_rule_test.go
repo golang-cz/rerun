@@ -32,8 +32,8 @@ func TestRulesNameTheCommandOnlyInGroupView(t *testing.T) {
 
 	m.applyScope(-1, "")
 	m.View()
-	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· $ go run ./api") {
-		t.Errorf("group start rule = %q, want the command last", got)
+	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
+		t.Errorf("group start rule = %q, want the command named", got)
 	}
 	if got := ruleLine(m, "↻ web restarted"); !strings.Contains(got, "· $ npm start") {
 		t.Errorf("group restart rule = %q, want the command last", got)
@@ -89,10 +89,6 @@ func TestInterleavedFollowsTheStreamScope(t *testing.T) {
 	m.applyScope(-1, "backend")
 	if !m.interleaved() {
 		t.Error("schema selection is not interleaved")
-	}
-	m.setScope(0, "", 0)
-	if m.interleaved() {
-		t.Error("build view is interleaved")
 	}
 	m.applyScope(0, "")
 	if m.interleaved() {

@@ -551,8 +551,8 @@ func TestComposeServiceActionsIssueTheRightCommands(t *testing.T) {
 	if got, want := readFake(t, dir, "actions.log"), "up postgres\nstop postgres\nrestart postgres\n"; got != want {
 		t.Fatalf("actions = %q, want %q", got, want)
 	}
-	if calls := readFake(t, dir, "calls.log"); !strings.Contains(calls, "-f "+target.File+" up -d postgres") {
-		t.Errorf("up was not run against the compose file: %s", calls)
+	if calls := readFake(t, dir, "calls.log"); !strings.Contains(calls, "-f "+target.File+" --profile * up -d postgres") {
+		t.Errorf("up was not run against the compose file with every profile: %s", calls)
 	}
 }
 
@@ -649,7 +649,7 @@ func TestResolveComposeFiltersServicesAndProfiles(t *testing.T) {
 	writeFake(t, dir, "config.debug.json", `{"name":"devbox","services":{"postgres":{},"redis":{},"adminer":{}}}`)
 	file := filepath.Join(dir, "docker-compose.yml")
 
-	project, names, err := resolveCompose(file, nil, []string{"redis"})
+	project, names, _, err := resolveCompose(file, nil, []string{"redis"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,18 +657,26 @@ func TestResolveComposeFiltersServicesAndProfiles(t *testing.T) {
 		t.Fatalf("resolve = %q %v, want devbox [redis]", project, names)
 	}
 
-	_, names, err = resolveCompose(file, []string{"debug"}, nil)
+	_, names, _, err = resolveCompose(file, []string{"debug"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(names) != "[adminer postgres redis]" {
 		t.Fatalf("debug profile = %v, want all three services", names)
 	}
+
+	writeFake(t, dir, "config.json", `{"name":"devbox","services":{"postgres":{},"redis":{}}}`)
+	if _, names, _, err = resolveCompose(file, nil, nil); err != nil || fmt.Sprint(names) != "[postgres redis]" {
+		t.Fatalf("no profile = %v, %v, want the services compose lists", names, err)
+	}
+	if calls := readFake(t, dir, "calls.log"); !strings.Contains(calls, "--profile *") {
+		t.Errorf("no profiles should name every profile with `*`, calls: %s", calls)
+	}
 	if calls := readFake(t, dir, "calls.log"); !strings.Contains(calls, "--profile debug") {
 		t.Errorf("profile was not passed to compose: %s", calls)
 	}
 
-	if _, _, err := resolveCompose(file, nil, []string{"nope"}); err == nil || !strings.Contains(err.Error(), `unknown service "nope"`) {
+	if _, _, _, err := resolveCompose(file, nil, []string{"nope"}); err == nil || !strings.Contains(err.Error(), `unknown service "nope"`) {
 		t.Errorf("unknown service err = %v, want it named", err)
 	}
 }
@@ -736,5 +744,51 @@ func TestComposeImportWithoutDocker(t *testing.T) {
 	}
 	if got := targetNames(cfg); fmt.Sprint(got) != "[api]" || len(cfg.Notices) == 0 {
 		t.Fatalf("optional import: targets %v notices %v, want a skip with a notice", got, cfg.Notices)
+	}
+}
+
+func TestComposeImportWithoutProfilesKeepsGatedServices(t *testing.T) {
+	fastRetries(t)
+	dir := fakeDocker(t)
+	writeFake(t, dir, "config.json", `{"name":"devbox","services":{"postgres":{},"adminer":{"profiles":["debug"]}}}`)
+	composeYML := "services:\n  postgres:\n    image: postgres\n  adminer:\n    image: adminer\n    profiles: [debug]\n"
+	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\n",
+		map[string]string{"devbox/docker-compose.yml": composeYML})
+
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := targetNames(cfg); fmt.Sprint(got) != "[devbox/adminer devbox/postgres]" {
+		t.Fatalf("targets = %v, want both services without a profiles filter", got)
+	}
+	if len(cfg.Notices) != 0 {
+		t.Errorf("notices = %v, want none for a non-empty import", cfg.Notices)
+	}
+}
+
+func TestComposeImportWithNoServicesSaysSo(t *testing.T) {
+	fastRetries(t)
+	dir := fakeDocker(t)
+	writeFake(t, dir, "config.json", `{"name":"devbox","services":{}}`)
+	composeYML := "services: {}\n"
+	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\napi:\n  run: echo hi\n",
+		map[string]string{"devbox/docker-compose.yml": composeYML})
+
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := targetNames(cfg); fmt.Sprint(got) != "[api]" {
+		t.Fatalf("targets = %v, want none", targetNames(cfg))
+	}
+	found := false
+	for _, n := range cfg.Notices {
+		if strings.Contains(n, "no services") && strings.Contains(n, "devbox/docker-compose.yml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("notices = %v, want one naming the empty compose file", cfg.Notices)
 	}
 }

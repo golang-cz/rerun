@@ -13,51 +13,97 @@ const ungrouped = "\x00default"
 // importKeyPrefix keys an import's section, apart from the schema of the same name.
 const importKeyPrefix = "\x00import:"
 
-// listRow is one list line: a group header, or a target, indented under its group.
+// allKeyPrefix keys an import's ungrouped targets, apart from a group named all.
+const allKeyPrefix = "\x00all:"
+
+// listRow is one list line: a group header, or a target, indented by its depth.
 type listRow struct {
 	header  bool
-	schema  string
-	target  int   // a target row's index into m.targets; -1 on a header
-	members []int // a header's member indices, which are contiguous
-	indent  bool
+	schema  string // the group key a header names; a target's innermost header key
+	label   string // a header's short name in the list
+	target  int    // a target row's index into m.targets; -1 on a header
+	members []int  // a header's member indices, which are contiguous
+	depth   int    // indent level: header 0, sub-header and root-group target 1, sub-group target 2
+	// collapsed is a header folded shut, which hides every row below it at a deeper depth.
+	collapsed bool
 }
 
-// groupTargets makes each group's members contiguous and puts ungrouped targets last.
+// groupTargets orders targets as the list draws them: sections in first-use order, sub-groups in
+// first-use order inside an import, and each import's `all` last. Members stay contiguous.
 func groupTargets(rows []*tuiTarget) {
-	rank := map[string]int{}
+	section := map[string]int{}
+	sub := map[string]int{}
 	for _, t := range rows {
 		if k := groupOf(t); k != ungrouped {
-			if _, ok := rank[k]; !ok {
-				rank[k] = len(rank)
+			if _, ok := section[k]; !ok {
+				section[k] = len(section)
+			}
+		}
+		if s := t.spec.Sub; s != "" {
+			if _, ok := sub[s]; !ok {
+				sub[s] = len(sub)
 			}
 		}
 	}
-	key := func(t *tuiTarget) int {
+	sectionOf := func(t *tuiTarget) int {
 		if k := groupOf(t); k != ungrouped {
-			return rank[k]
+			return section[k]
 		}
-		return len(rank)
+		return len(section)
 	}
-	slices.SortStableFunc(rows, func(a, b *tuiTarget) int { return cmp.Compare(key(a), key(b)) })
+	subOf := func(t *tuiTarget) int {
+		if s := t.spec.Sub; s != "" {
+			return sub[s]
+		}
+		return len(sub)
+	}
+	slices.SortStableFunc(rows, func(a, b *tuiTarget) int {
+		if c := cmp.Compare(sectionOf(a), sectionOf(b)); c != 0 {
+			return c
+		}
+		return cmp.Compare(subOf(a), subOf(b))
+	})
 }
 
-// groupOf is the key a target lists under: its schema, else its import's section.
+// groupOf is the top-level section key a target lists under; an import's targets stay in its section.
 func groupOf(t *tuiTarget) string {
 	switch {
+	case t.spec.section() != "":
+		return importKeyPrefix + t.spec.section()
 	case t.spec.Schema != "":
 		return t.spec.Schema
-	case t.spec.Import != "":
-		return importKeyPrefix + t.spec.Import
 	}
 	return ungrouped
 }
 
-// groupLabel is the name a group shows as in the list, chips, and bottom line.
-func groupLabel(key string) string {
-	if key == ungrouped {
-		return "(no group)"
+// inKey reports whether a target belongs to the group a scope key names.
+func inKey(t Target, key string) bool {
+	switch {
+	case key == "":
+		return false
+	case strings.HasPrefix(key, importKeyPrefix):
+		return t.section() == strings.TrimPrefix(key, importKeyPrefix)
+	case strings.HasPrefix(key, allKeyPrefix):
+		return t.section() != "" && t.section() == strings.TrimPrefix(key, allKeyPrefix) && t.Sub == ""
+	case t.section() != "":
+		return t.Sub == key
+	case key == ungrouped:
+		return t.Schema == ""
 	}
-	return strings.TrimPrefix(key, importKeyPrefix)
+	return t.Schema == key
+}
+
+// groupLabel is the full name a group shows in the bottom line and the chips.
+func groupLabel(key string) string {
+	switch {
+	case key == ungrouped:
+		return "all"
+	case strings.HasPrefix(key, importKeyPrefix):
+		return strings.TrimPrefix(key, importKeyPrefix)
+	case strings.HasPrefix(key, allKeyPrefix):
+		return strings.TrimPrefix(key, allKeyPrefix) + "/all"
+	}
+	return key
 }
 
 // hasGroups reports whether any target has a group. Without one the list stays flat.
@@ -70,57 +116,119 @@ func (m *tuiModel) hasGroups() bool {
 	return false
 }
 
-// listRows is the list as drawn: each group header precedes its members.
-func (m *tuiModel) listRows() []listRow {
-	grouped := m.hasGroups()
+// allRows is every row, folded or not: each header precedes its members, and an import nests sub-headers.
+func (m *tuiModel) allRows() []listRow {
+	if !m.hasGroups() {
+		rows := make([]listRow, len(m.targets))
+		for i := range m.targets {
+			rows[i] = listRow{target: i}
+		}
+		return rows
+	}
 	var rows []listRow
 	for i := 0; i < len(m.targets); {
-		if !grouped {
-			rows = append(rows, listRow{target: i})
-			i++
-			continue
-		}
 		key := groupOf(m.targets[i])
 		members := m.schemaMembers(key)
-		rows = append(rows, listRow{header: true, schema: key, target: -1, members: members})
-		for _, j := range members {
-			rows = append(rows, listRow{schema: key, target: j, indent: true})
-		}
 		i += len(members)
+		if strings.HasPrefix(key, importKeyPrefix) {
+			rows = append(rows, m.importRows(key, members)...)
+			continue
+		}
+		rows = append(rows, listRow{header: true, schema: key, label: groupLabel(key), target: -1, members: members})
+		rows = append(rows, targetRows(key, members, 1)...)
 	}
 	return rows
 }
 
-func (t *tuiTarget) buildShown() bool { return t.building || t.buildFailed }
+// listRows is the list as drawn: allRows without the rows under a collapsed header.
+func (m *tuiModel) listRows() []listRow {
+	var out []listRow
+	skip := -1
+	for _, r := range m.allRows() {
+		if skip >= 0 && r.depth > skip {
+			continue
+		}
+		skip = -1
+		if r.header && m.collapsed[r.schema] {
+			r.collapsed = true
+			skip = r.depth
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// importRows is an import's section: its header, then one sub-header per group in file order, then `all`.
+func (m *tuiModel) importRows(key string, members []int) []listRow {
+	name := strings.TrimPrefix(key, importKeyPrefix)
+	rows := []listRow{{header: true, schema: key, label: name, target: -1, members: members}}
+	var subs []string
+	hasAll := false
+	for _, j := range members {
+		if s := m.targets[j].spec.Sub; s == "" {
+			hasAll = true
+		} else if !slices.Contains(subs, s) {
+			subs = append(subs, s)
+		}
+	}
+	if len(subs) == 0 {
+		return append(rows, targetRows(key, members, 1)...)
+	}
+	for _, s := range subs {
+		sm := m.schemaMembers(s)
+		rows = append(rows, listRow{header: true, schema: s, label: strings.TrimPrefix(s, name+"/"), target: -1, members: sm, depth: 1})
+		rows = append(rows, targetRows(s, sm, 2)...)
+	}
+	if hasAll {
+		all := allKeyPrefix + name
+		am := m.schemaMembers(all)
+		rows = append(rows, listRow{header: true, schema: all, label: "all", target: -1, members: am, depth: 1})
+		rows = append(rows, targetRows(all, am, 2)...)
+	}
+	return rows
+}
+
+// targetRows lists members under the header key at a depth.
+func targetRows(key string, members []int, depth int) []listRow {
+	rows := make([]listRow, 0, len(members))
+	for _, j := range members {
+		rows = append(rows, listRow{schema: key, target: j, depth: depth})
+	}
+	return rows
+}
 
 func (m *tuiModel) setBuildState(i int, building, failed bool) {
 	t := m.targets[i]
 	t.building, t.buildFailed = building, failed
 }
 
-func (m *tuiModel) toggleBuildLog(i int) {
-	if m.buildView == i {
-		m.setScope(i, "", -1)
-		return
-	}
-	m.setScope(i, "", i)
-}
-
 // schemaMembers is the target indices a group key names, in list order.
 func (m *tuiModel) schemaMembers(schema string) []int {
 	var members []int
 	for i, t := range m.targets {
-		if groupOf(t) == schema {
+		if inKey(t.spec, schema) {
 			members = append(members, i)
 		}
 	}
 	return members
 }
 
-// headerIndex is the list index of a group's header row, or -1 when there is none.
-func (m *tuiModel) headerIndex(key string) int {
-	for i, r := range m.listRows() {
-		if r.header && r.schema == key {
+// memberOf reports whether target i belongs to the group a scope key names.
+func (m *tuiModel) memberOf(i int, key string) bool { return inKey(m.targets[i].spec, key) }
+
+// enclosingHeader is the list index of the header row idx sits under, or -1 when there is none.
+// A sub-header's enclosing header is one level up; a target's is the nearest header above.
+func (m *tuiModel) enclosingHeader(idx int) int {
+	rows := m.listRows()
+	if idx < 0 || idx >= len(rows) {
+		return -1
+	}
+	want := -1
+	if rows[idx].header {
+		want = rows[idx].depth - 1
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if rows[i].header && (want < 0 || rows[i].depth == want) {
 			return i
 		}
 	}
@@ -154,6 +262,66 @@ func (m *tuiModel) rowKey(r listRow) string {
 		return "schema:" + r.schema
 	}
 	return "target:" + m.targets[r.target].spec.Name
+}
+
+// treeLeft is ← on the list: fold an open header, else step to the enclosing header.
+func (m *tuiModel) treeLeft() {
+	r, ok := m.cursorRow()
+	if !ok {
+		return
+	}
+	if r.header && !r.collapsed {
+		m.toggleCollapse(m.cursor)
+		return
+	}
+	if i := m.enclosingHeader(m.cursor); i >= 0 {
+		m.cursor = i
+		m.liveSelect()
+	}
+}
+
+// treeRight is → on the list: unfold a folded header. It reports false on any other row.
+func (m *tuiModel) treeRight() bool {
+	r, ok := m.cursorRow()
+	if !ok || !r.header || !r.collapsed {
+		return false
+	}
+	m.toggleCollapse(m.cursor)
+	return true
+}
+
+// toggleCollapse folds or unfolds the header at idx. A cursor the fold hides moves to the header.
+func (m *tuiModel) toggleCollapse(idx int) {
+	r, ok := m.listRowAt(idx)
+	if !ok || !r.header {
+		return
+	}
+	cursorKey := ""
+	if c, ok := m.cursorRow(); ok {
+		cursorKey = m.rowKey(c)
+	}
+	if m.collapsed[r.schema] {
+		delete(m.collapsed, r.schema)
+	} else {
+		if m.collapsed == nil {
+			m.collapsed = map[string]bool{}
+		}
+		m.collapsed[r.schema] = true
+	}
+	m.cursor = m.indexOfKey(cursorKey, m.rowKey(r))
+}
+
+// indexOfKey is the index of the first listed row named by keys, or -1 when none is listed.
+func (m *tuiModel) indexOfKey(keys ...string) int {
+	rows := m.listRows()
+	for _, k := range keys {
+		for i, r := range rows {
+			if m.rowKey(r) == k {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // toggleRow is space: starts or stops a target, or a header's members.
@@ -192,30 +360,25 @@ func (m *tuiModel) liveSelect() {
 	}
 }
 
-// applyRowScope scopes the pane to a header's group, to a target alone, or to a target's build log.
+// applyRowScope scopes the pane to a header's group or to a target alone.
 func (m *tuiModel) applyRowScope(r listRow) {
 	if r.header {
-		if m.solo >= 0 || m.schemaSel != r.schema || m.buildView >= 0 {
+		if m.solo >= 0 || m.schemaSel != r.schema {
 			m.applyScope(-1, r.schema)
 		}
 		return
 	}
-	if m.solo != r.target || m.schemaSel != "" || m.buildView >= 0 {
+	if m.solo != r.target || m.schemaSel != "" {
 		m.applyScope(r.target, "")
 	}
 }
 
 // applyScope sets the pane's selection: one target, one schema, or neither.
 // Moving the cursor must never unmute, so mutes are left alone.
-func (m *tuiModel) applyScope(solo int, schema string) { m.setScope(solo, schema, -1) }
-
-// setScope is applyScope plus a build log: build is a target whose build lines alone show, or -1.
-func (m *tuiModel) setScope(solo int, schema string, build int) {
+func (m *tuiModel) applyScope(solo int, schema string) {
 	m.solo = solo
 	m.schemaSel = schema
-	m.buildView = build
 	m.tableFlip = false
-	m.refreshUnseen()
 	m.group.setSoloGuard(solo >= 0 || schema != "")
 	m.mergedDirty = true
 	m.vpDirty = true
@@ -224,7 +387,7 @@ func (m *tuiModel) setScope(solo int, schema string, build int) {
 
 // clearScope drops the solo or schema selection and restores the pane's lines.
 func (m *tuiModel) clearScope() {
-	if m.solo < 0 && m.schemaSel == "" && m.buildView < 0 {
+	if m.solo < 0 && m.schemaSel == "" {
 		return
 	}
 	m.applyScope(-1, "")
@@ -272,23 +435,12 @@ func (m *tuiModel) muteTargets(members []int) {
 			m.targets[i].muted = mute
 		}
 	}
-	m.refreshUnseen()
 	m.mergedDirty = true
 	m.vpDirty = true
 	m.recomputeSearch(false)
 }
 
-// unseenIn reports whether any of the targets hides unseen output.
-func (m *tuiModel) unseenIn(members []int) bool {
-	for _, i := range members {
-		if m.targets[i].unseen {
-			return true
-		}
-	}
-	return false
-}
-
-// schemaLine draws `▾ backend` with its running/total count and an unseen badge.
+// schemaLine draws `▾ backend` with its running/total count and its unsaved-columns marker.
 func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	running := 0
 	for _, i := range r.members {
@@ -296,10 +448,15 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 			running++
 		}
 	}
+	indent := 2 * r.depth
+	glyph := "▾"
+	if r.collapsed {
+		glyph = "▸"
+	}
 	segs := []seg{
-		{text: "▾ "},
-		{text: padRight(groupLabel(r.schema), nameWidth(leftW))},
-		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0, m.unseenIn(r.members))},
+		{text: strings.Repeat(" ", indent) + glyph + " "},
+		{text: padRight(r.label, max(0, nameWidth(leftW)-indent))},
+		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
 	}
 	return renderSegs(segs, m.rowStyle(row, r), leftW)

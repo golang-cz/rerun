@@ -35,6 +35,7 @@ type buildJob struct {
 
 type buildResult struct {
 	err   error
+	code  int
 	lines []string
 	dur   time.Duration
 }
@@ -157,7 +158,7 @@ func (r *targetRunner) startBuild(ctx context.Context, files map[string]struct{}
 		job.ended.Store(time.Now().UnixNano())
 		buf.flush()
 		code, werr := cmd.ExitState()
-		res := buildResult{dur: time.Since(started), lines: buf.tail()}
+		res := buildResult{dur: time.Since(started), code: code, lines: buf.tail()}
 		switch {
 		case job.cancelled.Load():
 			res.err = errBuildCancelled
@@ -209,7 +210,7 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 	r.lastBuildStart, r.lastBuildEnd = job.started, time.Unix(0, job.ended.Load())
 	files := sortedFiles(job.files)
 	if res.err != nil {
-		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, lines: res.lines, err: res.err})
+		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, code: res.code, lines: res.lines, err: res.err})
 		return
 	}
 	r.sink.emit(event{kind: evBuildOK, target: r.target.Name, dur: res.dur})

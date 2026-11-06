@@ -105,12 +105,12 @@ func TestFocusedArrowsMoveThePaneCursor(t *testing.T) {
 		t.Fatalf("pane cursor after down = %d, want %d", got, newest)
 	}
 	if m.follow {
-		t.Fatal("moving the cursor down resumed the tail; only G resumes it")
+		t.Fatal("moving the cursor down resumed the tail; only esc resumes it")
 	}
 
-	press(m, "G")
+	escToLive(m)
 	if !m.follow {
-		t.Fatal("G did not resume the tail")
+		t.Fatal("esc did not resume the tail")
 	}
 }
 
@@ -191,7 +191,7 @@ func TestFocusedEscReturnsToListAndKeepsScroll(t *testing.T) {
 		t.Fatal("esc cleared solo while the pane was focused")
 	}
 
-	press(m, "esc")
+	press(m, "esc", "esc") // the first esc returns to the live tail
 	if m.solo != -1 {
 		t.Fatal("unfocused esc did not clear solo")
 	}

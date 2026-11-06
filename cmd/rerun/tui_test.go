@@ -184,103 +184,11 @@ func TestStreamButtonMuteOnSoloRowIsNoOp(t *testing.T) {
 	}
 }
 
-func TestUnseenBadgeOnMutedOutput(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.toggleMute(1)
-
-	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden"})
-	if !m.targets[1].unseen {
-		t.Fatal("muted output did not raise the badge")
-	}
-	if !strings.Contains(m.View(), "✱") {
-		t.Error("the ✱ badge is not on screen")
-	}
-
-	// Unmuting the row clears it.
-	m.toggleMute(1)
-	if m.targets[1].unseen {
-		t.Error("unmuting did not clear the badge")
-	}
-}
-
-func TestNoBadgeForVisibleOutput(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.applyEvent(event{kind: evOutput, target: "api", line: "visible"})
-	if m.targets[1].unseen {
-		t.Fatal("output already in the pane must not raise the badge")
-	}
-}
-
-func TestUnseenExitBadgeClearsOnUnmute(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.applyEvent(event{kind: evExited, target: "web", status: "status 1", code: 1, err: nil})
-	if !m.targets[0].unseen {
-		t.Fatal("an exit did not raise the badge")
-	}
-
-	m.toggleMute(0)
-	if !m.targets[0].unseen {
-		t.Error("muting must not clear the badge")
-	}
-	m.toggleMute(0)
-	if m.targets[0].unseen {
-		t.Error("unmuting did not clear the badge")
-	}
-}
-
-// While one row is soloed, every other row's output is out of the pane and
-// earns the badge; esc brings the lines back and drops it.
-func TestUnseenBadgeOnSoloHiddenOutput(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	m.applyScope(0, "")
-
-	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden by solo"})
-	if !m.targets[1].unseen {
-		t.Fatal("output hidden by another row's solo did not raise the badge")
-	}
-	if !strings.Contains(m.View(), "✱") {
-		t.Error("the ✱ badge is not on screen")
-	}
-
-	// The soloed row's own output is in the pane: no badge.
-	m.applyEvent(event{kind: evOutput, target: "web", line: "visible"})
-	if m.targets[0].unseen {
-		t.Error("the soloed row's visible output raised the badge")
-	}
-
-	press(m, "esc")
-	if m.solo != -1 {
-		t.Fatal("esc did not clear the solo")
-	}
-	if m.targets[1].unseen {
-		t.Error("clearing the solo did not clear the hidden row's badge")
-	}
-}
-
-// Switching the solo from A to B returns A's lines to the pane, so its badge
-// goes; B stays badged until its own lines show.
-func TestUnseenBadgeClearsOnSoloSwitch(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.applyScope(0, "")
-	m.applyEvent(event{kind: evOutput, target: "api", line: "hidden"})
-	if !m.targets[1].unseen {
-		t.Fatal("solo-hidden output did not raise the badge")
-	}
-
-	m.applyScope(1, "")
-	if m.targets[0].unseen {
-		t.Error("web's badge survived the solo switching away from API")
-	}
-	if m.targets[1].unseen {
-		t.Error("the newly soloed row kept a badge")
-	}
-}
-
 func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
 	m.help, m.helpAll = true, true
 	view := m.View()
-	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off", "✱ unseen"} {
+	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help is missing the legend %q", want)
 		}
@@ -780,8 +688,8 @@ func TestFrozenChipShowsWithoutPending(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.View()
-	press(m, "p")
-	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G)") {
+	m.pauseTail()
+	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback · esc live") {
 		t.Fatalf("bottom line = %q, want the paused chip", got)
 	}
 }
@@ -791,8 +699,8 @@ func TestScopeAddsNoBottomLineChip(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyScope(0, "")
 	fadeNotice(m)
-	press(m, "p")
-	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback (p/G)") || strings.Contains(got, "web") {
+	m.pauseTail()
+	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback · esc live") || strings.Contains(got, "web") {
 		t.Fatalf("bottom line = %q, want the paused chip and no scope", got)
 	}
 }
@@ -802,7 +710,7 @@ func TestChipHiddenWhileInputOpen(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 	press(m, "/")
 	if got := bottomPaneLine(m); strings.Contains(got, "scrollback") || strings.Contains(got, "solo") {
 		t.Fatalf("bottom line = %q, want no chip while the bar is open", got)

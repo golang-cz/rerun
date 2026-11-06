@@ -215,11 +215,12 @@ func overlayCenter(frame, box string, width, height int) string {
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	nameW := 1
-	for _, t := range m.targets {
-		w := displayWidth(t.spec.Name)
-		if g := groupOf(t); g != ungrouped {
-			w += 2 // a member's name sits under its group header's indent
-			nameW = max(nameW, displayWidth(groupLabel(g)))
+	for _, r := range m.listRows() {
+		w := 2 * r.depth // each indent level sits in front of the name
+		if r.header {
+			w += displayWidth(r.label)
+		} else {
+			w += displayWidth(m.targets[r.target].spec.localName())
 		}
 		nameW = max(nameW, w)
 	}
@@ -246,17 +247,13 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 // nameWidth is the name cell's width for a given left column width.
 func nameWidth(leftW int) int { return max(0, leftW-statusW-4) }
 
-// marker is the two cells after a name: `*` when its columns await ctrl+s, `✱`
-// when its output is hidden. Both cells stay blank otherwise, so the status never shifts.
-func marker(dirty, unseen bool) string {
-	d, u := " ", " "
+// marker is the two cells after a name: `*` when its columns await ctrl+s, else blank,
+// so the status never shifts.
+func marker(dirty bool) string {
 	if dirty {
-		d = "*"
+		return "* "
 	}
-	if unseen {
-		u = "✱"
-	}
-	return d + u
+	return "  "
 }
 
 // listLen counts the list's screen lines: schema headers and targets.
@@ -272,15 +269,22 @@ func (m *tuiModel) listHeight() int {
 	return max(1, m.height-1-reserved)
 }
 
-// listOffset scrolls the list so the cursor's row stays inside the list area.
+// listOffset keeps the list's stored top row, and moves it only when the cursor
+// leaves the window: just enough to put the cursor on the top or bottom row.
 // The drawer never scrolls with it.
 func (m *tuiModel) listOffset() int {
 	visible := m.listHeight()
-	offset := 0
-	if m.cursor >= visible {
-		offset = m.cursor - visible + 1
+	top := m.listTop
+	switch {
+	case m.cursor < top:
+		top = m.cursor
+	case m.cursor >= top+visible:
+		top = m.cursor - visible + 1
 	}
-	return min(offset, max(0, m.listLen()+len(m.missing)-visible))
+	// Rows that shrank (a fold, a reload, a taller screen) never leave blank rows below the last one.
+	top = min(max(top, 0), max(0, m.listLen()+len(m.missing)-visible))
+	m.listTop = top
+	return top
 }
 
 // inDrawer reports whether a screen row is inside the drawer, and which of its
@@ -500,17 +504,16 @@ func (m *tuiModel) missingLine(mi missingImport, leftW int) string {
 func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
 
-	name := nameWidth(leftW)
+	indent := 2 * r.depth
 	var segs []seg
-	if r.indent {
-		segs = append(segs, seg{text: "  "})
-		name = max(0, name-2)
+	if indent > 0 {
+		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
 	}
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(t.spec.Name, name), link: t.spec.URL},
-		seg{text: marker(m.targetDirty(t), t.unseen)},
+		seg{text: padRight(t.spec.localName(), max(0, nameWidth(leftW)-indent)), link: t.spec.URL},
+		seg{text: marker(m.targetDirty(t))},
 		seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)},
 	)
 	style := m.rowStyle(row, r)
@@ -568,11 +571,6 @@ func stateColor(t *tuiTarget) string {
 		return runRed
 	}
 	return colorGray
-}
-
-// statusHit reports whether a list click lands in the status column.
-func (m *tuiModel) statusHit(x int) bool {
-	return x >= m.layout.leftW-statusW && x < m.layout.leftW
 }
 
 // statusColor keeps the uptime quiet and lets a red or green exit speak.
@@ -768,7 +766,7 @@ func (m *tuiModel) stateChip() string {
 	if m.follow {
 		return ""
 	}
-	return "scrollback (p/G)"
+	return "scrollback · esc live"
 }
 
 // searchLine is the find counter.
@@ -792,9 +790,7 @@ func (m *tuiModel) copyHintActive() bool {
 // glyph. The url follows, linked, when the target has one.
 func (m *tuiModel) titleLine(w int) string {
 	var segs []seg
-	if i := m.cursorTarget(); i >= 0 && i == m.buildView {
-		segs = append(segs, seg{text: m.buildLogTitle(m.targets[i])})
-	} else if i >= 0 {
+	if i := m.cursorTarget(); i >= 0 {
 		t := m.targets[i]
 		if t.state == stateExited {
 			segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
@@ -819,20 +815,6 @@ func (m *tuiModel) titleLine(w int) string {
 		}
 	}
 	return renderSegs(segs, m.titleStyle(), w)
-}
-
-// buildLogTitle names the build log the pane still shows after the cursor's row left it.
-func (m *tuiModel) buildLogTitle(t *tuiTarget) string {
-	state := "done"
-	switch {
-	case t.building:
-		state = "building"
-	case t.buildFailed:
-		state = "failed"
-	case t.buildCancelled:
-		state = "cancelled"
-	}
-	return fmt.Sprintf("%s · build log (%s)", t.spec.Name, state)
 }
 
 // titleStyle is bold only while the pane owns the keys.
@@ -906,9 +888,6 @@ func (m *tuiModel) emptyHint() string {
 		}
 		return "no lines match the filters · backspace removes the last"
 	}
-	if m.buildView >= 0 {
-		return m.targets[m.buildView].spec.Name + " build: no output yet"
-	}
 	if m.solo >= 0 {
 		t := m.targets[m.solo]
 		if t.building {
@@ -939,7 +918,8 @@ var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row"},
 	{"r", "reboot the row"},
-	{"esc", "back out: row to its group, group to all"},
+	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
+	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
 	{"tab", "focus the fs drawer"},
 	{"enter a f", "pane: expand the line; a adds its key, f filters its value"},
 	{"c", "toggle the columns table"},
@@ -952,16 +932,15 @@ var helpShortKeys = [][2]string{
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
-	{"←/→", "focus the log pane (then ←/→ scroll columns)"},
+	{"←/→", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane"},
 	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (group row: its targets)"},
 	{"r", "reboot (grace applies; group row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (group row: its targets)"},
-	{"esc b [ ]", "list: esc backs out · b service's build log · [ ] ⇧↑⇧↓ jump groups"},
-	{"o G", "open the target's url / resume the live tail"},
-	{"p", "browse the scrollback (again or G goes live)"},
+	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
+	{"o", "open the target's url"},
 	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
@@ -978,7 +957,7 @@ var helpMouse = []string{
 	"click a group scopes to its targets; click a batch lists its files",
 	"drag copies a range; shift-drag uses the terminal's selection",
 	"⚙ building  ● starting (gray)  ● run  ▲ unhealthy  ■ failed",
-	"✓ ok  ✗ exit  ○ stopped  · off  ✱ unseen",
+	"✓ ok  ✗ exit  ○ stopped  · off",
 }
 
 // helpView draws the help overlay: the short key list, or the full one when helpAll is set.

@@ -225,11 +225,10 @@ type scopeState struct {
 	solo   int
 	sel    string
 	cursor int
-	build  int
 }
 
 func (m *tuiModel) scopeState() scopeState {
-	return scopeState{solo: m.solo, sel: m.schemaSel, cursor: m.cursor, build: m.buildView}
+	return scopeState{solo: m.solo, sel: m.schemaSel, cursor: m.cursor}
 }
 
 // listFocused reports whether the list, not the pane or drawer, owns the keys.
@@ -239,16 +238,12 @@ func (m *tuiModel) listFocused() bool {
 
 // escList backs the scope out one level; filters and chips are never touched.
 func (m *tuiModel) escList() {
-	if m.buildView >= 0 {
-		m.setScope(m.buildView, "", -1)
-		return
-	}
 	r, ok := m.cursorRow()
-	if !ok || r.header || !m.hasGroups() {
+	if !ok || (r.header && r.depth == 0) || !m.hasGroups() {
 		m.clearScope()
 		return
 	}
-	i := m.headerIndex(groupOf(m.targets[r.target]))
+	i := m.enclosingHeader(m.cursor)
 	if i < 0 {
 		m.clearScope()
 		return

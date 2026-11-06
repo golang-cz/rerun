@@ -10,7 +10,6 @@ import (
 // The marker cells sit between the name and the status, so neither touches either.
 func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.targets[0].unseen = true
 	m.setEdit(colNode{name: "api"}, []Column{{Name: "level", Expr: ".level"}})
 	m.View()
 
@@ -18,8 +17,8 @@ func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	nameW := nameWidth(leftW)
 	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y, leftW))) }
 
-	if got := string(cells(0)[2+nameW : 4+nameW]); got != " ✱" {
-		t.Errorf("unseen row marker = %q, want \" ✱\"", got)
+	if got := string(cells(0)[2+nameW : 4+nameW]); got != "  " {
+		t.Errorf("clean row marker = %q, want two blank cells", got)
 	}
 	if got := string(cells(1)[2+nameW : 4+nameW]); got != "* " {
 		t.Errorf("dirty row marker = %q, want \"* \"", got)

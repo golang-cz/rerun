@@ -35,7 +35,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 		schemaTarget("worker", "backend"),
 		target("job"),
 	)
-	want := []string{"▾backend", "api", "worker", "▾data", "db", "▾(no group)", "web", "job"}
+	want := []string{"▾backend", "api", "worker", "▾data", "db", "▾all", "web", "job"}
 	if got := listNames(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("list = %v, want %v", got, want)
 	}
@@ -47,7 +47,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 	if !strings.HasPrefix(lines[1], "  ● api") {
 		t.Fatalf("member = %q, want the name indented under its header", lines[1])
 	}
-	if !strings.HasPrefix(lines[5], "▾ (no group)") {
+	if !strings.HasPrefix(lines[5], "▾ all") {
 		t.Fatalf("header = %q, want the trailing default header", lines[5])
 	}
 	if !strings.HasPrefix(lines[6], "  ● web") {

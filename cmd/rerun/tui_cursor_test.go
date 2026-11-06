@@ -47,15 +47,15 @@ func TestEnterExpandsTheCursorLine(t *testing.T) {
 	}
 }
 
-// Enter on a cursor line that is not JSON shows the hint and expands nothing.
-func TestEnterOnPlainCursorLineShowsHint(t *testing.T) {
+// Enter on a cursor line with nothing under it expands nothing and shows no hint.
+func TestEnterOnPlainCursorLineDoesNothing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "plain")
 	m.View()
 
 	press(m, "right", "enter")
-	if want := "the cursor line is not a JSON object"; m.hint != want {
-		t.Fatalf("hint = %q, want %q", m.hint, want)
+	if m.hint != "" {
+		t.Fatalf("hint = %q, want none", m.hint)
 	}
 	if len(m.expanded) != 0 {
 		t.Fatal("a plain line expanded")
@@ -80,9 +80,9 @@ func TestPaneCursorMovesPauseTheTailAndStayInView(t *testing.T) {
 		t.Fatalf("cursor row %d is outside the viewport at %d", row, m.vp.YOffset)
 	}
 
-	press(m, "G")
+	escToLive(m)
 	if !m.follow || m.paneCursorRow() != m.paneLen()-1 {
-		t.Fatal("G did not resume the tail on the newest line")
+		t.Fatal("esc did not resume the tail on the newest line")
 	}
 }
 

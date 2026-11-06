@@ -33,7 +33,7 @@ func frozenPane(t *testing.T) *tuiModel {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 	if m.follow {
 		t.Fatal("f did not freeze the pane")
 	}
@@ -67,9 +67,9 @@ func TestFreezeKeyTogglesFollowAndHoldsTheFrame(t *testing.T) {
 		t.Fatalf("the frozen pane's last line = %q, want the marker", got)
 	}
 
-	press(m, "p")
+	press(m, "esc")
 	if !m.follow || m.pending != 0 {
-		t.Fatalf("f did not resume: follow=%v pending=%d", m.follow, m.pending)
+		t.Fatalf("esc did not resume: follow=%v pending=%d", m.follow, m.pending)
 	}
 	if !m.vp.AtBottom() {
 		t.Fatal("the resumed pane is not at the bottom")
@@ -185,7 +185,7 @@ func TestFrozenClickPastContentCopiesNothing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 3).events)
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 11, false))
@@ -339,7 +339,7 @@ func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "web", line: strings.Repeat("a", copyCap+1)}})
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 
 	m.copySeq = "stale"
 	x := paneX(m)
@@ -408,7 +408,7 @@ func TestCopyTruncatesAtTheCap(t *testing.T) {
 	}
 	m.applyEvents(evs)
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 1, false))
@@ -439,7 +439,7 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 		{kind: evOutput, target: "web", line: "three"},
 	})
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 1, false))
@@ -458,7 +458,7 @@ func TestCopyStripsANSIFromThePayload(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "web", line: "\x1b[36mcyan text\x1b[0m"}})
 	m.View()
-	press(m, "p")
+	m.pauseTail()
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 1, false))
