@@ -18,8 +18,11 @@ func fmtDur(d time.Duration) string {
 	switch {
 	case secs < 60:
 		return fmt.Sprintf("%ds", secs)
-	case secs < 3600:
+	case secs < 600:
 		return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+	case secs < 3600:
+		// Seconds past 10m are noise in a list row.
+		return fmt.Sprintf("%dm", secs/60)
 	case secs < 86400:
 		return fmt.Sprintf("%dh%02dm", secs/3600, secs/60%60)
 	}
