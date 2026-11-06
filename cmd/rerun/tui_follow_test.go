@@ -139,10 +139,12 @@ func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 func TestScrollUpWithNothingAboveKeepsTailing(t *testing.T) {
 	gestures := []struct {
 		name string
-		msg  tea.Msg
+		msg  func(m *tuiModel) tea.Msg
 	}{
-		{"wheel", tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}},
-		{"pgup", tea.KeyMsg{Type: tea.KeyPgUp}},
+		{"wheel", func(m *tuiModel) tea.Msg {
+			return tea.MouseMsg{X: m.layout.leftW + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+		}},
+		{"pgup", func(m *tuiModel) tea.Msg { return tea.KeyMsg{Type: tea.KeyPgUp} }},
 	}
 	for _, g := range gestures {
 		t.Run(g.name, func(t *testing.T) {
@@ -151,7 +153,7 @@ func TestScrollUpWithNothingAboveKeepsTailing(t *testing.T) {
 			m.applyEvents(streamEvents("web", "early", 5).events)
 			m.View()
 
-			m.Update(g.msg)
+			m.Update(g.msg(m))
 			if !m.follow {
 				t.Fatalf("%s: a scroll gesture that could not move the pane froze the tail", g.name)
 			}

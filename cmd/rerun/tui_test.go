@@ -918,6 +918,41 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	}
 }
 
+func wheel(x, y int, button tea.MouseButton) tea.MouseMsg {
+	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: button}
+}
+
+func TestWheelOverListMovesCursorLikeArrows(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
+	m.View()
+
+	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	if m.cursor != 2 {
+		t.Fatalf("cursor = %d after two wheel-down notches, want 2", m.cursor)
+	}
+
+	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelUp))
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d after a wheel-up notch, want 1", m.cursor)
+	}
+}
+
+func TestWheelOverLogPaneLeavesCursorAlone(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
+	m.applyEvents(streamEvents("web", "line", 60).events)
+	m.View()
+	before := m.vp.YOffset
+
+	m.handleMouse(wheel(m.layout.leftW+1, 1, tea.MouseButtonWheelUp))
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d after a wheel over the log pane, want 0", m.cursor)
+	}
+	if m.vp.YOffset == before {
+		t.Fatalf("the log pane did not scroll on a wheel over it")
+	}
+}
+
 func TestEscClearsSolo(t *testing.T) {
 	m := newTestModel(t)
 	m.applyScope(1, "")

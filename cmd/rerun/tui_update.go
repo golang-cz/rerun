@@ -212,24 +212,10 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "up":
-		switch {
-		case m.paneFocus:
-			m.moveCursorRow(-1)
-		case m.drawerFocus:
-			m.moveDrawer(-1)
-		default:
-			m.moveCursor(-1)
-		}
+		m.stepSelection(-1)
 
 	case "down":
-		switch {
-		case m.paneFocus:
-			m.moveCursorRow(1)
-		case m.drawerFocus:
-			m.moveDrawer(1)
-		default:
-			m.moveCursor(1)
-		}
+		m.stepSelection(1)
 
 	case "k":
 		if m.drawerFocus {
@@ -451,6 +437,18 @@ func (m *tuiModel) hasFilter(query string) bool {
 	return false
 }
 
+// stepSelection is one ↑/↓ step; the wheel over the left column reuses it.
+func (m *tuiModel) stepSelection(delta int) {
+	switch {
+	case m.paneFocus:
+		m.moveCursorRow(delta)
+	case m.drawerFocus:
+		m.moveDrawer(delta)
+	default:
+		m.moveCursor(delta)
+	}
+}
+
 func (m *tuiModel) moveCursor(delta int) {
 	m.cursor = min(max(m.cursor+delta, 0), max(0, m.listLen()-1))
 	m.liveSelect()
@@ -510,12 +508,23 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Action == tea.MouseActionPress || msg.Action == tea.MouseActionMotion {
+		// The left column is the target list: one notch steps the selection like ↑/↓.
+		// The divider and the log pane keep scrolling the stream.
+		onList := msg.X < m.layout.leftW
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			m.scrollUp(3)
+			if onList {
+				m.stepSelection(-1)
+			} else {
+				m.scrollUp(3)
+			}
 			return m, nil
 		case tea.MouseButtonWheelDown:
-			m.scrollDown(3)
+			if onList {
+				m.stepSelection(1)
+			} else {
+				m.scrollDown(3)
+			}
 			return m, nil
 		}
 	}
