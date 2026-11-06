@@ -12,12 +12,7 @@ func fmtDur(d time.Duration) string {
 		d = 0
 	}
 	if d < time.Second {
-		// Tenths round, and a minimum of 0.1s keeps a fast step off 0.0s.
-		tenths := max(1, int((d+50*time.Millisecond)/(100*time.Millisecond)))
-		if tenths >= 10 {
-			return "1s"
-		}
-		return fmt.Sprintf("%d.%ds", tenths/10, tenths%10)
+		return "<1s"
 	}
 	secs := int(d / time.Second)
 	switch {

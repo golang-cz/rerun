@@ -24,7 +24,7 @@ func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 		t.Errorf("dirty row marker = %q, want \"* \"", got)
 	}
 	for y := 0; y < 2; y++ {
-		if got := string(cells(y)[4+nameW:]); !strings.HasPrefix(got, "0.1s") {
+		if got := string(cells(y)[4+nameW:]); !strings.HasPrefix(got, "<1s") {
 			t.Errorf("row %d status starts at %q, want the uptime at column %d", y, got, 4+nameW)
 		}
 	}
