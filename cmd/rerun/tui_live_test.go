@@ -80,7 +80,7 @@ func TestScopeFollowsTheListLines(t *testing.T) {
 	paneOut(m, "web", "web-line")
 	press(m, "j")
 
-	if got, want := m.paneLines(), []string{"api  api-line"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"api-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pane = %q, want %q", got, want)
 	}
 }

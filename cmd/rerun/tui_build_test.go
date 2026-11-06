@@ -615,3 +615,24 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 		t.Fatal("a click on the rule's icon while filtered did not open it")
 	}
 }
+
+// With one target in view there is no name column, so the build icon is still the rule's first cells.
+func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.applyScope(0, "")
+	m.View()
+	row := -1
+	for i := 0; i < m.paneLen(); i++ {
+		if r := m.rowInfo(i); r.sub < 0 && m.visibleSep[r.raw].build != nil {
+			row = i
+		}
+	}
+	if row < 0 {
+		t.Fatalf("the build rule is not in the single view: %q", rawPane(m))
+	}
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a click on the build icon in single view did not open the rule")
+	}
+}

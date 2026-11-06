@@ -91,7 +91,7 @@ func TestSoloOnAMemberReplacesTheSchemaSelection(t *testing.T) {
 	if m.solo != 1 || m.schemaSel != "" {
 		t.Fatalf("solo = %d schemaSel = %q, want worker soloed and no schema", m.solo, m.schemaSel)
 	}
-	if got, want := m.paneLines(), []string{"worker  worker-line"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"worker-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 }

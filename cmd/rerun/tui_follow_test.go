@@ -75,7 +75,7 @@ func TestFollowPinsSoloedPaneToNewestLine(t *testing.T) {
 		if !m.vp.AtBottom() {
 			t.Fatalf("batch %d: the soloed pane is not at the bottom", batch)
 		}
-		want := fmt.Sprintf("web  solo%d-24", batch)
+		want := fmt.Sprintf("solo%d-24", batch)
 		if got := newestPaneLine(m); got != want {
 			t.Fatalf("batch %d: soloed pane's last line = %q, want %q", batch, got, want)
 		}

@@ -102,11 +102,11 @@ func (m *tuiModel) levelFor(row int, line string, widths []int, budget int) (lev
 		if idx < 0 || !ok {
 			return levelSpan{}, false
 		}
-		_, spans := tableRow(padRight(t.spec.Name, m.prefixW)+"  ", c.vals, widths, budget)
+		_, spans := tableRow(m.namePrefix(t.spec.Name), c.vals, widths, budget)
 		if idx >= len(spans) {
 			return levelSpan{}, false
 		}
-		text := m.prefixW + 2
+		text := m.textCol()
 		return finishSpan(levelSpan{from: spans[idx].x0, to: spans[idx].x1, text: text, paint: paint}, line), true
 	}
 	hit := m.visibleLvl[r.raw]

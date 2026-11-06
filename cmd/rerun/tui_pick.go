@@ -323,7 +323,7 @@ func (m *tuiModel) columnHeader(w int) string {
 			names[i] += " ×"
 		}
 	}
-	row, spans := tableRow(strings.Repeat(" ", m.prefixW)+"  ", names, widths, m.paneWidth())
+	row, spans := tableRow(m.namePrefix(""), names, widths, m.paneWidth())
 	m.layout.heads = m.layout.heads[:0]
 	for i, s := range spans {
 		if !marked[i] {

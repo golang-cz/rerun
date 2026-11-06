@@ -196,7 +196,7 @@ func TestMergedStreamDropsMutedAndNonSolo(t *testing.T) {
 	}
 
 	m.applyScope(2, "")
-	if got, want := m.paneLines(), []string{"worker  k1"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"k1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
@@ -277,13 +277,13 @@ func TestScrollDownResumesFollowingAtTheBottom(t *testing.T) {
 	}
 }
 
-func TestSoloPaneKeepsPrefix(t *testing.T) {
+func TestSoloPaneDropsPrefix(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvent(event{kind: evOutput, target: "web", line: "hello"})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "world"})
 
 	m.applyScope(0, "")
-	if got, want := m.paneLines(), []string{"web  hello"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"hello"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo pane = %q, want %q", got, want)
 	}
 
@@ -1358,5 +1358,25 @@ func TestStartingAndStartedEventsMoveTheRow(t *testing.T) {
 	}
 	if got := m.status(m.targets[0]); got != "<1s" {
 		t.Fatalf("status after started = %q, want <1s", got)
+	}
+}
+
+// Only a single-target view drops the name column; groups and all keep it.
+func TestNameColumnOnlyInMultiTargetViews(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	paneOut(m, "api", "api-line")
+	paneOut(m, "web", "web-line")
+
+	m.applyScope(0, "")
+	if got, want := m.paneLines(), []string{"api-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("single pane = %q, want %q", got, want)
+	}
+	m.applyScope(-1, "")
+	if got, want := m.paneLines(), []string{"api     api-line", "web     web-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("all pane = %q, want %q", got, want)
+	}
+	m.applyScope(-1, "backend")
+	if got, want := m.paneLines(), []string{"api     api-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("group pane = %q, want %q", got, want)
 	}
 }

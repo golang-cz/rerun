@@ -1222,8 +1222,22 @@ func (m *tuiModel) prefixed(line mergedLine) string {
 	if line.name == "" || line.sep.isSep() {
 		return line.text
 	}
-	return padRight(line.name, m.prefixW) + "  " + line.text
+	return m.namePrefix(line.name) + line.text
 }
+
+// singleView reports whether one target fills the pane, so its lines need no name column.
+func (m *tuiModel) singleView() bool { return m.solo >= 0 && m.schemaSel == "" }
+
+// namePrefix is a line's name column; "" in single view, blank for name "".
+func (m *tuiModel) namePrefix(name string) string {
+	if m.singleView() {
+		return ""
+	}
+	return padRight(name, m.prefixW) + "  "
+}
+
+// textCol is the cell where a line's message starts.
+func (m *tuiModel) textCol() int { return displayWidth(m.namePrefix("")) }
 
 func (m *tuiModel) rebuildMerged() {
 	m.visible = m.visible[:0]

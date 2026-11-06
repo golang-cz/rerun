@@ -122,7 +122,7 @@ func (m *tuiModel) tableLines(lines []string) []string {
 			out[row] = lines[row]
 			continue
 		}
-		out[row], _ = tableRow(padRight(t.spec.Name, m.prefixW)+"  ", c.vals, widths, budget)
+		out[row], _ = tableRow(m.namePrefix(t.spec.Name), c.vals, widths, budget)
 	}
 	return out
 }
@@ -357,7 +357,7 @@ func (m *tuiModel) tableBudget() int {
 	if w <= 0 {
 		return 0
 	}
-	return max(0, w-m.prefixW-2-markW)
+	return max(0, w-m.textCol()-markW)
 }
 
 // columns returns the target's compiled columns, recompiling only when the
