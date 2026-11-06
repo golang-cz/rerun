@@ -123,6 +123,15 @@ func filesSummary(files []string) string {
 	return fmt.Sprintf("%s +%d", filepath.Base(files[0]), len(files)-1)
 }
 
+// buildDur rounds a build time up to whole seconds, so a build never reads 0s.
+func buildDur(d time.Duration) string {
+	secs := max(1, int((d+time.Second-1)/time.Second))
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+}
+
 // shortDur is whole seconds past ten and tenths below, so rules stay short.
 func shortDur(d time.Duration) string {
 	if d >= 10*time.Second {
@@ -160,7 +169,7 @@ func (r *buildRec) sep() sepLine {
 	case buildRunning:
 		head += " building"
 	case buildPassed:
-		head += " built " + shortDur(r.dur)
+		head += " built " + buildDur(r.dur)
 	case buildBroke:
 		icon, head = "✗", r.name+" build failed"
 		if r.reason != "" {
