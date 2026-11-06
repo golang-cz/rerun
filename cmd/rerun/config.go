@@ -29,11 +29,22 @@ func (e *configNotFoundError) Error() string {
 
 func (e *configNotFoundError) Unwrap() error { return ErrConfigNotFound }
 
-// Column is one table-mode column: a display header and the yq expression
-// that extracts one value from a JSON output line.
+// Column is one table-mode column: a display header and the yq expression, or
+// template of expressions, that extracts its value from a JSON output line.
 type Column struct {
 	Name string
 	Expr string
+	// Template is the raw body after the header when it is more than one
+	// placeholder or has literal text; Expr is empty then.
+	Template string
+}
+
+// body is the column's text after its header, in the form the config file uses.
+func (c Column) body() string {
+	if c.Template != "" {
+		return c.Template
+	}
+	return "{" + c.Expr + "}"
 }
 
 // startMode is when a target first runs. The zero value is startAuto, so a
@@ -573,26 +584,94 @@ func boolField(src *configSource, name, field string, node *yaml.Node) (bool, er
 }
 
 // parseColumn splits a `name {.yq.expr}` column entry: the header is
-// everything before the first `{`, the expression everything up to the last
-// `}`.
+// everything before the first `{`. The rest is a template of literal text and
+// `{expr}` placeholders; a body that is one placeholder keeps only its expression.
 func parseColumn(raw string) (Column, error) {
 	open := strings.Index(raw, "{")
 	if open < 0 {
 		return Column{}, errors.New("expected a name and a {.yq.expr}")
 	}
-	close := strings.LastIndex(raw, "}")
-	if close < open {
-		return Column{}, errors.New("missing a closing }")
-	}
 	name := strings.TrimSpace(raw[:open])
-	expr := strings.TrimSpace(raw[open+1 : close])
 	if name == "" {
 		return Column{}, errors.New("empty column name")
 	}
-	if expr == "" {
-		return Column{}, errors.New("empty column expression")
+	body := strings.TrimSpace(raw[open:])
+	segs, err := templateSegments(body)
+	if err != nil {
+		return Column{}, err
 	}
-	return Column{Name: name, Expr: expr}, nil
+	for _, s := range segs {
+		if s.expr && s.text == "" {
+			return Column{}, errors.New("empty column expression")
+		}
+	}
+	if len(segs) == 1 {
+		return Column{Name: name, Expr: segs[0].text}, nil
+	}
+	return Column{Name: name, Template: body}, nil
+}
+
+// templateSeg is one run of a column template: literal text, or a {expr} placeholder.
+type templateSeg struct {
+	text string
+	expr bool
+}
+
+// templateSegments splits a column template into literal runs and placeholders.
+// Braces nest, because yq expressions may build objects, and a quoted string
+// inside a placeholder may hold braces.
+func templateSegments(s string) ([]templateSeg, error) {
+	var segs []templateSeg
+	lit := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '}' {
+			return nil, errors.New("unexpected }")
+		}
+		if s[i] != '{' {
+			continue
+		}
+		end, err := closingBrace(s, i)
+		if err != nil {
+			return nil, err
+		}
+		if i > lit {
+			segs = append(segs, templateSeg{text: s[lit:i]})
+		}
+		segs = append(segs, templateSeg{text: strings.TrimSpace(s[i+1 : end]), expr: true})
+		lit = end + 1
+		i = end
+	}
+	if lit < len(s) {
+		segs = append(segs, templateSeg{text: s[lit:]})
+	}
+	return segs, nil
+}
+
+// closingBrace returns the index of the } that closes the { at open.
+func closingBrace(s string, open int) (int, error) {
+	depth := 0
+	var quote byte
+	for i := open; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == '\\' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return i, nil
+			}
+		}
+	}
+	return 0, errors.New("missing a closing }")
 }
 
 // yamlType names a node's type for error messages, e.g. "int" for !!int.

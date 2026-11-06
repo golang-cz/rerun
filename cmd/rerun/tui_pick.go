@@ -245,7 +245,7 @@ func (m *tuiModel) targetDirty(t *tuiTarget) bool {
 func writeColumns(path string, e colEdit) error {
 	cols := make([]string, 0, len(e.cols))
 	for _, c := range e.cols {
-		cols = append(cols, c.Name+" {"+c.Expr+"}")
+		cols = append(cols, c.Name+" "+c.body())
 	}
 	if e.node.schema {
 		return setColumns(path, e.node.name, "", cols)

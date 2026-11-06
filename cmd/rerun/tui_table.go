@@ -1,13 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
 // tableHint is shown when `c` has no columns to work with.
@@ -201,11 +200,11 @@ func (m *tuiModel) evaluateCell(raw int) cellCache {
 	if t == nil {
 		return cellCache{raw: true}
 	}
-	exprs, ok := t.columns()
-	if !ok {
+	cols, err := t.columns()
+	if err != nil || len(cols) == 0 {
 		return cellCache{raw: true}
 	}
-	vals, ok := yqObjectValues(exprs, m.visibleRaw[raw])
+	vals, ok := yqObjectValues(cols, m.visibleRaw[raw])
 	if !ok {
 		return cellCache{raw: true}
 	}
@@ -361,27 +360,24 @@ func (m *tuiModel) tableBudget() int {
 	return max(0, w-m.prefixW-2-markW)
 }
 
-// columns returns the target's compiled column expressions, reparsing only
-// when the spec's columns changed. A spec with a bad expression yields no
-// table, so its lines stay raw.
-func (t *tuiTarget) columns() ([]*yqlib.ExpressionNode, bool) {
+// columns returns the target's compiled columns, recompiling only when the
+// spec's columns changed. A spec with a bad expression yields no table, so its
+// lines stay raw, and the error names the column for the title row.
+func (t *tuiTarget) columns() ([]columnProgram, error) {
 	if !slices.Equal(t.colSpec, t.spec.Columns) {
 		t.colSpec = t.spec.Columns
-		t.colExprs = t.colExprs[:0]
-		t.colBad = false
+		t.colProgs = t.colProgs[:0]
+		t.colErr = nil
 		for _, col := range t.spec.Columns {
-			expr, err := yqParse(col.Expr)
+			prog, err := compileColumn(col)
 			if err != nil {
-				t.colBad = true
+				t.colErr = fmt.Errorf("bad column %q: %w", col.Name, err)
 				break
 			}
-			t.colExprs = append(t.colExprs, expr)
+			t.colProgs = append(t.colProgs, prog)
 		}
 	}
-	if t.colBad || len(t.colExprs) == 0 {
-		return nil, false
-	}
-	return t.colExprs, true
+	return t.colProgs, t.colErr
 }
 
 // visibleTarget resolves a raw-line index to the target that produced it, or

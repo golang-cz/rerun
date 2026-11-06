@@ -155,6 +155,12 @@ Each top-level key is one target. Fields:
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |
 
+A column can also hold literal text and several `{expr}` placeholders. Each
+placeholder evaluates on its own, a missing value renders as nothing, and runs of
+spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
+fields shows `disk full ENOSPC`, and a line with only `.error` shows `ENOSPC`. A
+bad expression shows `bad column "msg": <error>` in the title row.
+
 #### Groups
 
 Targets that log the same JSON shape can share columns. Define them once under

@@ -794,7 +794,18 @@ func (m *tuiModel) titleLine(w int) string {
 		if word := m.streamWord(i); word != "" {
 			segs = append(segs, seg{text: word + " · "})
 		}
-		segs = append(segs, seg{text: fmt.Sprintf("%s · %s · %s", m.status(t), fileCount(len(t.lastChange.Files)), t.spec.Cmd)})
+		if _, err := t.columns(); err != nil {
+			segs = append(segs, seg{text: ellipsize(oneLine(err.Error()), 40) + " · ", color: colorRed})
+		}
+		parts := []string{m.status(t)}
+		if t.state == stateRunning && !t.lastStart.IsZero() {
+			parts = []string{"running", "since " + t.lastStart.Format("15:04:05")}
+			if t.lastBuild > 0 {
+				parts = append(parts, "built "+shortDur(t.lastBuild))
+			}
+		}
+		parts = append(parts, fileCount(len(t.lastChange.Files)), oneLine(t.spec.Cmd))
+		segs = append(segs, seg{text: strings.Join(parts, " · ")})
 		if t.spec.URL != "" {
 			segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
 		}

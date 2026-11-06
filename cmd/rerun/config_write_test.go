@@ -338,3 +338,23 @@ func TestSetColumnsFillsFlowEmptyGroupsBlock(t *testing.T) {
 		t.Errorf("ParseConfig after save: %v", err)
 	}
 }
+
+func TestTemplateColumnsRoundTripThroughWriteAndParse(t *testing.T) {
+	path := writeConfigFixture(t, "api:\n  cmd: echo hi\n")
+	edit := colEdit{node: colNode{name: "api"}, cols: []Column{
+		{Name: "msg", Template: "{.message} {.error}"},
+		{Name: "level", Expr: ".level"},
+	}}
+	if err := writeColumns(path, edit); err != nil {
+		t.Fatalf("writeColumns: %v", err)
+	}
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig after write: %v", err)
+	}
+	api, _ := cfg.Find("api")
+	if !reflect.DeepEqual(api.Columns, edit.cols) {
+		t.Errorf("columns = %+v, want %+v", api.Columns, edit.cols)
+	}
+}

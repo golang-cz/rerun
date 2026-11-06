@@ -11,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/golang-cz/rerun"
-	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
 // lineCap bounds each target's scrollback and the merged stream. Phase B
@@ -165,12 +164,14 @@ type tuiTarget struct {
 	health   healthState
 	lastRule *restartRule
 
-	// colSpec is the spec the cached column expressions were parsed from, so
-	// a spec swap reparses exactly once. colBad marks a spec whose expression
-	// does not compile, which keeps every one of its rows raw.
+	// colSpec is the spec the cached column programs were compiled from, so
+	// a spec swap recompiles exactly once. colErr is the first column that does
+	// not compile, which keeps every one of its rows raw.
 	colSpec  []Column
-	colExprs []*yqlib.ExpressionNode
-	colBad   bool
+	colProgs []columnProgram
+	colErr   error
+	// lastBuild is the build behind the current run, 0 when it had none.
+	lastBuild time.Duration
 }
 
 // tuiModel is the whole screen: the target list on the left, the stream on
@@ -539,7 +540,7 @@ func (m *tuiModel) addLine(i int, line string) {
 
 // refreshRule rewrites a rule's stored raw text, so copy and search match what it now draws.
 func (m *tuiModel) refreshRule(rr *restartRule) {
-	raw := rr.label(1 << 16)
+	raw := rr.label(1<<16, false)
 	for k := range m.merged {
 		if m.merged[k].sep.restart == rr {
 			m.merged[k].text = raw
@@ -794,6 +795,7 @@ func (m *tuiModel) applyEvent(ev event) {
 	case evStarted:
 		t.state = stateRunning
 		t.lastStart = ev.at
+		t.lastBuild = ev.buildDur
 		t.runStarted = true
 		t.exitCode = -1
 		t.exitLabel = ""
@@ -803,7 +805,7 @@ func (m *tuiModel) applyEvent(ev event) {
 			t.health = healthStarting
 		}
 		if ev.restart {
-			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp}
+			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp, cmd: oneLine(t.spec.Cmd)}
 			t.lastRule = rr
 			m.addRule(i, sepLine{restart: rr})
 			if m.follow && m.solo == i && m.schemaSel == "" {
@@ -815,7 +817,7 @@ func (m *tuiModel) applyEvent(ev event) {
 			if ev.buildDur > 0 {
 				label += " · built " + shortDur(ev.buildDur)
 			}
-			m.addRule(i, sepLine{label: label})
+			m.addRule(i, sepLine{label: label, cmd: oneLine(t.spec.Cmd)})
 		}
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))

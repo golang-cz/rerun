@@ -421,8 +421,8 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 	_, rightW := m.layoutWidths()
 	lines := paneOf(m)
 
-	if !strings.HasPrefix(lines[0], "0:00 · no files · vite dev") {
-		t.Fatalf("title = %q, want the cursor row's uptime, files, and command", lines[0])
+	if !strings.HasPrefix(lines[0], "running · since ") || !strings.Contains(lines[0], "· no files · vite dev") {
+		t.Fatalf("title = %q, want the cursor row's run start, files, and command", lines[0])
 	}
 	if got := displayWidth(lines[0]); got != rightW {
 		t.Fatalf("title width = %d, want %d", got, rightW)
@@ -439,7 +439,7 @@ func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
 		first:  "src/a.go",
 		change: rerun.ChangeSet{Files: map[string]struct{}{"src/a.go": {}, "src/b.go": {}, "src/c.go": {}}},
 	})
-	if line := paneOf(m)[0]; !strings.HasPrefix(line, "0:00 · 3 files · vite dev") {
+	if line := paneOf(m)[0]; !strings.HasPrefix(line, "running · since ") || !strings.Contains(line, "· 3 files · vite dev") {
 		t.Fatalf("title after a change = %q, want the file count", line)
 	}
 
@@ -463,7 +463,7 @@ func TestRightPaneTitleShowsRowState(t *testing.T) {
 	}{
 		{name: "running", state: stateRunning, setup: func(m *tuiModel) {
 			m.now = m.targets[0].lastStart.Add(12 * time.Second)
-		}, want: "0:12 · no files · make run"},
+		}, want: "running · since "},
 		{name: "exited ok", state: stateExited, setup: func(m *tuiModel) {
 			m.targets[0].exitCode = 0
 			m.targets[0].exitLabel = "exit 0"
@@ -487,8 +487,12 @@ func TestRightPaneTitleShowsRowState(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(m)
 			}
-			if got := paneOf(m)[0]; !strings.HasPrefix(got, tt.want) {
+			got := paneOf(m)[0]
+			if !strings.HasPrefix(got, tt.want) {
 				t.Fatalf("title = %q, want prefix %q", got, tt.want)
+			}
+			if tt.state == stateRunning && !strings.Contains(got, "· no files · make run") {
+				t.Fatalf("title = %q, want files and command after the run start", got)
 			}
 		})
 	}

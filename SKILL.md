@@ -145,6 +145,12 @@ group's, and a `group:` naming no group is an error. A group may be empty (`weba
 The older `schemas:`/`schema:` spelling still works; use one spelling per file. Quote each column entry,
 since a `{` inside a plain `[...]` entry is a YAML error.
 
+A column can also hold literal text and several `{expr}` placeholders. Each
+placeholder evaluates on its own, a missing value renders as nothing, and runs of
+spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
+fields shows `disk full ENOSPC`, and a line with only `.error` shows `ENOSPC`. A
+bad expression shows `bad column "msg": <error>` in the title row.
+
 ## Flags
 
 - `-delay`, `-cooldown`, `-grace` — override per run (CLI wins over rerun.yml)
