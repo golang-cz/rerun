@@ -19,7 +19,7 @@ func importTarget(imp, name, sub string) Target {
 func nestedRows(m *tuiModel) []string {
 	var out []string
 	for _, r := range m.listRows() {
-		pad := strings.Repeat(" ", 2*r.depth)
+		pad := strings.Repeat(" ", r.indent())
 		if r.header {
 			glyph := "▾"
 			if r.collapsed {
@@ -47,17 +47,17 @@ func TestImportNestsGroupsAndAllUnderItsHeader(t *testing.T) {
 
 	want := []string{
 		"▾omsx",
-		"  ▾backend",
-		"    omsx-api",
-		"    api-gateway",
-		"  ▾webapps",
-		"    dashboard",
-		"  ▾all",
-		"    misc",
+		" ▾backend",
+		"  omsx-api",
+		"  api-gateway",
+		" ▾webapps",
+		"  dashboard",
+		" ▾all",
+		"  misc",
 		"▾backend",
-		"  server",
+		" server",
 		"▾all",
-		"  lone",
+		" lone",
 	}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -67,7 +67,7 @@ func TestImportNestsGroupsAndAllUnderItsHeader(t *testing.T) {
 func TestImportWithoutGroupsListsTargetsDirectlyUnderItsHeader(t *testing.T) {
 	m := newTestModel(t, importTarget("bpn", "api", ""), importTarget("bpn", "web", ""))
 
-	want := []string{"▾bpn", "  api", "  web"}
+	want := []string{"▾bpn", " api", " web"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
@@ -88,13 +88,13 @@ func TestComposeImportGroupsServicesByFirstProfile(t *testing.T) {
 
 	want := []string{
 		"▾devbox",
-		"  ▾edge",
-		"    caddy",
-		"    home",
-		"  ▾data",
-		"    postgres",
-		"  ▾all",
-		"    redis",
+		" ▾edge",
+		"  caddy",
+		"  home",
+		" ▾data",
+		"  postgres",
+		" ▾all",
+		"  redis",
 	}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

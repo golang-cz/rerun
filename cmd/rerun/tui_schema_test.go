@@ -44,13 +44,13 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 	if !strings.HasPrefix(lines[0], "▾ backend") || !strings.Contains(lines[0], "2/2") {
 		t.Fatalf("header = %q, want `▾ backend` with its running count", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "  ● api") {
+	if !strings.HasPrefix(lines[1], " ● api") {
 		t.Fatalf("member = %q, want the name indented under its header", lines[1])
 	}
 	if !strings.HasPrefix(lines[5], "▾ all") {
 		t.Fatalf("header = %q, want the trailing default header", lines[5])
 	}
-	if !strings.HasPrefix(lines[6], "  ● web") {
+	if !strings.HasPrefix(lines[6], " ● web") {
 		t.Fatalf("ungrouped member = %q, want it indented under default", lines[6])
 	}
 }

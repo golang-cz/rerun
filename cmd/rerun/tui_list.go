@@ -16,6 +16,9 @@ const importKeyPrefix = "\x00import:"
 // allKeyPrefix keys an import's ungrouped targets, apart from a group named all.
 const allKeyPrefix = "\x00all:"
 
+// indentCells is the list pane indent per nesting level.
+const indentCells = 1
+
 // listRow is one list line: a group header, or a target, indented by its depth.
 type listRow struct {
 	header  bool
@@ -27,6 +30,9 @@ type listRow struct {
 	// collapsed is a header folded shut, which hides every row below it at a deeper depth.
 	collapsed bool
 }
+
+// indent is the list cells in front of a row's name.
+func (r listRow) indent() int { return indentCells * r.depth }
 
 // groupTargets orders targets as the list draws them: sections in first-use order, sub-groups in
 // first-use order inside an import, and each import's `all` last. Members stay contiguous.
@@ -448,7 +454,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 			running++
 		}
 	}
-	indent := 2 * r.depth
+	indent := r.indent()
 	glyph := "▾"
 	if r.collapsed {
 		glyph = "▸"

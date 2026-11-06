@@ -190,10 +190,10 @@ func TestGroupTargetsOrdersMembersLikeTheRows(t *testing.T) {
 	m := newTestModel(t, a, b, root, c, d, e, lone)
 
 	want := []string{
-		"▾a", "  ▾backend", "    one", "    three", "  ▾webapps", "    five", "  ▾all", "    four",
-		"▾b", "  ▾webapps", "    two",
-		"▾backend", "  server",
-		"▾all", "  lone",
+		"▾a", " ▾backend", "  one", "  three", " ▾webapps", "  five", " ▾all", "  four",
+		"▾b", " ▾webapps", "  two",
+		"▾backend", " server",
+		"▾all", " lone",
 	}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

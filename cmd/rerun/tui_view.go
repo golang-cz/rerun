@@ -216,7 +216,7 @@ func overlayCenter(frame, box string, width, height int) string {
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	nameW := 1
 	for _, r := range m.listRows() {
-		w := 2 * r.depth // each indent level sits in front of the name
+		w := r.indent()
 		if r.header {
 			w += displayWidth(r.label)
 		} else {
@@ -504,7 +504,7 @@ func (m *tuiModel) missingLine(mi missingImport, leftW int) string {
 func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
 
-	indent := 2 * r.depth
+	indent := r.indent()
 	var segs []seg
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})

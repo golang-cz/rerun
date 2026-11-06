@@ -26,7 +26,7 @@ func TestRootGroupNamedLikeImportListsInItsSection(t *testing.T) {
 	}
 	m := newTestModel(t, cfg.Targets...)
 
-	want := []string{"▾bpn", "  local", "  api"}
+	want := []string{"▾bpn", " local", " api"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
@@ -62,7 +62,7 @@ func TestCollapsedImportHidesEverythingBelow(t *testing.T) {
 func TestCollapsedSubHeaderHidesOnlyItsTargets(t *testing.T) {
 	m := nestedFixture(t)
 	toggleKey(t, m, "omsx/backend")
-	want := []string{"▾omsx", "  ▸backend", "  ▾webapps", "    dash", "  ▾all", "    misc"}
+	want := []string{"▾omsx", " ▸backend", " ▾webapps", "  dash", " ▾all", "  misc"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -73,7 +73,7 @@ func TestNestedCollapseRestoresOnExpand(t *testing.T) {
 	toggleKey(t, m, "omsx/backend")
 	toggleKey(t, m, importKeyPrefix+"omsx")
 	toggleKey(t, m, importKeyPrefix+"omsx")
-	want := []string{"▾omsx", "  ▸backend", "  ▾webapps", "    dash", "  ▾all", "    misc"}
+	want := []string{"▾omsx", " ▸backend", " ▾webapps", "  dash", " ▾all", "  misc"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("after collapsing the import and expanding it: rows = %v, want %v", got, want)
 	}
@@ -148,7 +148,7 @@ func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 	m := nestedFixture(t)
 	m.View()
-	m.handleMouse(mouse(2, 1, false)) // the backend sub-header sits one indent in
+	m.handleMouse(mouse(1, 1, false)) // the backend sub-header sits one indent in
 	if !m.collapsed["omsx/backend"] {
 		t.Fatalf("sub-header arrow click left backend open: %v", m.collapsed)
 	}

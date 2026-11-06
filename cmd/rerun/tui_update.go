@@ -586,7 +586,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	r, _ := m.listRowAt(row)
 	// The arrow cell folds a header; its name cell selects it as before.
-	if r.header && msg.X == 2*r.depth {
+	if r.header && msg.X == r.indent() {
 		m.toggleCollapse(row)
 		return m, nil
 	}
