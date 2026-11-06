@@ -94,13 +94,13 @@ func (r *restartRule) label(maxW int, grouped bool) string {
 		segs = append(segs, f)
 	}
 	if r.built > 0 {
-		segs = append(segs, "built "+buildDur(r.built))
+		segs = append(segs, "built "+fmtDur(r.built))
 	}
 	if r.upFor > 0 {
-		segs = append(segs, "was up "+shortDur(r.upFor))
+		segs = append(segs, "was up "+fmtDur(r.upFor))
 	}
 	if r.healthy > 0 {
-		segs = append(segs, "healthy in "+shortDur(r.healthy))
+		segs = append(segs, "healthy in "+fmtDur(r.healthy))
 	}
 	if grouped && r.cmd != "" {
 		segs = append(segs, "$ "+r.cmd)
@@ -121,23 +121,6 @@ func filesSummary(files []string) string {
 		return filepath.Base(files[0])
 	}
 	return fmt.Sprintf("%s +%d", filepath.Base(files[0]), len(files)-1)
-}
-
-// buildDur rounds a build time up to whole seconds, so a build never reads 0s.
-func buildDur(d time.Duration) string {
-	secs := max(1, int((d+time.Second-1)/time.Second))
-	if secs < 60 {
-		return fmt.Sprintf("%ds", secs)
-	}
-	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
-}
-
-// shortDur is whole seconds past ten and tenths below, so rules stay short.
-func shortDur(d time.Duration) string {
-	if d >= 10*time.Second {
-		return d.Round(time.Second).String()
-	}
-	return d.Round(100 * time.Millisecond).String()
 }
 
 type buildPhase uint8
@@ -169,7 +152,7 @@ func (r *buildRec) sep() sepLine {
 	case buildRunning:
 		head += " building"
 	case buildPassed:
-		head += " built " + buildDur(r.dur)
+		head += " built " + fmtDur(r.dur)
 	case buildBroke:
 		icon, head = "✗", r.name+" build failed"
 		if r.reason != "" {
@@ -273,7 +256,7 @@ func exitRule(t *tuiTarget, ev event, now time.Time) sepLine {
 	dur := ""
 	if t.runStarted && !t.lastStart.IsZero() {
 		d := eventTime(ev, now).Sub(t.lastStart)
-		dur = " · " + d.Round(100*time.Millisecond).String()
+		dur = " · " + fmtDur(d)
 	}
 	glyph, tone := "✓", toneOK
 	if ev.code != 0 {

@@ -38,8 +38,8 @@ const configTarget = "config"
 // feedHeader is the drawer's title line while the feed shows.
 const feedHeader = "fs · last 1m"
 
-// feedAgeW is the width of a batch's right-aligned age column.
-const feedAgeW = 3
+// feedAgeW fits the longest fmtDur value, 1m00s, so the drawer's columns line up.
+const feedAgeW = 5
 
 // feedBatch is one burst of changes: its files merged by path, the paths that are
 // directories created in it, and every target the burst restarted. at is the first
@@ -120,18 +120,6 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) in
 func isDirPath(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-// feedAge is how long ago a batch started, as the drawer shows it: 5s, 42s, 1m, 2h.
-func feedAge(d time.Duration) string {
-	secs := int(max(d, 0) / time.Second)
-	switch {
-	case secs < 60:
-		return fmt.Sprintf("%ds", secs)
-	case secs < 3600:
-		return fmt.Sprintf("%dm", secs/60)
-	}
-	return fmt.Sprintf("%dh", secs/3600)
 }
 
 // feedRestart names the target in its change's batch once the spawn lands.
@@ -362,7 +350,7 @@ func feedBatchRows(batches []feedBatch, dim bool, cursor int, now time.Time) []d
 			id:      b.id,
 			label:   feedFirstFile(b),
 			extra:   len(b.files) - 1,
-			age:     feedAge(now.Sub(b.at)),
+			age:     fmtDur(now.Sub(b.at)),
 			targets: b.targets,
 			dim:     dim,
 			cursor:  b.id == cursor,

@@ -68,7 +68,7 @@ members, keeping the name prefixes. Each
 line pads the name to the longest target, so every message starts in the same
 column. The pane's top line shows the cursor row's state, uptime, how many files its
 last change batch held, and its command, with its url linked. It names a muted
-row in words (`muted`), and uptime reads `0:07`, `2:03`, `1:02:03`.
+row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it.
 The bottom-left footer reads `? help`. The fs drawer

@@ -109,7 +109,7 @@ func TestHealthyAppendRefreshesRawText(t *testing.T) {
 	for i, s := range m.visibleSep {
 		if s.restart != nil {
 			found = true
-			if !strings.HasSuffix(m.visibleRaw[i], "· healthy in 1.8s") {
+			if !strings.HasSuffix(m.visibleRaw[i], "· healthy in 1s") {
 				t.Fatalf("raw text = %q, want the healthy time", m.visibleRaw[i])
 			}
 		}

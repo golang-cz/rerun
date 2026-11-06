@@ -73,7 +73,7 @@ func TestBuildStatusTextPerState(t *testing.T) {
 	m.now = buildAt.Add(4 * time.Second)
 	row := func() string { return strings.TrimRight(leftLineRaw(m, 0), " ") }
 
-	if got := row(); !strings.HasSuffix(got, "0:04") {
+	if got := row(); !strings.HasSuffix(got, "4s") {
 		t.Fatalf("idle row = %q, want the uptime", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
@@ -303,7 +303,7 @@ func TestBuildRuleUpdatesInPlace(t *testing.T) {
 		t.Fatalf("building rule = %q, want one rule", got)
 	}
 	m.applyEvents([]event{buildOK("api", 500*time.Millisecond)})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 1s · a.go +1 more" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 0.5s · a.go +1 more" {
 		t.Fatalf("rule after the build = %q, want it rewritten in place", got)
 	}
 	if len(m.merged) != 1 {

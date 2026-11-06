@@ -1268,25 +1268,10 @@ func (m *tuiModel) pruneCells() {
 	m.cellBySeq = live
 }
 
-// uptime renders a running target's age as a clock: 0:07, 2:03, 1:02:03, then 4d03h.
-func uptime(d time.Duration) string {
-	if d < 0 {
-		d = 0
-	}
-	secs := int(d / time.Second)
-	switch {
-	case d < time.Hour:
-		return fmt.Sprintf("%d:%02d", secs/60, secs%60)
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%d:%02d:%02d", secs/3600, secs/60%60, secs%60)
-	}
-	return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
-}
-
 // status is the row's second column: uptime while running, what happened after.
 func (m *tuiModel) status(t *tuiTarget) string {
 	if t.building {
-		return "⚙ " + buildDur(max(0, m.now.Sub(t.buildStart)))
+		return "⚙ " + fmtDur(m.now.Sub(t.buildStart))
 	}
 	if t.buildFailed {
 		return "✗ build"
@@ -1296,7 +1281,7 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	}
 	switch t.state {
 	case stateRunning:
-		return uptime(m.now.Sub(t.lastStart))
+		return fmtDur(m.now.Sub(t.lastStart))
 	case stateStarting:
 		return "starting"
 	case stateBackoff:

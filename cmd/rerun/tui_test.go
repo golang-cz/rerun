@@ -102,30 +102,6 @@ func buttons(m *tuiModel) []string {
 	return out
 }
 
-func TestUptimeFormat(t *testing.T) {
-	tests := []struct {
-		in   time.Duration
-		want string
-	}{
-		{0, "0:00"},
-		{3 * time.Second, "0:03"},
-		{9 * time.Second, "0:09"},
-		{48 * time.Second, "0:48"},
-		{75 * time.Second, "1:15"},
-		{30 * time.Minute, "30:00"},
-		{90 * time.Minute, "1:30:00"},
-		{150 * time.Minute, "2:30:00"},
-		{23 * time.Hour, "23:00:00"},
-		{99 * time.Hour, "4d03h"},
-		{-time.Second, "0:00"},
-	}
-	for _, tt := range tests {
-		if got := uptime(tt.in); got != tt.want {
-			t.Errorf("uptime(%v) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
 func TestStreamButtonMuteToggle(t *testing.T) {
 	m := newTestModel(t)
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", " ", " "}) {
@@ -737,7 +713,7 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 	}
 
 	web := lines[0]
-	for _, want := range []string{"●", "web", "0:48"} {
+	for _, want := range []string{"●", "web", "48s"} {
 		if !strings.Contains(web, want) {
 			t.Errorf("web row %q is missing %q", web, want)
 		}
@@ -987,8 +963,8 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 func TestRowStatusText(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.now = m.targets[0].lastStart.Add(65 * time.Second)
-	if got := m.status(m.targets[0]); got != "1:05" {
-		t.Errorf("running status = %q, want 1:05", got)
+	if got := m.status(m.targets[0]); got != "1m05s" {
+		t.Errorf("running status = %q, want 1m05s", got)
 	}
 
 	m.targets[0].state = stateExited
@@ -1035,8 +1011,8 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 
 	// The first run takes the row to the ordinary running state.
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: m.now}})
-	if got := m.status(m.targets[0]); got != "0:00" {
-		t.Errorf("status after the first run = %q, want 0s", got)
+	if got := m.status(m.targets[0]); got != "0.1s" {
+		t.Errorf("status after the first run = %q, want 0.1s", got)
 	}
 }
 
@@ -1380,7 +1356,7 @@ func TestStartingAndStartedEventsMoveTheRow(t *testing.T) {
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state after started = %v, want running", m.targets[0].state)
 	}
-	if got := m.status(m.targets[0]); got != "0:00" {
-		t.Fatalf("status after started = %q, want 0s", got)
+	if got := m.status(m.targets[0]); got != "0.1s" {
+		t.Fatalf("status after started = %q, want 0.1s", got)
 	}
 }

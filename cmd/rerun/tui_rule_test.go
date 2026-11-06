@@ -18,7 +18,7 @@ func TestStartAndExitWriteRunRules(t *testing.T) {
 		{kind: evExited, target: "web", code: 0, at: start.Add(4200 * time.Millisecond)},
 	})
 
-	want := []string{"▶ web started 12:01:02 · sleep 1", "listening", "✓ web exited 0 · 4.2s"}
+	want := []string{"▶ web started 12:01:02 · sleep 1", "listening", "✓ web exited 0 · 4s"}
 	var got []string
 	for i, line := range m.visibleRaw {
 		if m.visibleSep[i].isSep() || line == "listening" {

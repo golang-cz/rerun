@@ -77,8 +77,8 @@ func TestHealthyAppendsToItsRestartRule(t *testing.T) {
 	}
 
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(1800 * time.Millisecond), runAt: restartAt, dur: 1800 * time.Millisecond}})
-	if got := m.targets[0].lastRule.label(200, false); !strings.HasSuffix(got, " · healthy in 1.8s") {
-		t.Fatalf("label = %q, want healthy in 1.8s appended", got)
+	if got := m.targets[0].lastRule.label(200, false); !strings.HasSuffix(got, " · healthy in 1s") {
+		t.Fatalf("label = %q, want healthy in 1s appended", got)
 	}
 
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(-time.Minute), runAt: restartAt.Add(-time.Minute), dur: 9 * time.Second}})

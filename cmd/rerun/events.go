@@ -167,18 +167,18 @@ func (s *plainSink) render(ev event) string {
 		return fmt.Sprintf("[%s] building (%s)\n", ev.target, fileCount(len(ev.files)))
 
 	case evBuildOK:
-		return fmt.Sprintf("[%s] build ok (%s)\n", ev.target, ev.dur.Round(time.Millisecond))
+		return fmt.Sprintf("[%s] build ok (%s)\n", ev.target, fmtDur(ev.dur))
 
 	case evBuildFailed:
 		var b strings.Builder
-		fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, ev.dur.Round(time.Millisecond), ev.err)
+		fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, fmtDur(ev.dur), ev.err)
 		for _, l := range ev.lines {
 			fmt.Fprintf(&b, "[%s] build: %s\n", ev.target, l)
 		}
 		return b.String()
 
 	case evHealth:
-		return fmt.Sprintf("[%s] health: %s (%s after start)\n", ev.target, ev.health, ev.dur.Round(time.Millisecond))
+		return fmt.Sprintf("[%s] health: %s (%s after start)\n", ev.target, ev.health, fmtDur(ev.dur))
 
 	case evStopped:
 		return fmt.Sprintf("[%s] stopped\n", ev.target)
