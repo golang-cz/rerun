@@ -229,7 +229,7 @@ imports:
     profiles: [debug]                # compose profiles to activate
 ```
 
-- A service shows as `devbox/postgres`, with the state, `▶ started`, `✗ exited 137`, `↻ restarted` and health marks.
+- A service shows as `devbox/postgres`, with the state, `▶ started`, `✗ exit 137`, `↻ restarted` and health marks.
 - `space` starts or stops a service. `r` restarts it.
 - Services have no file watching and no build. `docker compose watch` covers that.
 - rerun reads container state from `docker events`, and reconciles with `docker compose ps` after every reconnect.
@@ -237,6 +237,36 @@ imports:
 - If docker stops answering, the footer shows `docker unreachable, retrying`.
 - The `docker` CLI must be on PATH. A required import without it is an error. An optional one is skipped with a notice.
 - `groups:` is an error on a compose import. `services:` and `profiles:` are errors on a rerun import.
+
+#### Makefile
+
+A Makefile is an import source too. rerun reads its target names; it does not run `make -p`.
+
+```yaml
+imports:
+  - path: apps/api/Makefile        # group defaults to make/api
+  - path: tools/Makefile
+    group: make/tools
+    optional: true
+    targets: [lint, gen]           # keep only these targets
+
+groups:
+  make:
+    hide: false                    # unfold the default group
+```
+
+- A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and starts folded.
+- A subfolder's Makefile loads only when you import it. rerun never scans subfolders.
+- The default group for a subfolder import is `make/<dir>`, such as `make/api`.
+- `groups: make: hide: false` unfolds a Makefile group.
+- Subgroups such as `make/api` need their own entry, like `groups: make/api: hide: false`.
+- A target's description is its trailing `## text`, or the comment lines directly above it.
+- `targets:` keeps only the named targets. It works on Makefile imports only.
+- `targets:` fails the load when a listed target is gone from the Makefile.
+- Each target is a row that starts manually and does not watch files.
+- Enter in Ctrl+K runs a target. Enter on a running one focuses it.
+- A `.mk` file runs as `make -f <file>`.
+- A repo with only a Makefile opens rerun with the finder open.
 
 #### Reloading
 

@@ -681,6 +681,7 @@ func (m *tuiModel) rightLines(w int) []string {
 			// Keep the click target live even when an overlaid line hides the marker.
 			m.layout.marker = rect{x: m.layout.leftW + 1, y: headH + m.vp.Height - 1, w: w, h: 1}
 		}
+		again := m.runAgainHint()
 		// The bottom row is one line, so this switch is its precedence order.
 		switch {
 		case m.copyHintActive():
@@ -702,6 +703,8 @@ func (m *tuiModel) rightLines(w int) []string {
 			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
 			out[last] = m.bottomLine(w, m.hint, chip)
+		case again != "":
+			out[last] = m.bottomLine(w, again, chip)
 		case !m.follow:
 			// A frozen pane with nothing else to say still names the state.
 			out[last] = m.bottomLine(w, "", chip)
@@ -852,12 +855,45 @@ func (m *tuiModel) panLines(lines []string) []string {
 	return out
 }
 
+// runAgainHint names r as the way to run a stopped or exited make row again.
+func (m *tuiModel) runAgainHint() string {
+	i := m.solo
+	if i < 0 {
+		i = m.cursorTarget()
+	}
+	if i < 0 || i >= len(m.targets) {
+		return ""
+	}
+	t := m.targets[i]
+	if t.spec.Kind != makeKind || (t.state != stateExited && t.state != stateStopped) {
+		return ""
+	}
+	return "r run again · ctrl+k find"
+}
+
+// makeEmptyHint points at the finder before any target ran, since a Makefile's targets stay folded until found.
+func (m *tuiModel) makeEmptyHint() string {
+	for _, t := range m.targets {
+		if t.spec.Kind == makeKind {
+			if t.spec.ImportHide {
+				return "ctrl+k find a target · → unfold make/"
+			}
+			return "ctrl+k find a target"
+		}
+	}
+	return ""
+}
+
 func (m *tuiModel) emptyHint() string {
 	if m.filterActive() {
 		if m.solo >= 0 {
 			return fmt.Sprintf("no lines in %s match the filters · backspace removes the last", m.targets[m.solo].spec.Name)
 		}
 		return "no lines match the filters · backspace removes the last"
+	}
+	// A solo row names its own state below; the make hint would hide it.
+	if hint := m.makeEmptyHint(); hint != "" && !m.anyTargetRan() && m.solo < 0 {
+		return hint
 	}
 	if m.solo >= 0 {
 		t := m.targets[m.solo]
@@ -875,6 +911,16 @@ func (m *tuiModel) emptyHint() string {
 	return "no output yet — press ? for keys"
 }
 
+// anyTargetRan reports whether any target has started, or has exited or stopped after starting.
+func (m *tuiModel) anyTargetRan() bool {
+	for _, t := range m.targets {
+		if t.runStarted || t.state == stateExited || t.state == stateStopped {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *tuiModel) allMuted() bool {
 	for _, t := range m.targets {
 		if !t.muted {
@@ -888,7 +934,7 @@ func (m *tuiModel) allMuted() bool {
 var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row"},
-	{"r", "reboot the row"},
+	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
 	{"tab", "focus the fs drawer"},
@@ -897,7 +943,7 @@ var helpShortKeys = [][2]string{
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
-	{"ctrl+k", "find a target or group and jump to it"},
+	{"ctrl+k", "find a target or group; enter jumps, runs a make target"},
 	{"q", "quit (asks first)"},
 }
 
@@ -912,7 +958,7 @@ var helpKeys = [][2]string{
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (group row: its targets)"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
-	{"ctrl+k", "find a target or group: enter jumps, esc closes"},
+	{"ctrl+k", "find a target or group: enter jumps or runs a make target, esc closes"},
 	{"o", "open the target's url"},
 	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},

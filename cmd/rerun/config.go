@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,9 @@ import (
 const ConfigFileName = "rerun.yml"
 
 const defaultDelay = 200 * time.Millisecond
+
+// makeKind is the Target.Kind of a Makefile target.
+const makeKind = "make"
 
 // ErrConfigNotFound reports that no rerun.yml was found on the way up.
 var ErrConfigNotFound = errors.New("no rerun.yml found")
@@ -145,6 +149,8 @@ type Config struct {
 	Files []string
 	// Missing lists the optional imports whose file is absent.
 	Missing []missingImport
+	// MakeOnly is set when no rerun.yml exists and the Makefile in its dir is the whole config.
+	MakeOnly bool
 	// Notices are warnings that do not stop the config from loading.
 	Notices []string
 }
@@ -171,6 +177,7 @@ func LoadConfig(startDir string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	start := dir
 
 	for {
 		path := filepath.Join(dir, ConfigFileName)
@@ -190,6 +197,9 @@ func LoadConfig(startDir string) (*Config, error) {
 		dir = parent
 	}
 
+	if mk := implicitMakefile(start); mk != "" {
+		return makeOnlyConfig(filepath.Join(start, ConfigFileName), mk)
+	}
 	return nil, &configNotFoundError{dir: startDir}
 }
 
@@ -309,6 +319,12 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A reload after rerun.yml is deleted keeps the Makefile running, not an error.
+		if mk := implicitMakefile(filepath.Dir(abs)); mk != "" {
+			return makeOnlyConfig(abs, mk)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -322,14 +338,24 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}}
-	if imports := mappingValue(root, importsKey); imports != nil {
-		if err := cfg.parseImports(src, imports, abs, file.schemas); err != nil {
-			return nil, err
-		}
+	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
+		return nil, err
 	}
 
 	if len(cfg.Targets) == 0 && len(cfg.Missing) == 0 {
 		return nil, src.at(root, nodeSpan(root), "no targets defined")
+	}
+	return cfg, nil
+}
+
+// makeOnlyConfig is the config for a dir with a Makefile and no rerun.yml. path is where the rerun.yml would be, so a later one reloads.
+func makeOnlyConfig(path, mk string) (*Config, error) {
+	cfg := &Config{Path: path, Files: []string{path}, MakeOnly: true}
+	if err := cfg.parseImports(&configSource{path: path}, nil, path, nil); err != nil {
+		return nil, err
+	}
+	if len(cfg.Targets) == 0 {
+		return nil, fmt.Errorf("%s: no targets defined; add a rule or write rerun.yml", mk)
 	}
 	return cfg, nil
 }
@@ -374,6 +400,8 @@ type groupDef struct {
 	columns []Column
 	muted   *bool
 	hide    bool
+	// hideSet tells `hide: false` apart from no hide key, which Makefile groups read differently.
+	hideSet bool
 }
 
 // parseFileBody reads a file's groups and targets under the names the file writes.
@@ -533,7 +561,7 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 			if err != nil {
 				return groupDef{}, err
 			}
-			def.hide = b
+			def.hide, def.hideSet = b, true
 
 		default:
 			e := src.at(key, len(field), fmt.Sprintf("%s: unknown field %q", owner, field))

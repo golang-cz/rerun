@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/golang-cz/rerun"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,32 +20,48 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "hide", "groups", "services", "profiles"}
+var importFields = []string{"path", "group", "optional", "hide", "groups", "services", "profiles", "targets"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
-	path      string
-	group     string
-	optional  bool
-	hide      bool
-	groups    []string
-	services  []string
-	profiles  []string
+	path     string
+	group    string
+	optional bool
+	hide     bool
+	groups   []string
+	services []string
+	profiles []string
+	// targets is the Makefile-only filter: the rule names to keep.
+	targets   []string
 	pathNode  *yaml.Node
 	groupNode *yaml.Node
 	groupsRef *yaml.Node
 	// servicesRef and profilesRef locate the compose-only keys, for errors on rerun files.
 	servicesRef *yaml.Node
 	profilesRef *yaml.Node
+	targetsRef  *yaml.Node
+	// implicit marks the root Makefile that is imported without being listed.
+	implicit bool
 }
 
 // parseImports merges the root file's imports into cfg; a root group named like an import gives its targets columns.
 func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string]groupDef) error {
-	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
-		return nil
+	var specs []importSpec
+	if node != nil && !(node.Kind == yaml.ScalarNode && node.Tag == "!!null") {
+		if node.Kind != yaml.SequenceNode {
+			return src.at(node, nodeSpan(node), "imports: expected a list of entries with a path")
+		}
+		for _, item := range node.Content {
+			spec, err := parseImportSpec(src, deref(item))
+			if err != nil {
+				return err
+			}
+			specs = append(specs, spec)
+		}
 	}
-	if node.Kind != yaml.SequenceNode {
-		return src.at(node, nodeSpan(node), "imports: expected a list of entries with a path")
+	// Last, so an explicit import of the same file is seen first and wins the dedupe.
+	if mk := implicitMakefile(filepath.Dir(rootFile)); mk != "" {
+		specs = append(specs, importSpec{path: filepath.Base(mk), group: makeKind, optional: true, implicit: true})
 	}
 
 	rootCanon := canonicalPath(rootFile)
@@ -66,11 +84,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		return nil
 	}
 
-	for _, item := range node.Content {
-		spec, err := parseImportSpec(src, deref(item))
-		if err != nil {
-			return err
-		}
+	for _, spec := range specs {
 		abs, err := resolveImportPath(filepath.Dir(rootFile), spec.path)
 		if err != nil {
 			return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: %v", spec.path, err))
@@ -80,16 +94,30 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: a file cannot import itself", spec.path))
 		}
 		if first, ok := seenFiles[canon]; ok {
+			if spec.implicit {
+				continue
+			}
 			if !slices.Equal(first, spec.groups) {
 				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q is listed again with different groups; the first one wins", spec.path))
 			}
 			continue
 		}
 		seenFiles[canon] = spec.groups
+		// An implicit Makefile never breaks a config that loaded before: it yields to any make group.
+		if spec.implicit && seenGroups[makeKind] {
+			continue
+		}
+		if spec.implicit && rootOwnsGroup(cfg, rootSchemas, makeKind) {
+			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: rerun.yml defines group %q; list the Makefile under imports: to use it", filepath.Base(abs), makeKind))
+			continue
+		}
 		// A compose import's default group is its project name, known only after docker reads the file.
 		explicitGroup := spec.group != ""
 		if !explicitGroup {
 			spec.group = filepath.Base(filepath.Dir(abs))
+			if isMakefile(abs) {
+				spec.group = makeGroup(rootFile, abs)
+			}
 		}
 
 		data, err := os.ReadFile(abs)
@@ -103,70 +131,107 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			}
 			return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: file not found; set optional: true to skip it", spec.path))
 		}
+		if err != nil && spec.implicit {
+			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: %v", filepath.Base(abs), err))
+			continue
+		}
 		if err != nil {
 			return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: %v", spec.path, err))
 		}
 
-		isrc, iroot, err := parseConfigBytes(abs, data)
-		if err != nil {
-			return err
-		}
-
 		var targets []Target
-		if mappingValue(iroot, "services") != nil {
-			if spec.groupsRef != nil {
-				return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
+		if isMakefile(abs) {
+			ref := spec.groupsRef
+			if ref == nil {
+				ref = spec.servicesRef
 			}
-			project, services, profilesOf, err := resolveComposeImport(spec, abs)
-			if errors.Is(err, errNoDocker) && spec.optional {
-				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
+			if ref == nil {
+				ref = spec.profilesRef
+			}
+			if ref != nil {
+				return src.at(ref, nodeSpan(ref), fmt.Sprintf("import %q: groups, services and profiles apply to rerun and compose files; a Makefile filters with targets:", spec.path))
+			}
+			mk, err := makefileTargets(spec, abs, data)
+			if err != nil && spec.implicit {
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: %v", filepath.Base(abs), err))
 				continue
 			}
 			if err != nil {
-				return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: %v", spec.path, err))
-			}
-			if !explicitGroup {
-				spec.group = project
-			}
-			if err := claim(spec, spec.group); err != nil {
-				return err
-			}
-			cfg.Files = append(cfg.Files, abs)
-			if len(services) == 0 {
-				cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: no services in %s", spec.path, abs))
-			}
-			targets = composeTargets(abs, spec.group, project, services, spec.profiles, profilesOf)
-		} else {
-			if spec.servicesRef != nil || spec.profilesRef != nil {
-				ref := spec.servicesRef
-				if ref == nil {
-					ref = spec.profilesRef
+				node := spec.targetsRef
+				if node == nil {
+					node = spec.pathNode
 				}
-				return src.at(ref, nodeSpan(ref), fmt.Sprintf("import %q: services and profiles apply to compose files; this file is a rerun file", spec.path))
+				return src.at(node, nodeSpan(node), fmt.Sprintf("import %q: %v", spec.path, err))
 			}
 			if err := claim(spec, spec.group); err != nil {
 				return err
 			}
-			if mappingValue(iroot, importsKey) != nil {
-				cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: imports are one level deep; the imports key here is ignored", abs))
-			}
 			cfg.Files = append(cfg.Files, abs)
-			if canon != abs && isSymlink(abs) {
-				cfg.Files = append(cfg.Files, canon)
+			targets = mk
+		} else {
+			if spec.targetsRef != nil {
+				return src.at(spec.targetsRef, nodeSpan(spec.targetsRef), fmt.Sprintf("import %q: targets applies to Makefile imports; a rerun or compose file filters with groups: or services:", spec.path))
 			}
-
-			file, err := parseFileBody(isrc, iroot, abs)
+			isrc, iroot, err := parseConfigBytes(abs, data)
 			if err != nil {
 				return err
 			}
-			if len(spec.groups) > 0 {
-				for _, g := range spec.groups {
-					if _, ok := file.schemas[g]; !ok {
-						return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: unknown group %q", spec.path, g))
+
+			if mappingValue(iroot, "services") != nil {
+				if spec.groupsRef != nil {
+					return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
+				}
+				project, services, profilesOf, err := resolveComposeImport(spec, abs)
+				if errors.Is(err, errNoDocker) && spec.optional {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
+					continue
+				}
+				if err != nil {
+					return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("import %q: %v", spec.path, err))
+				}
+				if !explicitGroup {
+					spec.group = project
+				}
+				if err := claim(spec, spec.group); err != nil {
+					return err
+				}
+				cfg.Files = append(cfg.Files, abs)
+				if len(services) == 0 {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: no services in %s", spec.path, abs))
+				}
+				targets = composeTargets(abs, spec.group, project, services, spec.profiles, profilesOf)
+			} else {
+				if spec.servicesRef != nil || spec.profilesRef != nil {
+					ref := spec.servicesRef
+					if ref == nil {
+						ref = spec.profilesRef
+					}
+					return src.at(ref, nodeSpan(ref), fmt.Sprintf("import %q: services and profiles apply to compose files; this file is a rerun file", spec.path))
+				}
+				if err := claim(spec, spec.group); err != nil {
+					return err
+				}
+				if mappingValue(iroot, importsKey) != nil {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: imports are one level deep; the imports key here is ignored", abs))
+				}
+				cfg.Files = append(cfg.Files, abs)
+				if canon != abs && isSymlink(abs) {
+					cfg.Files = append(cfg.Files, canon)
+				}
+
+				file, err := parseFileBody(isrc, iroot, abs)
+				if err != nil {
+					return err
+				}
+				if len(spec.groups) > 0 {
+					for _, g := range spec.groups {
+						if _, ok := file.schemas[g]; !ok {
+							return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: unknown group %q", spec.path, g))
+						}
 					}
 				}
+				targets = file.targets
 			}
-			targets = file.targets
 		}
 
 		for _, t := range targets {
@@ -175,6 +240,10 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			}
 			t.Name = spec.group + "/" + t.Name
 			if names[t.Name] {
+				if spec.implicit {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("make target %q is skipped: the name is already used", t.Name))
+					continue
+				}
 				return src.at(spec.pathNode, nodeSpan(spec.pathNode), fmt.Sprintf("duplicate target %q", t.Name))
 			}
 			names[t.Name] = true
@@ -203,13 +272,15 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 					t.Columns = slices.Clone(root.columns)
 				}
 			}
-			// The import's hide is the outermost level: it only applies where nothing above set muted.
-			if spec.hide {
+			// Makefile imports fold by default; a root groups: entry with hide: false unfolds one.
+			unfolded := rootSchemas[spec.group].hideSet && !rootSchemas[spec.group].hide
+			if spec.hide || (t.Kind == makeKind && !unfolded) {
 				t.GroupHide, t.ImportHide = true, true
-				if t.Muted == nil {
-					muted := true
-					t.Muted = &muted
-				}
+			}
+			// The import's hide is the outermost level: it only applies where nothing above set muted.
+			if spec.hide && t.Muted == nil {
+				muted := true
+				t.Muted = &muted
 			}
 			cfg.Targets = append(cfg.Targets, t)
 		}
@@ -226,6 +297,19 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		}
 	}
 	return nil
+}
+
+// rootOwnsGroup reports whether rerun.yml itself defines group, by a groups: entry or by its own targets.
+func rootOwnsGroup(cfg *Config, rootSchemas map[string]groupDef, group string) bool {
+	if _, ok := rootSchemas[group]; ok {
+		return true
+	}
+	for _, t := range cfg.Targets {
+		if t.Import == "" && t.Schema == group {
+			return true
+		}
+	}
+	return false
 }
 
 // errNoDocker is returned when a compose import needs the docker CLI and it is not on PATH.
@@ -259,6 +343,42 @@ func composeTargets(file, group, project string, services, profiles []string, pr
 		out = append(out, t)
 	}
 	return out
+}
+
+// makefileTargets makes one manual target per Makefile rule, in file order, limited to spec.targets when set.
+func makefileTargets(spec importSpec, path string, data []byte) ([]Target, error) {
+	rules, err := parseMakefile(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	for _, want := range spec.targets {
+		if !slices.ContainsFunc(rules, func(r makeTarget) bool { return r.Name == want }) {
+			return nil, fmt.Errorf("no target %q in %s", want, path)
+		}
+	}
+	// A bare make reads only the Makefile of its own dir, so a .mk file needs -f.
+	words := []string{"make"}
+	if filepath.Ext(path) == ".mk" {
+		words = append(words, "-f", filepath.Base(path))
+	}
+	cmd := rerun.ShellScript(words) + " "
+	dir := filepath.Dir(path)
+	var out []Target
+	for _, r := range rules {
+		if len(spec.targets) > 0 && !slices.Contains(spec.targets, r.Name) {
+			continue
+		}
+		out = append(out, Target{Kind: makeKind, Name: r.Name, Desc: r.Desc, Cmd: cmd + r.Name, Dir: dir, Start: startManual, Selected: true})
+	}
+	return out, nil
+}
+
+// makeGroup is the default group of a Makefile import: `make` beside rerun.yml, else make/<dir name>.
+func makeGroup(rootFile, abs string) string {
+	if filepath.Dir(abs) == filepath.Dir(rootFile) {
+		return makeKind
+	}
+	return makeKind + "/" + filepath.Base(filepath.Dir(abs))
 }
 
 // listProfile is the profile a service groups under: its first one the import names, else its first.
@@ -318,6 +438,13 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				return spec, err
 			}
 			spec.groups, spec.groupsRef = list, value
+
+		case "targets":
+			list, _, err := stringOrList(src, "import", field, value)
+			if err != nil {
+				return spec, err
+			}
+			spec.targets, spec.targetsRef = list, value
 
 		case "services", "profiles":
 			list, _, err := stringOrList(src, "import", field, value)

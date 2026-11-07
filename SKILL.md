@@ -122,6 +122,25 @@ An import's `hide: true` mutes its targets and folds its section. Its own `muted
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
 imported file is ignored. A compose file is imported as its services. See Docker Compose below.
 
+### Makefile: a make file's targets
+
+A Makefile is an import source too. Its targets become rows, read as text, never run through `make -p`.
+
+```yaml
+imports:
+  - path: apps/api/Makefile        # group defaults to make/api
+  - path: tools/Makefile
+    group: make/tools
+    targets: [lint, gen]           # keep only these
+```
+
+- A `Makefile` next to `rerun.yml` loads as a folded `make` group by default.
+- Subfolder Makefiles load only when imported. rerun never scans subfolders.
+- `groups: make: hide: false` unfolds a Makefile group.
+- Descriptions come from a trailing `## text` or the comment above the target.
+- Targets start manually and do not watch files. Enter in Ctrl+K runs one.
+- A `.mk` file runs as `make -f <file>`.
+
 ### Docker Compose: a compose file's services
 
 An import of a file with a top-level `services:` key makes each service a target:

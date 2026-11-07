@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/golang-cz/rerun"
@@ -102,6 +103,12 @@ func runConfigMode(args Args) int {
 	cfg, err := LoadConfig(".")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nrerun: hint: %s\n", configHint)
+		return 1
+	}
+	// A Makefile-only config has no TUI to start its manual targets from, so without a terminal it would wait forever.
+	if cfg.MakeOnly && !(isTerminal(os.Stdout) && isTerminal(os.Stdin)) {
+		fmt.Fprintf(os.Stderr, "rerun: %v\n", &configNotFoundError{dir: filepath.Dir(cfg.Path)})
 		fmt.Fprintf(os.Stderr, "\nrerun: hint: %s\n", configHint)
 		return 1
 	}

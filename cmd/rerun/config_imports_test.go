@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -582,5 +583,163 @@ func TestFeedKeysStayUnderTheOwnerDir(t *testing.T) {
 	}
 	if got := m.feedPath(filepath.Join(filepath.Dir(root), "src", "a.go"), Target{Dir: filepath.Dir(root)}); got != "src/a.go" {
 		t.Errorf("root key = %q, want src/a.go", got)
+	}
+}
+
+func TestMakefileImports(t *testing.T) {
+	tools := "# Build the thing\nbuild: ## Build it\n\tgo build\n\ntest:\n\tgo test\n"
+	tests := []struct {
+		name     string
+		root     string
+		files    map[string]string
+		wantErr  string
+		wantNext []string
+		check    func(t *testing.T, cfg *Config)
+	}{
+		{
+			name:     "explicit import lists each rule as a manual make target",
+			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"tools/Makefile": tools},
+			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
+			check: func(t *testing.T, cfg *Config) {
+				build, _ := cfg.Find("make/tools/build")
+				if build.Kind != makeKind || build.Cmd != "make build" || build.Start != startManual {
+					t.Errorf("kind = %q cmd = %q start = %q", build.Kind, build.Cmd, build.Start)
+				}
+				if build.Desc != "Build it" || build.Import != "make/tools" {
+					t.Errorf("desc = %q import = %q", build.Desc, build.Import)
+				}
+				if want := filepath.Join(filepath.Dir(filepath.Dir(cfg.Path)), "tools"); build.Dir != want {
+					t.Errorf("dir = %q, want %q", build.Dir, want)
+				}
+				if test, _ := cfg.Find("make/tools/test"); test.Desc != "" {
+					t.Errorf("test desc = %q, want none", test.Desc)
+				}
+			},
+		},
+		{
+			name:     "targets keeps only the listed rules in file order",
+			root:     "imports:\n  - path: ../tools/Makefile\n    targets: [test, build]\n",
+			files:    map[string]string{"tools/Makefile": tools},
+			wantNext: []string{"make/tools/build", "make/tools/test"},
+		},
+		{
+			name:    "targets names a rule the Makefile lacks",
+			root:    "imports:\n  - path: ../tools/Makefile\n    targets: [nope]\n",
+			files:   map[string]string{"tools/Makefile": tools},
+			wantErr: `no target "nope"`,
+		},
+		{
+			name:    "targets on a rerun import is an error",
+			root:    "imports:\n  - path: ../bpn/rerun.yml\n    targets: [api]\n",
+			files:   map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n"},
+			wantErr: "targets applies to Makefile imports",
+		},
+		{
+			name:    "targets on a compose import is an error",
+			root:    "imports:\n  - path: ../stack/compose.yml\n    targets: [api]\n",
+			files:   map[string]string{"stack/compose.yml": "services:\n  api:\n    image: x\n"},
+			wantErr: "targets applies to Makefile imports",
+		},
+		{
+			name:     "a Makefile beside rerun.yml defaults to the make group",
+			root:     "imports:\n  - path: Makefile\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"app/Makefile": "build:\n"},
+			wantNext: []string{"local", "make/build"},
+		},
+		{
+			name:     "an unlisted Makefile beside rerun.yml is imported as make",
+			root:     "local:\n  cmd: echo\n",
+			files:    map[string]string{"app/Makefile": "build:\n"},
+			wantNext: []string{"local", "make/build"},
+			check: func(t *testing.T, cfg *Config) {
+				build, _ := cfg.Find("make/build")
+				if !build.ImportHide {
+					t.Errorf("implicit make group is not folded by default")
+				}
+				if !slices.ContainsFunc(cfg.Files, func(f string) bool {
+					return filepath.Dir(f) == filepath.Dir(cfg.Path) && strings.EqualFold(filepath.Base(f), "makefile")
+				}) {
+					t.Errorf("files = %v, want the implicit Makefile watched", cfg.Files)
+				}
+			},
+		},
+		{
+			name:     "an explicit root import with targets replaces the implicit one",
+			root:     "imports:\n  - path: Makefile\n    targets: [test]\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"app/Makefile": "build:\ntest:\n"},
+			wantNext: []string{"local", "make/test"},
+		},
+		{
+			name:     "no Makefile beside rerun.yml means no make group",
+			root:     "local:\n  cmd: echo\n",
+			wantNext: []string{"local"},
+		},
+		{
+			name:     "a nested rerun file does not pull in a Makefile beside it",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n",
+			files:    map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n", "bpn/Makefile": "build:\n"},
+			wantNext: []string{"bpn/api"},
+		},
+		{
+			name:     "groups entry hide false unfolds one make group",
+			root:     "groups:\n  make/tools:\n    hide: false\n\nimports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"tools/Makefile": tools},
+			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
+			check: func(t *testing.T, cfg *Config) {
+				build, _ := cfg.Find("make/tools/build")
+				if build.GroupHide || build.ImportHide {
+					t.Errorf("group hide = %v, import hide = %v; want unfolded", build.GroupHide, build.ImportHide)
+				}
+			},
+		},
+		{
+			name:     "make groups are folded by default",
+			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"tools/Makefile": tools},
+			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
+			check: func(t *testing.T, cfg *Config) {
+				build, _ := cfg.Find("make/tools/build")
+				if !build.ImportHide || build.Muted != nil {
+					t.Errorf("import hide = %v, muted = %v; want folded and not muted", build.ImportHide, build.Muted)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newImportFixture(t, tt.root, tt.files)
+			cfg, err := ParseConfig(f.root)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseConfig: %v", err)
+			}
+			if got := targetNames(cfg); !equalStrings(got, tt.wantNext) {
+				t.Errorf("targets = %v, want %v", got, tt.wantNext)
+			}
+			if tt.check != nil {
+				tt.check(t, cfg)
+			}
+		})
+	}
+}
+
+func TestMakeGroupsSortLast(t *testing.T) {
+	makeRow := &tuiTarget{spec: Target{Name: "make/build", Kind: makeKind, Import: "make"}}
+	apiRow := &tuiTarget{spec: Target{Name: "bpn/api", Import: "bpn"}}
+	localRow := &tuiTarget{spec: Target{Name: "local"}}
+	rows := []*tuiTarget{makeRow, apiRow, localRow}
+	groupTargets(rows)
+	want := []*tuiTarget{apiRow, localRow, makeRow}
+	for i := range want {
+		if rows[i] != want[i] {
+			t.Fatalf("row %d = %q, want %q", i, rows[i].spec.Name, want[i].spec.Name)
+		}
 	}
 }

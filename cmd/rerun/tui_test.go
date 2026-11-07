@@ -1360,7 +1360,7 @@ func TestExitEventAddsOnlyTheRunRule(t *testing.T) {
 	if got := m.paneLen(); got != before+1 {
 		t.Fatalf("pane lines after an exit = %d, want %d", got, before+1)
 	}
-	if !strings.Contains(m.visibleRaw[len(m.visibleRaw)-1], "■ web exited 1") {
+	if !strings.Contains(m.visibleRaw[len(m.visibleRaw)-1], "■ web exit 1") {
 		t.Fatalf("last pane line = %q, want the exit rule", m.visibleRaw[len(m.visibleRaw)-1])
 	}
 }

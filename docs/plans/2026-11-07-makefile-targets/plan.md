@@ -1,6 +1,6 @@
 # Makefile targets
 
-Status: TODO
+Status: DONE
 
 ## Summary
 

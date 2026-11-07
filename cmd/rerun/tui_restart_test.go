@@ -111,7 +111,7 @@ func TestNonRestartExitKeepsExitRule(t *testing.T) {
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt}})
 	m.applyEvents([]event{{kind: evExited, target: "api", code: 0, status: "exited 0", at: restartAt.Add(time.Second)}})
 	m.View()
-	if rules := rawRules(m); len(rules) != 2 || !strings.HasPrefix(rules[1], "✓ api exited 0") {
+	if rules := rawRules(m); len(rules) != 2 || !strings.HasPrefix(rules[1], "✓ api exit 0") {
 		t.Fatalf("rules = %q, want the ■ exit rule after the start", rules)
 	}
 }

@@ -267,7 +267,7 @@ func exitRule(t *tuiTarget, ev event, now time.Time) sepLine {
 
 func exitStatus(code int, err error) string {
 	if code >= 0 {
-		return fmt.Sprintf("exited %d", code)
+		return fmt.Sprintf("exit %d", code)
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ProcessState != nil {

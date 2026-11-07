@@ -137,7 +137,7 @@ func (g *targetGroup) watchConfig(path string) {
 	if abs, err := filepath.Abs(path); err == nil {
 		clean = abs
 	}
-	w := &configWatch{watcher: watcher, dirs: map[string]bool{}, sink: g.sink}
+	w := &configWatch{watcher: watcher, dirs: map[string]bool{}, sink: g.sink, rootDir: filepath.Dir(clean)}
 	cfg, _ := ParseConfig(clean)
 	w.syncAfter(clean, cfg)
 
@@ -204,6 +204,8 @@ type configWatch struct {
 	known  []string
 	files  map[string]bool
 	absent []missingImport
+	// rootDir is the dir of rerun.yml, where a Makefile written later also changes the config.
+	rootDir string
 }
 
 // sync makes the watched dirs match the files and the absent imports.
@@ -246,6 +248,10 @@ func (w *configWatch) syncAfter(root string, cfg *Config) (added bool) {
 		return w.sync(cfg.Files, cfg.Missing)
 	}
 	files := append(append([]string{root}, w.known...), importedPaths(root)...)
+	// The implicit Makefile is not a listed import, so a broken load still has to watch it.
+	if mk := implicitMakefile(filepath.Dir(root)); mk != "" {
+		files = append(files, mk)
+	}
 	return w.sync(slices.Compact(slices.Sorted(slices.Values(files))), w.absent)
 }
 
@@ -275,6 +281,9 @@ func importedPaths(root string) []string {
 // interesting reports whether an event on name can change the config.
 func (w *configWatch) interesting(name string) bool {
 	if w.files[name] {
+		return true
+	}
+	if filepath.Dir(name) == w.rootDir && slices.Contains(makeNames, filepath.Base(name)) {
 		return true
 	}
 	for _, m := range w.absent {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -229,7 +230,8 @@ func (m *tuiModel) saveColumns() {
 		return
 	}
 	path := m.group.configPath
-	if path == "" {
+	// A Makefile-only config has no rerun.yml; writing would fail, or create one the user never asked for.
+	if _, err := os.Stat(path); path == "" || err != nil {
 		m.showNotice("rerun: no rerun.yml to save columns to", true)
 		return
 	}

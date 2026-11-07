@@ -34,8 +34,9 @@ type listRow struct {
 // indent is the list cells in front of a row's name.
 func (r listRow) indent() int { return indentCells * r.depth }
 
-// groupTargets orders targets as the list draws them: sections in first-use order, sub-groups in
-// first-use order inside an import, and each import's `all` last. Members stay contiguous.
+// groupTargets orders targets as the list draws them: sections in first-use order, Makefile imports
+// after the rest, sub-groups in first-use order inside an import, and each import's `all` last.
+// Members stay contiguous.
 func groupTargets(rows []*tuiTarget) {
 	section := map[string]int{}
 	sub := map[string]int{}
@@ -63,7 +64,17 @@ func groupTargets(rows []*tuiTarget) {
 		}
 		return len(sub)
 	}
+	// Makefile imports list last, after the ungrouped rows.
+	makeOf := func(t *tuiTarget) int {
+		if t.spec.Kind == makeKind {
+			return 1
+		}
+		return 0
+	}
 	slices.SortStableFunc(rows, func(a, b *tuiTarget) int {
+		if c := cmp.Compare(makeOf(a), makeOf(b)); c != 0 {
+			return c
+		}
 		if c := cmp.Compare(sectionOf(a), sectionOf(b)); c != 0 {
 			return c
 		}

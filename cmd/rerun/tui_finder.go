@@ -36,7 +36,9 @@ type finderItem struct {
 	name    string
 	desc    string
 	matched []int // rune indexes of name that the query matched
-	enter   func(m *tuiModel)
+	// make marks a Makefile target, whose enter runs it instead of jumping.
+	make  bool
+	enter func(m *tuiModel)
 }
 
 // groupDesc is a group's description; groups have none until config supplies one.
@@ -56,8 +58,12 @@ func (m *tuiModel) finderCandidates() []finderItem {
 			continue
 		}
 		t := m.targets[r.target].spec
-		out = append(out, finderItem{kind: "target", name: t.Name, desc: finderDesc(t.Desc),
-			enter: func(m *tuiModel) { m.finderJump(i) }})
+		item := finderItem{kind: "target", name: t.Name, desc: finderDesc(t.Desc), make: t.Kind == makeKind,
+			enter: func(m *tuiModel) { m.finderJump(i) }}
+		if item.make {
+			item.enter = func(m *tuiModel) { m.finderRun(i) }
+		}
+		out = append(out, item)
 	}
 	return out
 }
@@ -181,6 +187,14 @@ func (m *tuiModel) finderJump(idx int) {
 	}
 }
 
+// finderRun is enter on a make row: it jumps there, then starts it unless it is already up.
+func (m *tuiModel) finderRun(idx int) {
+	m.finderJump(idx)
+	if r := m.allRows()[idx]; !m.targets[r.target].state.up() {
+		m.startTarget(r.target)
+	}
+}
+
 // revealRow unfolds the headers above rows[idx] that hide it, and the header itself when it is one.
 func (m *tuiModel) revealRow(rows []listRow, idx int) {
 	depth := rows[idx].depth
@@ -253,6 +267,9 @@ func (m *tuiModel) finderView() string {
 	}
 	if m.finderHasFooter() {
 		footer := "↑↓ move  ⏎ jump  esc close"
+		if m.finder.sel < len(res) && res[m.finder.sel].make {
+			footer = "↑↓ move  ⏎ run  esc close"
+		}
 		if len(res) == 0 {
 			footer = "esc close"
 		}

@@ -18,7 +18,7 @@ func TestStartAndExitWriteRunRules(t *testing.T) {
 		{kind: evExited, target: "web", code: 0, at: start.Add(4200 * time.Millisecond)},
 	})
 
-	want := []string{"▶ web started 12:01:02 · sleep 1", "listening", "✓ web exited 0 · 4s"}
+	want := []string{"▶ web started 12:01:02 · sleep 1", "listening", "✓ web exit 0 · 4s"}
 	var got []string
 	for i, line := range m.visibleRaw {
 		if m.visibleSep[i].isSep() || line == "listening" {
@@ -40,8 +40,8 @@ func TestFailedExitRuleIsRed(t *testing.T) {
 		{kind: evExited, target: "web", code: 1},
 	})
 	last := m.visibleSep[len(m.visibleSep)-1]
-	if last.tone != toneFail || !strings.Contains(last.label, "exited 1") {
-		t.Fatalf("exit rule = %+v, want a red exited 1 rule", last)
+	if last.tone != toneFail || !strings.Contains(last.label, "exit 1") {
+		t.Fatalf("exit rule = %+v, want a red exit 1 rule", last)
 	}
 }
 

@@ -136,7 +136,7 @@ func TestRowLeavesRoomForTheMarkCell(t *testing.T) {
 func TestExitRuleOmitsDurationWithoutAStart(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
-	if got := m.visibleRaw[len(m.visibleRaw)-1]; got != "■ web exited 1" {
+	if got := m.visibleRaw[len(m.visibleRaw)-1]; got != "■ web exit 1" {
 		t.Fatalf("exit rule = %q, want no duration", got)
 	}
 }
@@ -151,8 +151,8 @@ func TestExitRuleNamesSignalsAndErrors(t *testing.T) {
 	}{
 		{"signal", event{code: -1, err: sigErr}, "■ web killed by term", toneFail},
 		{"error", event{code: -1, err: errors.New("boom")}, "■ web failed: boom", toneFail},
-		{"zero", event{code: 0}, "✓ web exited 0", toneOK},
-		{"code", event{code: 3}, "■ web exited 3", toneFail},
+		{"zero", event{code: 0}, "✓ web exit 0", toneOK},
+		{"code", event{code: 3}, "■ web exit 3", toneFail},
 	}
 	for _, c := range cases {
 		got := exitRule(&tuiTarget{spec: target("web")}, c.ev, time.Now())

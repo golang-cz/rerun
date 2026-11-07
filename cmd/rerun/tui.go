@@ -34,9 +34,7 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	tty := saveTTY()
 	defer tty.restore()
 
-	model := newTUI(targets)
-	model.group.configPath = cfg.Path
-	model.missing = cfg.Missing
+	model := newConfigTUI(targets, cfg)
 	for _, n := range cfg.Notices {
 		model.group.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
 	}
@@ -483,6 +481,17 @@ func (m *tuiModel) cancelBuild(i int) {
 		m.dropBuild(rec, "cancelled")
 	}
 	m.setBuildState(i, false, t.buildFailed)
+}
+
+// newConfigTUI is the TUI for a loaded config. A Makefile-only config opens the finder, the only way to pick its targets.
+func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
+	m := newTUI(targets)
+	m.group.configPath = cfg.Path
+	m.missing = cfg.Missing
+	if cfg.MakeOnly {
+		m.finder = finderState{open: true}
+	}
+	return m
 }
 
 func (m *tuiModel) stopTarget(i int) {
