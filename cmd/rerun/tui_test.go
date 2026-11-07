@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -922,19 +923,86 @@ func wheel(x, y int, button tea.MouseButton) tea.MouseMsg {
 	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: button}
 }
 
-func TestWheelOverListMovesCursorLikeArrows(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"), target("worker"))
+// longListModel is nine targets in a six-row terminal: the list is taller than its window.
+func longListModel(t *testing.T) *tuiModel {
+	t.Helper()
+	defs := make([]Target, 0, 9)
+	for i := 1; i <= 9; i++ {
+		defs = append(defs, target(fmt.Sprintf("t%d", i)))
+	}
+	m := newTestModel(t, defs...)
+	m.height = 6
 	m.View()
+	return m
+}
+
+func TestWheelOverListScrollsWindowNotCursor(t *testing.T) {
+	m := longListModel(t)
+	cursor, scope := m.cursor, m.scopeState()
 
 	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
 	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
-	if m.cursor != 2 {
-		t.Fatalf("cursor = %d after two wheel-down notches, want 2", m.cursor)
+	if m.layout.offset != 2 {
+		t.Fatalf("offset = %d after two wheel-down notches, want 2", m.layout.offset)
+	}
+	if m.cursor != cursor || m.scopeState() != scope {
+		t.Fatalf("cursor = %d, scope = %v after the wheel, want %d, %v", m.cursor, m.scopeState(), cursor, scope)
 	}
 
-	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelUp))
+	m.View()
+	if m.layout.offset != 2 {
+		t.Fatalf("a render moved the window back to offset %d, want 2", m.layout.offset)
+	}
+}
+
+func TestWheelOverListClampsAtBothEnds(t *testing.T) {
+	m := longListModel(t)
+	visible := m.listHeight()
+	last := m.listLen() + len(m.missing) - visible
+
+	for range 20 {
+		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelUp))
+	}
+	if m.layout.offset != 0 {
+		t.Fatalf("offset = %d after wheeling above the top, want 0", m.layout.offset)
+	}
+
+	for range 20 {
+		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	}
+	if m.layout.offset != last {
+		t.Fatalf("offset = %d after wheeling past the end, want %d", m.layout.offset, last)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d after wheeling, want 0", m.cursor)
+	}
+}
+
+func TestClickAfterWheelSelectsRowUnderMouse(t *testing.T) {
+	m := longListModel(t)
+	for range 3 {
+		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	}
+
+	m.handleMouse(mouse(2, 1, false))
+	if want := m.layout.offset + 1; m.cursor != want {
+		t.Fatalf("cursor = %d after clicking list line 1 at offset %d, want %d", m.cursor, m.layout.offset, want)
+	}
+}
+
+func TestKeyMoveAfterWheelFollowsCursor(t *testing.T) {
+	m := longListModel(t)
+	for range 20 {
+		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	}
+
+	press(m, "down")
+	m.View()
 	if m.cursor != 1 {
-		t.Fatalf("cursor = %d after a wheel-up notch, want 1", m.cursor)
+		t.Fatalf("cursor = %d after a down key, want 1", m.cursor)
+	}
+	if line := m.cursor - m.layout.offset; line < 0 || line >= m.listHeight() {
+		t.Fatalf("cursor %d is outside the window at offset %d", m.cursor, m.layout.offset)
 	}
 }
 

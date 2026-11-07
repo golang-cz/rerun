@@ -301,6 +301,9 @@ type tuiModel struct {
 	collapsed map[string]bool
 	// listTop is the list's first visible row; it moves only when the cursor leaves the window.
 	listTop int
+	// listScrolled means a wheel moved the window off the cursor, which it left at listScrollAt.
+	listScrolled bool
+	listScrollAt int
 
 	// barFocus routes keys to the filter bar; barSel is its focused chip, or -1.
 	barFocus bool

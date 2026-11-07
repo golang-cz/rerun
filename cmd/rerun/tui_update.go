@@ -437,7 +437,7 @@ func (m *tuiModel) hasFilter(query string) bool {
 	return false
 }
 
-// stepSelection is one ↑/↓ step; the wheel over the left column reuses it.
+// stepSelection is one ↑/↓ step, routed to the focused pane.
 func (m *tuiModel) stepSelection(delta int) {
 	switch {
 	case m.paneFocus:
@@ -508,20 +508,20 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Action == tea.MouseActionPress || msg.Action == tea.MouseActionMotion {
-		// The left column is the target list: one notch steps the selection like ↑/↓.
+		// The left column scrolls the target window and keeps the selection: clicks pick rows.
 		// The divider and the log pane keep scrolling the stream.
 		onList := msg.X < m.layout.leftW
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			if onList {
-				m.stepSelection(-1)
+				m.scrollList(-1)
 			} else {
 				m.scrollUp(3)
 			}
 			return m, nil
 		case tea.MouseButtonWheelDown:
 			if onList {
-				m.stepSelection(1)
+				m.scrollList(1)
 			} else {
 				m.scrollDown(3)
 			}

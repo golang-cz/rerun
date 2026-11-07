@@ -271,20 +271,32 @@ func (m *tuiModel) listHeight() int {
 
 // listOffset keeps the list's stored top row, and moves it only when the cursor
 // leaves the window: just enough to put the cursor on the top or bottom row.
-// The drawer never scrolls with it.
+// A wheel parks the window until the cursor moves. The drawer never scrolls with it.
 func (m *tuiModel) listOffset() int {
 	visible := m.listHeight()
 	top := m.listTop
-	switch {
-	case m.cursor < top:
-		top = m.cursor
-	case m.cursor >= top+visible:
-		top = m.cursor - visible + 1
+	if !m.listScrolled || m.cursor != m.listScrollAt {
+		m.listScrolled = false
+		switch {
+		case m.cursor < top:
+			top = m.cursor
+		case m.cursor >= top+visible:
+			top = m.cursor - visible + 1
+		}
 	}
 	// Rows that shrank (a fold, a reload, a taller screen) never leave blank rows below the last one.
 	top = min(max(top, 0), max(0, m.listLen()+len(m.missing)-visible))
 	m.listTop = top
 	return top
+}
+
+// scrollList moves the list window one row per wheel notch and leaves the cursor alone.
+func (m *tuiModel) scrollList(delta int) {
+	m.layout.offset = m.listOffset()
+	m.listTop = m.layout.offset + delta
+	m.listScrolled = true
+	m.listScrollAt = m.cursor
+	m.layout.offset = m.listOffset()
 }
 
 // inDrawer reports whether a screen row is inside the drawer, and which of its
