@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -374,5 +375,59 @@ func TestFinderBoxSizeIgnoresQuery(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestFinderMultiWordMatchesAnyOrder(t *testing.T) {
+	m := newTestModel(t, target("bpn-api/test"), target("worker"))
+	for _, q := range []string{"bpn test", "test bpn"} {
+		res := m.finderResults(q)
+		if len(res) != 1 || res[0].name != "bpn-api/test" {
+			t.Fatalf("results for %q = %v, want bpn-api/test only", q, res)
+		}
+	}
+}
+
+func TestFinderMultiWordNeedsEveryWord(t *testing.T) {
+	m := newTestModel(t, target("bpn-api/test"))
+	if res := m.finderResults("bpn zzz"); len(res) != 0 {
+		t.Fatalf("results for %q = %v, want none", "bpn zzz", res)
+	}
+}
+
+func TestFinderMultiWordMatchedCoversBothWords(t *testing.T) {
+	m := newTestModel(t, target("bpn-api/test"))
+	res := m.finderResults("bpn test")
+	if len(res) != 1 {
+		t.Fatalf("results = %v, want one match", res)
+	}
+	want := []int{0, 1, 2, 8, 9, 10, 11}
+	if fmt.Sprint(res[0].matched) != fmt.Sprint(want) {
+		t.Fatalf("matched = %v, want %v", res[0].matched, want)
+	}
+}
+
+func TestFinderBlankQueryReturnsAll(t *testing.T) {
+	m := newTestModel(t, target("web"), target("worker"))
+	if res := m.finderResults("   "); len(res) != 2 {
+		t.Fatalf("blank query returned %d results, want 2", len(res))
+	}
+}
+
+func BenchmarkFinderMatch(b *testing.B) {
+	names := make([]string, 2000)
+	for i := range names {
+		names[i] = "group-" + strconv.Itoa(i/20) + "/target-" + strconv.Itoa(i)
+	}
+	descs := make([]string, len(names))
+	for i := range descs {
+		descs[i] = "synthetic description for target " + strconv.Itoa(i)
+	}
+	words := strings.Fields("grp tgt 1")
+	b.ResetTimer()
+	for b.Loop() {
+		nameHits := fuzzyAll(words, names)
+		descHits := fuzzyAll(words, descs)
+		_, _ = nameHits, descHits
 	}
 }

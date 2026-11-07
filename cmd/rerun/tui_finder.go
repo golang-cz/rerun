@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -68,29 +69,87 @@ func (m *tuiModel) finderCandidates() []finderItem {
 	return out
 }
 
+// fuzzyHit is one entry's result over all query words: summed score, merged indexes, words matched.
+type fuzzyHit struct {
+	score, hits int
+	matched     []int
+}
+
+// fuzzyAll runs one fuzzy pass per word; an entry counts only when every word hits it.
+func fuzzyAll(words, data []string) []fuzzyHit {
+	hits := make([]fuzzyHit, len(data))
+	for n, w := range words {
+		for _, f := range fuzzy.Find(w, data) {
+			h := &hits[f.Index]
+			if h.hits != n {
+				continue
+			}
+			h.hits++
+			h.score += f.Score
+			h.matched = append(h.matched, f.MatchedIndexes...)
+		}
+		// Stop once no entry has matched every word so far; nothing can match later.
+		if !slices.ContainsFunc(hits, func(h fuzzyHit) bool { return h.hits == n+1 }) {
+			break
+		}
+	}
+	for i := range hits {
+		if hits[i].hits == len(words) {
+			slices.Sort(hits[i].matched)
+			hits[i].matched = slices.Compact(hits[i].matched)
+		}
+	}
+	return hits
+}
+
 // finderResults ranks candidates: name matches first, then desc-only matches, each by score.
 func (m *tuiModel) finderResults(query string) []finderItem {
 	cands := m.finderCandidates()
-	if query == "" {
+	words := strings.Fields(query)
+	if len(words) == 0 {
 		return cands
 	}
 	names := make([]string, len(cands))
-	descs := make([]string, len(cands))
 	for i, c := range cands {
-		names[i], descs[i] = c.name, c.desc
+		names[i] = c.name
 	}
-	var out []finderItem
-	named := make([]bool, len(cands))
-	for _, f := range fuzzy.Find(query, names) {
-		c := cands[f.Index]
-		c.matched = f.MatchedIndexes
-		out = append(out, c)
-		named[f.Index] = true
-	}
-	for _, f := range fuzzy.Find(query, descs) {
-		if !named[f.Index] {
-			out = append(out, cands[f.Index])
+	nameHits := fuzzyAll(words, names)
+
+	// Desc is only searched for candidates the name pass missed, so a name match never repeats.
+	var descIdx []int
+	var descs []string
+	for i, h := range nameHits {
+		if h.hits != len(words) {
+			descIdx = append(descIdx, i)
+			descs = append(descs, cands[i].desc)
 		}
+	}
+	descHits := fuzzyAll(words, descs)
+
+	type scored struct {
+		item  finderItem
+		score int
+	}
+	var named, desc []scored
+	for i, h := range nameHits {
+		if h.hits == len(words) {
+			c := cands[i]
+			c.matched = h.matched
+			named = append(named, scored{c, h.score})
+		}
+	}
+	for j, h := range descHits {
+		if h.hits == len(words) {
+			desc = append(desc, scored{cands[descIdx[j]], h.score})
+		}
+	}
+	byScore := func(a, b scored) int { return cmp.Compare(b.score, a.score) }
+	slices.SortStableFunc(named, byScore)
+	slices.SortStableFunc(desc, byScore)
+
+	out := make([]finderItem, 0, len(named)+len(desc))
+	for _, s := range append(named, desc...) {
+		out = append(out, s.item)
 	}
 	return out
 }
