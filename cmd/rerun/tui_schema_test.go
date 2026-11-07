@@ -112,7 +112,7 @@ func TestEscClearsSchemaSelectionToTheMergedPane(t *testing.T) {
 	}
 }
 
-// space on a header starts or stops every member.
+// space on a header stops its running members, else starts its auto members.
 func TestSpaceOnSchemaRowTogglesItsMembers(t *testing.T) {
 	m := newTestModel(t, target("web"), schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 

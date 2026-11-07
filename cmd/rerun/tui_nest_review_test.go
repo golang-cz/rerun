@@ -86,7 +86,7 @@ func TestRowActionsActOnTheHeaderMembers(t *testing.T) {
 			}
 		}
 	})
-	t.Run("space on an import header starts every member", func(t *testing.T) {
+	t.Run("space on an import header starts every auto member", func(t *testing.T) {
 		m := nestedFixture(t)
 		m.toggleRow(m.listRows()[0])
 		for _, tg := range m.targets {
@@ -116,6 +116,63 @@ func TestRowActionsActOnTheHeaderMembers(t *testing.T) {
 			t.Fatalf("a member outside the backend header was rebooted")
 		}
 	})
+}
+
+// space on a header starts only the members rerun.yml auto-starts.
+func TestToggleHeaderStartsOnlyAutoMembers(t *testing.T) {
+	auto := schemaTarget("api", "backend")
+	manual := schemaTarget("job", "backend")
+	manual.Start = startManual
+	unselected := schemaTarget("legacy", "backend")
+	unselected.Selected = false
+	m := newTestModel(t, auto, manual, unselected)
+	for i := range m.targets {
+		m.targets[i].state = stateStopped
+	}
+	hdr := headerRow(t, m)
+
+	m.toggleRow(hdr)
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("auto member state = %v, want running", m.targets[0].state)
+	}
+	if m.targets[1].state == stateRunning || m.targets[2].state == stateRunning {
+		t.Fatalf("a non-auto member started: manual=%v unselected=%v",
+			m.targets[1].state, m.targets[2].state)
+	}
+}
+
+// space on a header of manual members (a Makefile import) starts nothing and hints.
+func TestToggleHeaderOfManualMembersStartsNothing(t *testing.T) {
+	build := schemaTarget("build", "make")
+	build.Start = startManual
+	test := schemaTarget("test", "make")
+	test.Start = startManual
+	m := newTestModel(t, build, test)
+	for i := range m.targets {
+		m.targets[i].state = stateStopped
+	}
+
+	m.toggleRow(headerRow(t, m))
+	for _, tg := range m.targets {
+		if tg.state != stateStopped {
+			t.Fatalf("%s state = %v, want stopped", tg.spec.Name, tg.state)
+		}
+	}
+	if got := "no auto-start targets in group; press space on a target to run it"; m.hint != got {
+		t.Fatalf("hint = %q, want %q", m.hint, got)
+	}
+}
+
+// headerRow is the first header of m's list, which the toggle tests act on.
+func headerRow(t *testing.T, m *tuiModel) listRow {
+	t.Helper()
+	for _, r := range m.listRows() {
+		if r.header {
+			return r
+		}
+	}
+	t.Fatal("fixture has no header row")
+	return listRow{}
 }
 
 func TestReloadKeepsOrClearsASubScope(t *testing.T) {

@@ -488,7 +488,7 @@ func (m *tuiModel) clearScope() {
 	m.applyScope(-1, "")
 }
 
-// toggleTargets is space on a header: stops the running members, else starts them all.
+// toggleTargets is space on a header: stops the running members, else starts the ones rerun.yml auto-starts.
 func (m *tuiModel) toggleTargets(members []int) {
 	anyUp := false
 	for _, i := range members {
@@ -497,13 +497,23 @@ func (m *tuiModel) toggleTargets(members []int) {
 			break
 		}
 	}
-	for _, i := range members {
-		switch {
-		case anyUp && m.targets[i].state.up():
-			m.stopTarget(i)
-		case !anyUp && !m.targets[i].state.up():
-			m.startTarget(i)
+	if anyUp {
+		for _, i := range members {
+			if m.targets[i].state.up() {
+				m.stopTarget(i)
+			}
 		}
+		return
+	}
+	started := false
+	for _, i := range members {
+		if m.targets[i].spec.Start == startAuto && m.targets[i].spec.Selected {
+			m.startTarget(i)
+			started = true
+		}
+	}
+	if !started {
+		m.showHint("no auto-start targets in group; press space on a target to run it")
 	}
 }
 
