@@ -1,5 +1,7 @@
 # Makefile targets
 
+Status: TODO
+
 ## Summary
 
 A Makefile is one more import source, next to rerun files and compose files.

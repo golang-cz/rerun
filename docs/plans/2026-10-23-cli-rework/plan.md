@@ -1,6 +1,6 @@
 # rerun CLI rework — plan
 
-Status: DRAFT (decisions being added as we make them)
+Status: DONE
 Date: 2026-10-23
 
 ## Summary
