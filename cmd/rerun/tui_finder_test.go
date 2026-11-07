@@ -285,9 +285,59 @@ func TestFinderLongQueryShowsTail(t *testing.T) {
 	m.width, m.height = 30, 20
 	m.Update(ctrlK)
 	press(m, strings.Repeat("a", 50)+"Z")
-	view := ansi.Strip(m.finderView())
-	if !strings.Contains(view, "Z_") {
-		t.Fatalf("popup hides the end of the query:\n%s", view)
+	lines := strings.Split(ansi.Strip(m.finderView()), "\n")
+	if !strings.Contains(lines[1], "Z ") {
+		t.Fatalf("popup hides the end of the query:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestFinderInputRowIsFirstAndShowsCount(t *testing.T) {
+	m := newTestModel(t, target("web"), target("worker"), schemaTarget("api", "backend"))
+	m.width, m.height = 80, 24
+	m.Update(ctrlK)
+	press(m, "w", "o", "r", "k")
+	lines := strings.Split(ansi.Strip(m.finderView()), "\n")
+	if !strings.Contains(lines[1], "❯ work") || !strings.Contains(lines[1], "1/1") {
+		t.Fatalf("first inner line = %q, want the query and the 1/1 count", lines[1])
+	}
+}
+
+func TestFinderDescColumnAlignsAcrossRows(t *testing.T) {
+	m := newTestModel(t,
+		describe(target("web"), "frontend app"),
+		describe(target("worker"), "background jobs"),
+	)
+	m.width, m.height = 80, 24
+	m.Update(ctrlK)
+	lines := strings.Split(ansi.Strip(m.finderView()), "\n")
+	col := map[string]int{}
+	for _, line := range lines {
+		for _, desc := range []string{"frontend app", "background jobs"} {
+			if i := strings.Index(line, desc); i >= 0 {
+				col[desc] = lipgloss.Width(line[:i])
+			}
+		}
+	}
+	if len(col) != 2 || col["frontend app"] != col["background jobs"] {
+		t.Fatalf("desc columns = %v, want both rows to start at the same column:\n%s", col, strings.Join(lines, "\n"))
+	}
+}
+
+func TestFinderLongNameTruncatesFromLeft(t *testing.T) {
+	m := newTestModel(t, target("services/payments/ledger-reconciler-worker"))
+	m.width, m.height = 80, 24
+	m.Update(ctrlK)
+	var row string
+	for _, line := range strings.Split(ansi.Strip(m.finderView()), "\n") {
+		if strings.Contains(line, "worker") {
+			row = line
+		}
+	}
+	if !strings.Contains(row, "…") || !strings.HasSuffix(strings.TrimRight(row, " │"), "worker") {
+		t.Fatalf("row = %q, want the name cut from the left and ending in its own segment", row)
+	}
+	if strings.Contains(row, "services") {
+		t.Fatalf("row = %q, want the long prefix cut away", row)
 	}
 }
 
@@ -303,14 +353,26 @@ func TestFinderTinyTerminalLinesFitWidth(t *testing.T) {
 	}
 }
 
-func TestFinderBoxIsAtLeastHalfTheScreen(t *testing.T) {
-	for _, size := range [][2]int{{200, 50}, {80, 24}} {
-		m := newTestModel(t)
-		m.width, m.height = size[0], size[1]
-		m.Update(ctrlK)
-		top := strings.Split(ansi.Strip(m.finderView()), "\n")[0]
-		if w := lipgloss.Width(top); w < size[0]/2 || w > size[0] {
-			t.Fatalf("%dx%d: popup box is %d cells wide, want between %d and %d", size[0], size[1], w, size[0]/2, size[0])
+func TestFinderBoxSizeIgnoresQuery(t *testing.T) {
+	sizes := []struct{ w, h, wantW, wantH int }{{200, 50, 100, 25}, {80, 24, 40, 12}}
+	for _, s := range sizes {
+		for _, q := range []string{"", "w", "zzzz-no-match", "web"} {
+			m := newTestModel(t, target("web"), target("worker"), schemaTarget("api", "backend"))
+			m.width, m.height = s.w, s.h
+			m.Update(ctrlK)
+			press(m, strings.Split(q, "")...)
+			if q == "web" && len(m.finderResults(q)) != 1 {
+				t.Fatalf("query %q matches %d items, want exactly 1", q, len(m.finderResults(q)))
+			}
+			popup := m.finderView()
+			if w, h := lipgloss.Width(popup), lipgloss.Height(popup); w != s.wantW || h != s.wantH {
+				t.Fatalf("%dx%d query %q: popup %dx%d, want %dx%d", s.w, s.h, q, w, h, s.wantW, s.wantH)
+			}
+			for i, line := range strings.Split(popup, "\n") {
+				if w := lipgloss.Width(line); w != s.wantW {
+					t.Fatalf("%dx%d query %q: line %d is %d cells, want %d", s.w, s.h, q, i, w, s.wantW)
+				}
+			}
 		}
 	}
 }

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,8 +13,15 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// finderMinRows is the match count the popup shows on any terminal tall enough for it.
-const finderMinRows = 10
+// The popup's outer box never shrinks below these, but the terminal still caps it.
+const (
+	finderMinWidth  = 40
+	finderMinHeight = 10
+	// finderChromeRows are the input, rule and footer lines around the match rows.
+	finderChromeRows = 3
+	// finderMinRows is the fewest match rows worth keeping when the footer is dropped to make room.
+	finderMinRows = 3
+)
 
 // finderState is the Ctrl+K popup: a fuzzy query over every target and group.
 type finderState struct {
@@ -80,21 +89,37 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	return out
 }
 
-// finderWidth is the popup's outer width, border included: half the screen or 100 cells, never wider than the screen.
-func (m *tuiModel) finderWidth() int {
-	w := max(m.width/2, min(100, m.width-8))
-	return max(1, min(w, m.width-2))
+// finderSize is the popup's outer box, border included: half the terminal, floored, never past the terminal.
+func (m *tuiModel) finderSize() (int, int) {
+	w := min(max(m.width/2, min(finderMinWidth, m.width)), m.width)
+	h := min(max(m.height/2, min(finderMinHeight, m.height)), m.height)
+	return max(1, w), max(1, h)
 }
 
-// finderVisibleRows is how many matches fit: half the screen, and the popup adds six lines around them.
-func (m *tuiModel) finderVisibleRows() int {
-	return max(1, min(max(finderMinRows, m.height/2), m.height-6))
+// finderInnerH is the box height inside its border; it depends only on the terminal.
+func (m *tuiModel) finderInnerH() int {
+	_, h := m.finderSize()
+	return max(0, h-m.styles.box.GetVerticalFrameSize())
+}
+
+// finderHasFooter drops the footer on boxes too short to keep finderMinRows match rows under it.
+func (m *tuiModel) finderHasFooter() bool {
+	return m.finderInnerH()-finderChromeRows >= finderMinRows
+}
+
+// finderListRows is how many match rows fill the box; the size depends only on the terminal, never the matches.
+func (m *tuiModel) finderListRows() int {
+	chrome := finderChromeRows
+	if !m.finderHasFooter() {
+		chrome--
+	}
+	return max(0, m.finderInnerH()-chrome)
 }
 
 // handleFinderKey routes keys while the finder is open; enter jumps, esc and ctrl+k close.
 func (m *tuiModel) handleFinderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	res := m.finderResults(m.finder.query)
-	n := min(len(res), m.finderVisibleRows())
+	n := min(len(res), m.finderListRows())
 	m.finder.sel = min(m.finder.sel, max(0, n-1))
 	switch msg.String() {
 	case "ctrl+c":
@@ -184,46 +209,131 @@ func finderTail(s string, width int) string {
 	return string(r[i:])
 }
 
-// finderView draws the popup: the query line, then the ranked matches.
+// finderView draws the popup at a fixed size: input and count, a rule, the ranked matches, then the footer.
 func (m *tuiModel) finderView() string {
-	outer := m.finderWidth()
-	w := max(1, outer-4) // border and padding take four cells
+	outerW, outerH := m.finderSize()
+	box := m.styles.box
+	innerW := max(1, outerW-box.GetHorizontalFrameSize())
+	innerH := max(1, outerH-box.GetVerticalFrameSize())
 	res := m.finderResults(m.finder.query)
-	row := lipgloss.NewStyle().MaxWidth(w)
-	bold := lipgloss.NewStyle().Bold(true)
+	rows := m.finderListRows()
+	nameW := finderNameWidth(res[:min(len(res), rows)], innerW)
+	fit := func(s string) string {
+		return lipgloss.NewStyle().Width(innerW).Render(ansi.Truncate(s, innerW, "…"))
+	}
 
-	var b strings.Builder
-	b.WriteString(row.Render(m.styles.title.Render("find target or group")) + "\n")
-	b.WriteString(row.Render("> "+finderTail(m.finder.query, w-3)+"_") + "\n")
-	if len(res) == 0 {
-		b.WriteString(row.Render(m.styles.hint.Render("no match")) + "\n")
+	n := 0
+	if len(res) > 0 {
+		n = min(m.finder.sel, len(res)-1) + 1
 	}
-	for i, c := range res[:min(len(res), m.finderVisibleRows())] {
-		var name strings.Builder
-		for j, r := range []rune(c.name) {
-			if slices.Contains(c.matched, j) {
-				name.WriteString(bold.Render(string(r)))
-			} else {
-				name.WriteRune(r)
-			}
+	count := fmt.Sprintf("%d/%d", n, len(res))
+
+	input := m.styles.chip.Render("❯ ")
+	if m.finder.query == "" {
+		input += m.styles.paneCursor.Render(" ") + m.styles.hint.Render("find…")
+	} else {
+		input += finderTail(m.finder.query, innerW-2-lipgloss.Width(count)-2) + m.styles.paneCursor.Render(" ")
+	}
+	gap := max(1, innerW-lipgloss.Width(input)-lipgloss.Width(count))
+	input += strings.Repeat(" ", gap) + m.styles.hint.Render(count)
+
+	lines := []string{
+		fit(input),
+		fit(m.styles.divider.Render(strings.Repeat("─", innerW))),
+	}
+	for i := range rows {
+		switch {
+		case i == 0 && len(res) == 0:
+			lines = append(lines, fit("  "+m.styles.hint.Render("no matches for \""+m.finder.query+"\"")))
+		case i < len(res):
+			lines = append(lines, fit(m.finderLine(res[i], i == m.finder.sel, nameW, innerW)))
+		default:
+			lines = append(lines, fit(""))
 		}
+	}
+	if m.finderHasFooter() {
+		footer := "↑↓ move  ⏎ jump  esc close"
+		if len(res) == 0 {
+			footer = "esc close"
+		}
+		lines = append(lines, fit(m.styles.hint.Render(footer)))
+	}
+	lines = lines[:min(len(lines), innerH)]
+
+	return box.Width(outerW - box.GetHorizontalBorderSize()).
+		Height(outerH - box.GetVerticalBorderSize()).
+		Render(strings.Join(lines, "\n"))
+}
+
+// finderNameWidth is the name column: the longest shown name, capped at 55% of the row and floored at 12.
+func finderNameWidth(shown []finderItem, innerW int) int {
+	longest := 0
+	for _, c := range shown {
+		n := lipgloss.Width(c.name)
 		if c.kind == "group" {
-			name.WriteString("/")
+			n++
 		}
-		prefix := "  "
-		if i == m.finder.sel {
-			prefix = "› "
-		}
-		line := prefix + name.String()
-		if room := w - lipgloss.Width(line) - 2; c.desc != "" && room > 0 {
-			line += "  " + m.styles.hint.Render(ansi.Truncate(c.desc, room, "…"))
-		}
-		b.WriteString(row.Render(line) + "\n")
+		longest = max(longest, n)
 	}
-	b.WriteString("\n" + row.Render(m.styles.hint.Render("↑/↓ move · enter jump · esc closes")))
-	lines := strings.Split(m.styles.box.Width(outer-2).Render(b.String()), "\n")
-	for i, l := range lines {
-		lines[i] = ansi.Truncate(l, m.width, "")
+	return min(max(12, min(longest, innerW*55/100)), max(1, innerW-2))
+}
+
+// finderLine is one match row: a marker, the name cell, then the desc column when it fits.
+func (m *tuiModel) finderLine(c finderItem, selected bool, nameW, innerW int) string {
+	paint := m.finderPaint(selected)
+	marker := paint(lipgloss.NewStyle()).Render("  ")
+	if selected {
+		marker = paint(m.styles.chip).Render("▌") + paint(lipgloss.NewStyle()).Render(" ")
 	}
-	return strings.Join(lines, "\n")
+	row := marker + m.finderName(c, selected, nameW)
+	if descW := innerW - 4 - nameW; descW >= 8 && c.desc != "" {
+		row += paint(lipgloss.NewStyle()).Render("  ") + paint(m.styles.hint).Render(ansi.Truncate(c.desc, descW, "…"))
+	}
+	return row + paint(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, innerW-lipgloss.Width(row))))
+}
+
+// finderName renders the name cell at exactly nameW cells: dim path prefix, own name, and matches underlined.
+func (m *tuiModel) finderName(c finderItem, selected bool, nameW int) string {
+	paint := m.finderPaint(selected)
+	label := c.name
+	if c.kind == "group" {
+		label = strings.TrimSuffix(label, "/")
+	}
+	prefix := 0
+	if i := strings.LastIndex(label, "/"); i >= 0 {
+		prefix = utf8.RuneCountInString(label[:i+1])
+	}
+	var b strings.Builder
+	for j, r := range []rune(label) {
+		st := paint(lipgloss.NewStyle())
+		switch {
+		case j < prefix:
+			st = paint(m.styles.hint)
+		case selected:
+			st = st.Bold(true)
+		}
+		if slices.Contains(c.matched, j) {
+			st = m.styles.chipFind.Inherit(st)
+		}
+		b.WriteString(st.Render(string(r)))
+	}
+	if c.kind == "group" {
+		b.WriteString(paint(m.styles.hint).Render("/"))
+	}
+	name := b.String()
+	if w := lipgloss.Width(name); w > nameW {
+		// Cut from the left so the own name, the last segment, stays visible.
+		name = paint(m.styles.hint).Render("…") + ansi.TruncateLeft(name, w-nameW+1, "")
+	}
+	return name + paint(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, nameW-lipgloss.Width(name))))
+}
+
+// finderPaint gives a style the selected row's background, so the cursor band has no gaps.
+func (m *tuiModel) finderPaint(selected bool) func(lipgloss.Style) lipgloss.Style {
+	return func(s lipgloss.Style) lipgloss.Style {
+		if selected {
+			return s.Inherit(m.styles.cursor)
+		}
+		return s
+	}
 }
