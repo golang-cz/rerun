@@ -332,6 +332,8 @@ type tuiModel struct {
 	// prefixW is the pane prefix column: the longest name in view, so every
 	// stream line starts its message in the same column.
 	prefixW int
+	// groupW is a name's prefix width in the all view: the longest name in its group.
+	groupW map[string]int
 	// nameCut is the group or import prefix the pane drops from names, or "" for full names.
 	nameCut string
 
@@ -1245,7 +1247,11 @@ func (m *tuiModel) namePrefix(name string) string {
 	if m.singleView() {
 		return ""
 	}
-	return padRight(strings.TrimPrefix(name, m.nameCut), m.prefixW) + "  "
+	w, ok := m.groupW[name]
+	if !ok {
+		w = m.prefixW
+	}
+	return padRight(strings.TrimPrefix(name, m.nameCut), w) + "  "
 }
 
 // refreshNames sets the name column for the pane's view. A group or import view
@@ -1266,6 +1272,18 @@ func (m *tuiModel) refreshNames() {
 	m.prefixW = 0
 	for _, n := range names {
 		m.prefixW = max(m.prefixW, displayWidth(strings.TrimPrefix(n, m.nameCut)))
+	}
+	m.groupW = nil
+	if m.schemaSel != "" || !m.hasGroups() {
+		return
+	}
+	byGroup := map[string]int{}
+	for _, t := range m.targets {
+		byGroup[groupOf(t)] = max(byGroup[groupOf(t)], displayWidth(t.spec.Name))
+	}
+	m.groupW = make(map[string]int, len(m.targets))
+	for _, t := range m.targets {
+		m.groupW[t.spec.Name] = byGroup[groupOf(t)]
 	}
 }
 

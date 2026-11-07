@@ -58,7 +58,7 @@ func (m *tuiModel) expansionRows(raw int) []dispRow {
 	if !m.visibleObj[raw] {
 		return m.sepRows(raw)
 	}
-	k := blockKey{m.visibleSeq[raw], m.textCol()}
+	k := blockKey{m.visibleSeq[raw], displayWidth(m.visible[raw]) - displayWidth(m.visibleRaw[raw])}
 	if rows, ok := m.blockCache[k]; ok {
 		return rows
 	}

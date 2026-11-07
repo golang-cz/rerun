@@ -281,6 +281,20 @@ func TestMergedStreamPadsPrefixesToAConstantColumn(t *testing.T) {
 	}
 }
 
+// A group's lines pad only to that group's longest name, not the longest anywhere.
+func TestMergedStreamPadsPrefixesPerGroup(t *testing.T) {
+	short, db, long := target("api"), target("db"), target("backoffice-webapp")
+	short.Schema, db.Schema, long.Schema = "core", "core", "ui"
+	m := newTestModel(t, short, db, long)
+	m.applyEvent(event{kind: evOutput, target: "api", line: "a1"})
+	m.applyEvent(event{kind: evOutput, target: "backoffice-webapp", line: "b1"})
+
+	want := []string{"api  a1", "backoffice-webapp  b1"}
+	if got := m.paneLines(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pane = %q, want %q", got, want)
+	}
+}
+
 func TestMergedStreamKeepsArrivalOrder(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	for _, ev := range []event{
@@ -1409,7 +1423,7 @@ func TestNameColumnOnlyInMultiTargetViews(t *testing.T) {
 		t.Fatalf("single pane = %q, want %q", got, want)
 	}
 	m.applyScope(-1, "")
-	if got, want := m.paneLines(), []string{"api     api-line", "web     web-line"}; !reflect.DeepEqual(got, want) {
+	if got, want := m.paneLines(), []string{"api     api-line", "web  web-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("all pane = %q, want %q", got, want)
 	}
 	m.applyScope(-1, "backend")
