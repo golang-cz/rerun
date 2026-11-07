@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // groupedModel has two backend targets, one data target, and one ungrouped target.
@@ -264,5 +266,21 @@ func TestEscOnUngroupedRowInFlatListClearsScope(t *testing.T) {
 	press(m, "esc")
 	if m.solo != -1 || m.cursor != 1 {
 		t.Fatalf("esc on a flat row: solo=%d cursor=%d, want scope all and the cursor kept", m.solo, m.cursor)
+	}
+}
+
+// The filter bar's chips are the pane's first line; the target title no longer sits above them.
+func TestFirstPaneLineIsThePillsRow(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "alpha", "beta")
+	m.filters = []textFilter{{query: "beta", keep: func(s string) bool { return strings.Contains(s, "beta") }}}
+	m.chipsChanged()
+
+	lines := paneOf(m)
+	if got := ansi.Strip(lines[0]); !strings.Contains(got, "[beta ×]") {
+		t.Fatalf("first pane line = %q, want the filter chip", got)
+	}
+	if got := ansi.Strip(lines[1]); !strings.Contains(got, "beta") {
+		t.Fatalf("second pane line = %q, want the first log line", got)
 	}
 }

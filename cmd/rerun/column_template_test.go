@@ -4,8 +4,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 func TestParseColumnTemplates(t *testing.T) {
@@ -89,16 +87,13 @@ func TestTemplateColumnValues(t *testing.T) {
 	}
 }
 
-func TestBadTemplateExpressionShowsInTitleRow(t *testing.T) {
+func TestBadTemplateExpressionShowsRawLine(t *testing.T) {
 	tgt := target("web")
 	tgt.Columns = []Column{{Name: "msg", Template: "{.message} {.a |||}"}}
 	m := newTestModel(t, tgt)
 	addLines(m, "web", `{"message":"hi"}`)
 	m.View()
 
-	if title := ansi.Strip(m.titleLine(200)); !strings.Contains(title, `bad column "msg": `) {
-		t.Fatalf("title = %q, want the bad column error", title)
-	}
 	if rows := tableRows(m); len(rows) == 0 || !strings.Contains(rows[0], `{"message":"hi"}`) {
 		t.Errorf("rows = %q, want the raw line when a column does not compile", rows)
 	}

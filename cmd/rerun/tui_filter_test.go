@@ -102,27 +102,27 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	if !m.follow {
 		t.Fatal("committing a search froze the pane before any jump")
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "42/60") {
-		t.Fatalf("bottom line = %q, want 42/60", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "41/60") {
+		t.Fatalf("bottom line = %q, want 41/60", got)
 	}
 
 	press(m, "n")
 	if m.follow {
 		t.Fatal("the first n did not freeze the tail")
 	}
-	if m.searchRow != 42 {
-		t.Fatalf("searchRow = %d, want 42", m.searchRow)
+	if m.searchRow != 41 {
+		t.Fatalf("searchRow = %d, want 41", m.searchRow)
 	}
-	if want := 42 - m.vp.Height/2; m.vp.YOffset != want {
+	if want := 41 - m.vp.Height/2; m.vp.YOffset != want {
 		t.Fatalf("YOffset = %d, want the match centered at %d", m.vp.YOffset, want)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "43/60") {
-		t.Fatalf("bottom line after n = %q, want 43/60", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "42/60") {
+		t.Fatalf("bottom line after n = %q, want 42/60", got)
 	}
 
 	press(m, "N")
-	if got := bottomPaneLine(m); !strings.Contains(got, "42/60") {
-		t.Fatalf("bottom line after N = %q, want 42/60", got)
+	if got := bottomPaneLine(m); !strings.Contains(got, "41/60") {
+		t.Fatalf("bottom line after N = %q, want 41/60", got)
 	}
 
 	m.searchRow = 59
@@ -483,8 +483,8 @@ func TestFilterShrinkClampsFrozenYOffset(t *testing.T) {
 	m.View()
 	m.pauseTail()
 	m.scrollUp(25)
-	if m.vp.YOffset != 16 {
-		t.Fatalf("YOffset = %d, want 16 before the shrink", m.vp.YOffset)
+	if m.vp.YOffset != 15 {
+		t.Fatalf("YOffset = %d, want 15 before the shrink", m.vp.YOffset)
 	}
 
 	press(m, "v")

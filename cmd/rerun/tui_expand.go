@@ -322,7 +322,7 @@ func (m *tuiModel) clickHeader(px, y int) {
 		}
 		return
 	}
-	if y < m.barRows()+m.titleRows() || !m.tableHeaderOn() {
+	if !m.tableHeaderOn() {
 		return
 	}
 	for _, h := range m.layout.heads {

@@ -119,9 +119,9 @@ func TestFrozenDragCopiesTheRange(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
 
-	m.handleMouse(mouse(x, 3, false))
-	m.handleMouse(motion(x, 6))
-	m.handleMouse(release(x, 6))
+	m.handleMouse(mouse(x, 2, false))
+	m.handleMouse(motion(x, 5))
+	m.handleMouse(release(x, 5))
 
 	lo := m.vp.YOffset + 2
 	hi := m.vp.YOffset + 5
@@ -142,9 +142,9 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
 
-	m.handleMouse(mouse(x, 6, false))
-	m.handleMouse(motion(x, 3))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 5, false))
+	m.handleMouse(motion(x, 2))
+	m.handleMouse(release(x, 2))
 
 	lo := m.vp.YOffset + 2
 	hi := m.vp.YOffset + 5
@@ -166,8 +166,8 @@ func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 
 	x := paneX(m)
 	want := m.visibleRaw[m.vp.YOffset+2] + "\n"
-	m.handleMouse(mouse(x, 3, false))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 2, false))
+	m.handleMouse(release(x, 2))
 
 	if !m.follow {
 		t.Fatal("the live-pane click froze the pane")
@@ -188,11 +188,11 @@ func TestFrozenClickPastContentCopiesNothing(t *testing.T) {
 	m.pauseTail()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 11, false))
+	m.handleMouse(mouse(x, 10, false))
 	if m.selAnchor != nil {
 		t.Fatal("the press anchored a selection past the content")
 	}
-	m.handleMouse(release(x, 11))
+	m.handleMouse(release(x, 10))
 	if m.copySeq != "" {
 		t.Fatalf("a click past the content copied: %q", m.copySeq)
 	}
@@ -201,7 +201,7 @@ func TestFrozenClickPastContentCopiesNothing(t *testing.T) {
 // Motion with no button down never starts a selection.
 func TestBareMotionStartsNoSelection(t *testing.T) {
 	m := frozenPane(t)
-	m.handleMouse(motion(paneX(m), 2))
+	m.handleMouse(motion(paneX(m), 1))
 	if m.selAnchor != nil {
 		t.Fatal("a bare motion anchored a selection")
 	}
@@ -219,8 +219,8 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 	}
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 2, false))
+	m.handleMouse(release(x, 2))
 	m.View()
 
 	if m.copySeq == "" {
@@ -246,8 +246,8 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 	m.View()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 2, false))
+	m.handleMouse(release(x, 2))
 
 	lines := paneOf(m)[m.titleHeight():]
 	last := lines[len(lines)-1]
@@ -284,8 +284,8 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 2, false))
+	m.handleMouse(release(x, 2))
 	if m.copySeq == "" {
 		t.Fatal("the click did not copy")
 	}
@@ -321,7 +321,7 @@ func TestFrozenDragOntoMarkerRowStopsAtVisibleContent(t *testing.T) {
 	}
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
+	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(motion(x, marker.y))
 	m.handleMouse(release(x, marker.y))
 
@@ -343,8 +343,8 @@ func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 
 	m.copySeq = "stale"
 	x := paneX(m)
-	m.handleMouse(mouse(x, 1, false))
-	m.handleMouse(release(x, 1))
+	m.handleMouse(mouse(x, 0, false))
+	m.handleMouse(release(x, 0))
 
 	if m.copySeq != "" {
 		t.Fatalf("copySeq = %q, want cleared", m.copySeq)
@@ -364,7 +364,7 @@ func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 func TestNonLeftReleaseClearsTheSelection(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
+	m.handleMouse(mouse(x, 2, false))
 	if m.selAnchor == nil {
 		t.Fatal("the press did not anchor a selection")
 	}
@@ -374,7 +374,7 @@ func TestNonLeftReleaseClearsTheSelection(t *testing.T) {
 		t.Fatal("the right-button release kept the selection")
 	}
 
-	m.handleMouse(release(x, 5))
+	m.handleMouse(release(x, 4))
 	if m.copySeq != "" {
 		t.Fatalf("a stray left release copied: %q", m.copySeq)
 	}
@@ -384,7 +384,7 @@ func TestNonLeftReleaseClearsTheSelection(t *testing.T) {
 func TestSelectionClearsOnKeypress(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
-	m.handleMouse(mouse(x, 3, false))
+	m.handleMouse(mouse(x, 2, false))
 	if m.selAnchor == nil {
 		t.Fatal("the press did not anchor a selection")
 	}
@@ -411,9 +411,9 @@ func TestCopyTruncatesAtTheCap(t *testing.T) {
 	m.pauseTail()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 1, false))
-	m.handleMouse(motion(x, 20))
-	m.handleMouse(release(x, 20))
+	m.handleMouse(mouse(x, 0, false))
+	m.handleMouse(motion(x, 19))
+	m.handleMouse(release(x, 19))
 
 	if m.copySeq == "" {
 		t.Fatal("the drag did not copy")
@@ -442,9 +442,9 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 	m.pauseTail()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 1, false))
-	m.handleMouse(motion(x, 3))
-	m.handleMouse(release(x, 3))
+	m.handleMouse(mouse(x, 0, false))
+	m.handleMouse(motion(x, 2))
+	m.handleMouse(release(x, 2))
 
 	want := "one\n\nthree\n"
 	if got := decodeCopy(t, m.copySeq); got != want {
@@ -461,8 +461,8 @@ func TestCopyStripsANSIFromThePayload(t *testing.T) {
 	m.pauseTail()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 1, false))
-	m.handleMouse(release(x, 1))
+	m.handleMouse(mouse(x, 0, false))
+	m.handleMouse(release(x, 0))
 
 	got := decodeCopy(t, m.copySeq)
 	if got != "cyan text\n" {
@@ -485,7 +485,7 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 	x := paneX(m)
 	yOff := m.vp.YOffset
 
-	m.handleMouse(mouse(x, 3, false))
+	m.handleMouse(mouse(x, 2, false))
 	if !m.follow {
 		t.Fatal("the press alone froze the tail")
 	}
@@ -493,7 +493,7 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 		t.Fatalf("anchor = %v, want the pressed row %d", m.selAnchor, yOff+2)
 	}
 
-	m.handleMouse(motion(x, 6))
+	m.handleMouse(motion(x, 5))
 	if m.follow {
 		t.Fatal("the first drag motion did not freeze the tail")
 	}
@@ -504,7 +504,7 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 		t.Fatalf("the frame moved on freeze: %d -> %d", yOff, m.vp.YOffset)
 	}
 
-	m.handleMouse(release(x, 6))
+	m.handleMouse(release(x, 5))
 
 	lo := yOff + 2
 	hi := yOff + 5

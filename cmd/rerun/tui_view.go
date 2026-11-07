@@ -632,8 +632,8 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 }
 
 // rightLines is the stream pane, exactly m.height lines tall. The fixed header
-// rows sit on top: the title row (cursor row's state, or the chips) and the
-// table's column names. The bottom line carries the new-lines marker, else a hint.
+// rows sit on top: the filter bar's chips and the table's column names. The
+// bottom line carries the new-lines marker, else a hint.
 func (m *tuiModel) rightLines(w int) []string {
 	headH := m.headerRows()
 	m.vp.Width = w
@@ -643,9 +643,6 @@ func (m *tuiModel) rightLines(w int) []string {
 	var header []string
 	if m.barRows() == 1 {
 		header = append(header, m.barLine(w))
-	}
-	if m.titleRows() == 1 {
-		header = append(header, m.titleLine(w))
 	}
 	if m.tableHeaderOn() {
 		header = append(header, m.columnHeader(w))
@@ -794,47 +791,6 @@ func (m *tuiModel) filterLine() string {
 // copyHintActive reports whether the copy feedback still owns the bottom line.
 func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
-}
-
-// titleLine is the right pane's title row for a target row: its state, how many
-// files its last change batch held, and its command. The state replaces the
-// uptime whenever the row is not running; an exited row leads with its exit
-// glyph. The url follows, linked, when the target has one.
-func (m *tuiModel) titleLine(w int) string {
-	var segs []seg
-	if i := m.cursorTarget(); i >= 0 {
-		t := m.targets[i]
-		if t.state == stateExited {
-			segs = append(segs, seg{text: t.glyph() + " ", color: stateColor(t)})
-		}
-		if word := m.streamWord(i); word != "" {
-			segs = append(segs, seg{text: word + " · "})
-		}
-		if _, err := t.columns(); err != nil {
-			segs = append(segs, seg{text: ellipsize(oneLine(err.Error()), 40) + " · ", color: colorRed})
-		}
-		parts := []string{m.status(t)}
-		if t.state == stateRunning && !t.lastStart.IsZero() {
-			parts = []string{"running", "since " + t.lastStart.Format("15:04:05")}
-			if t.lastBuild > 0 {
-				parts = append(parts, "built "+fmtDur(t.lastBuild))
-			}
-		}
-		parts = append(parts, fileCount(len(t.lastChange.Files)), oneLine(t.spec.Cmd))
-		segs = append(segs, seg{text: strings.Join(parts, " · ")})
-		if t.spec.URL != "" {
-			segs = append(segs, seg{text: "  "}, seg{text: t.spec.URL, link: t.spec.URL})
-		}
-	}
-	return renderSegs(segs, m.titleStyle(), w)
-}
-
-// titleStyle is bold only while the pane owns the keys.
-func (m *tuiModel) titleStyle() lipgloss.Style {
-	if m.paneFocus {
-		return m.styles.title
-	}
-	return m.styles.base
 }
 
 // syncContent rebuilds the viewport only when its content changed, and keeps

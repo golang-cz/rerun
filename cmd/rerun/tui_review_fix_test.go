@@ -169,7 +169,7 @@ func TestBarHintNamesTheKeys(t *testing.T) {
 	}
 }
 
-// The cursor steps back while another region has focus; the pane title is bold only when it has focus.
+// The cursor steps back while another region has focus.
 func TestFocusVisibility(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.cursor = 0
@@ -181,13 +181,7 @@ func TestFocusVisibility(t *testing.T) {
 	if !m.rowStyle(0, r).GetFaint() {
 		t.Fatal("cursor row is not faint with the pane focused")
 	}
-	if !m.titleStyle().GetBold() {
-		t.Fatal("title is not bold with the pane focused")
-	}
 	m.paneFocus = false
-	if m.titleStyle().GetBold() {
-		t.Fatal("title is bold with the list focused")
-	}
 }
 
 func TestUnhealthyRunShowsStatusAndTriangle(t *testing.T) {

@@ -286,18 +286,10 @@ func writeColumns(path string, e colEdit) error {
 	return setColumns(path, "", e.node.name, cols)
 }
 
-// titleRows is 1 when the header carries a target's title, else 0.
-func (m *tuiModel) titleRows() int {
-	if m.cursorTarget() >= 0 {
-		return 1
-	}
-	return 0
-}
-
-// headerRows is the pane's fixed header: the filter bar, the title row, and the
-// table's column header. The viewport sits below it.
+// headerRows is the pane's fixed header: the filter bar and the table's column
+// header. The viewport sits below it.
 func (m *tuiModel) headerRows() int {
-	n := m.barRows() + m.titleRows()
+	n := m.barRows()
 	if m.tableHeaderOn() {
 		n++
 	}

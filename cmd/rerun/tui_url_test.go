@@ -16,10 +16,6 @@ func TestURLCapturedFromOutputRelinksTheRow(t *testing.T) {
 	if got := m.targetLine(0, listRow{target: 0}, leftW); !strings.Contains(got, "http://localhost:5173") {
 		t.Fatalf("row link = %q, want the captured url", got)
 	}
-	m.cursor = 0
-	if got := m.titleLine(80); !strings.Contains(got, "http://localhost:5173") {
-		t.Fatalf("title line = %q, want the captured url", got)
-	}
 }
 
 func TestURLCapturePrecedence(t *testing.T) {

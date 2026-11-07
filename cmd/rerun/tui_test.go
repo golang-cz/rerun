@@ -337,112 +337,6 @@ func TestSoloPaneDropsPrefix(t *testing.T) {
 	}
 }
 
-// The right pane's first line is the cursor row's header: its status, the size
-// of its last change batch, and its command. The left column already prints
-// the name.
-func TestRightPaneTitleShowsCursorRowCommand(t *testing.T) {
-	web := target("frontend")
-	web.Cmd = "vite dev"
-	m := newTestModel(t, web, target("api"))
-
-	m.cursor = 0
-	_, rightW := m.layoutWidths()
-	lines := paneOf(m)
-
-	if !strings.HasPrefix(lines[0], "running · since ") || !strings.Contains(lines[0], "· no files · vite dev") {
-		t.Fatalf("title = %q, want the cursor row's run start, files, and command", lines[0])
-	}
-	if got := displayWidth(lines[0]); got != rightW {
-		t.Fatalf("title width = %d, want %d", got, rightW)
-	}
-	if m.vp.Height != m.height-1 {
-		t.Fatalf("viewport height = %d, want %d with a title row", m.vp.Height, m.height-1)
-	}
-
-	// The file count is the row's retained change batch.
-	m.applyEvent(event{
-		kind:   evChanged,
-		target: "frontend",
-		count:  3,
-		first:  "src/a.go",
-		change: rerun.ChangeSet{Files: map[string]struct{}{"src/a.go": {}, "src/b.go": {}, "src/c.go": {}}},
-	})
-	if line := paneOf(m)[0]; !strings.HasPrefix(line, "running · since ") || !strings.Contains(line, "· 3 files · vite dev") {
-		t.Fatalf("title after a change = %q, want the file count", line)
-	}
-
-	// The title follows the cursor row.
-	m.cursor = 1
-	if line := paneOf(m)[0]; !strings.Contains(line, "· sleep 1") {
-		t.Fatalf("title after moving = %q, want the api row's command", line)
-	}
-}
-
-// The pane header replaces the cursor row's uptime with the row's state
-// whenever it is not running; an exited row leads with its exit glyph.
-func TestRightPaneTitleShowsRowState(t *testing.T) {
-	web := target("frontend")
-	web.Cmd = "make run"
-	tests := []struct {
-		name  string
-		state procState
-		setup func(m *tuiModel)
-		want  string
-	}{
-		{name: "running", state: stateRunning, setup: func(m *tuiModel) {
-			m.now = m.targets[0].lastStart.Add(12 * time.Second)
-		}, want: "running · since "},
-		{name: "exited ok", state: stateExited, setup: func(m *tuiModel) {
-			m.targets[0].exitCode = 0
-			m.targets[0].exitLabel = "exit 0"
-		}, want: "✓ exit 0 · no files · make run"},
-		{name: "exited failure", state: stateExited, setup: func(m *tuiModel) {
-			m.targets[0].exitCode = -1
-			m.targets[0].exitLabel = "exit segv"
-		}, want: "✗ exit segv · no files · make run"},
-		{name: "backoff", state: stateBackoff, setup: func(m *tuiModel) {
-			m.targets[0].backoffUntil = m.now.Add(4 * time.Second)
-		}, want: "backoff 4s · no files · make run"},
-		{name: "stopped", state: stateStopped, want: "stopped · no files · make run"},
-		{name: "off", state: stateOff, want: "off · no files · make run"},
-		{name: "starting", state: stateStarting, want: "starting · no files · make run"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := newTestModel(t, web, target("api"))
-			m.cursor = 0
-			m.targets[0].state = tt.state
-			if tt.setup != nil {
-				tt.setup(m)
-			}
-			got := paneOf(m)[0]
-			if !strings.HasPrefix(got, tt.want) {
-				t.Fatalf("title = %q, want prefix %q", got, tt.want)
-			}
-			if tt.state == stateRunning && !strings.Contains(got, "· no files · make run") {
-				t.Fatalf("title = %q, want files and command after the run start", got)
-			}
-		})
-	}
-}
-
-func TestRightPaneTitleLinksTheURL(t *testing.T) {
-	web := target("frontend")
-	web.Cmd = "vite dev"
-	web.URL = "http://localhost:5173"
-	m := newTestModel(t, web, target("api"))
-	m.cursor = 0
-
-	_, rightW := m.layoutWidths()
-	line := paneOf(m)[0]
-	if !strings.Contains(line, osc8(web.URL, web.URL)) {
-		t.Fatalf("title = %q, want the linked url", line)
-	}
-	if got := displayWidth(line); got != rightW {
-		t.Fatalf("title width = %d, want %d", got, rightW)
-	}
-}
-
 func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "a-very-long-command-that-will-not-fit"
@@ -470,8 +364,8 @@ func TestNoTitleOnSchemaRowAndPaneUsesFullHeight(t *testing.T) {
 
 	m.cursor = 1
 	m.View()
-	if m.vp.Height != m.height-1 {
-		t.Fatalf("setup: viewport height = %d, want %d", m.vp.Height, m.height-1)
+	if m.vp.Height != m.height {
+		t.Fatalf("setup: viewport height = %d, want %d", m.vp.Height, m.height)
 	}
 
 	m.cursor = 0
@@ -761,9 +655,6 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 		if !strings.Contains(web, want) {
 			t.Errorf("web row %q is missing %q", web, want)
 		}
-	}
-	if title := lines[0]; !strings.Contains(title, "muted") {
-		t.Errorf("pane title %q does not name the muted row", title)
 	}
 	if api := lines[1]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
 		t.Errorf("api row = %q, want ✓ and exit 0", api)

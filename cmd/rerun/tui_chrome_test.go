@@ -43,16 +43,6 @@ func TestEveryNonRunningStateNamesItself(t *testing.T) {
 	}
 }
 
-// The pane's top line names a muted cursor row in words.
-func TestPaneTitleNamesMutedRow(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.cursor = 0
-	m.toggleMute(0)
-	if line := paneOf(m)[0]; !strings.HasPrefix(line, "muted · ") {
-		t.Errorf("title = %q, want it to start with muted", line)
-	}
-}
-
 // Mute posts a footer notice naming the target.
 func TestMuteNamesTheTargetInTheFooter(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))

@@ -444,14 +444,6 @@ func (m *tuiModel) streamsTo(i int) bool {
 	return true
 }
 
-// streamWord names a muted target's stream for the pane's title line.
-func (m *tuiModel) streamWord(i int) string {
-	if m.targets[i].muted {
-		return "muted"
-	}
-	return ""
-}
-
 func (m *tuiModel) toggleMute(i int) {
 	t := m.targets[i]
 	t.muted = !t.muted

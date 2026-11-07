@@ -95,30 +95,3 @@ func TestInterleavedFollowsTheStreamScope(t *testing.T) {
 		t.Error("single-target view is interleaved")
 	}
 }
-
-func TestTitleRowShowsRunStartAndBuild(t *testing.T) {
-	m := newTestModel(t, cmdTarget("api", "go run ./api"))
-	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt, buildDur: 2 * time.Second}})
-
-	title := ansi.Strip(m.titleLine(200))
-	if !strings.Contains(title, "running · since 15:04:05 · built 2s · ") {
-		t.Fatalf("title = %q, want running, since and built first", title)
-	}
-	if strings.Index(title, "built 2s") > strings.Index(title, "go run ./api") {
-		t.Errorf("title = %q, want the command after the run info", title)
-	}
-}
-
-func TestTitleRowOmitsRunStartWhenNotRunning(t *testing.T) {
-	tgt := cmdTarget("api", "go run ./api")
-	tgt.Selected = false
-	m := newTestModel(t, tgt)
-
-	title := ansi.Strip(m.titleLine(200))
-	if strings.Contains(title, "since") {
-		t.Errorf("title = %q, want no since for a stopped target", title)
-	}
-	if !strings.Contains(title, "go run ./api") {
-		t.Errorf("title = %q, want the command still shown", title)
-	}
-}
