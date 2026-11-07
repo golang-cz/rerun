@@ -1,0 +1,316 @@
+package main
+
+import (
+	"strconv"
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
+
+var ctrlK = tea.KeyMsg{Type: tea.KeyCtrlK}
+
+// targetIndex is the index of the named target in m.targets, or -1.
+func targetIndex(m *tuiModel, name string) int {
+	for i, t := range m.targets {
+		if t.spec.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func describe(t Target, desc string) Target {
+	t.Desc = desc
+	return t
+}
+
+func TestFinderCtrlKOpens(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	if !m.finder.open {
+		t.Fatal("ctrl+k did not open the finder")
+	}
+	m.Update(ctrlK)
+	if m.finder.open {
+		t.Fatal("second ctrl+k did not close the finder")
+	}
+}
+
+func TestFinderFuzzyQuerySelectsTarget(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	press(m, "w", "r", "k")
+	if res := m.finderResults(m.finder.query); len(res) == 0 || res[0].name != "worker" {
+		t.Fatalf("results for %q = %v, want worker first", m.finder.query, res)
+	}
+	press(m, "enter")
+	if want := targetIndex(m, "worker"); m.solo != want {
+		t.Fatalf("solo = %d, want worker at %d", m.solo, want)
+	}
+	if m.finder.open {
+		t.Fatal("enter did not close the finder")
+	}
+}
+
+func TestFinderDescMatchRanksBelowNameMatch(t *testing.T) {
+	m := newTestModel(t,
+		describe(target("docs"), "frontend docs"),
+		target("frontend"),
+	)
+	m.Update(ctrlK)
+	press(m, "f", "r", "o", "n", "t")
+	res := m.finderResults(m.finder.query)
+	if len(res) != 2 || res[0].name != "frontend" || res[1].name != "docs" {
+		t.Fatalf("results = %v, want frontend (name) then docs (desc)", res)
+	}
+	if len(res[1].matched) != 0 {
+		t.Fatalf("desc-only match highlighted name chars %v", res[1].matched)
+	}
+}
+
+func TestFinderEnterOnGroupSelectsIt(t *testing.T) {
+	m := newTestModel(t,
+		target("web"),
+		schemaTarget("api", "backend"),
+		schemaTarget("worker", "backend"),
+	)
+	m.Update(ctrlK)
+	press(m, "b", "a", "c", "k")
+	press(m, "enter")
+	if m.schemaSel != "backend" {
+		t.Fatalf("schemaSel = %q, want backend", m.schemaSel)
+	}
+	if r, _ := m.cursorRow(); !r.header || r.schema != "backend" {
+		t.Fatalf("cursor row = %+v, want the backend header", r)
+	}
+}
+
+func TestFinderUnfoldsCollapsedGroup(t *testing.T) {
+	m := newTestModel(t,
+		target("web"),
+		schemaTarget("api", "backend"),
+		schemaTarget("worker", "backend"),
+	)
+	m.collapsed = map[string]bool{"backend": true}
+	m.Update(ctrlK)
+	press(m, "w", "o", "r", "k", "e", "r")
+	press(m, "enter")
+	if m.collapsed["backend"] {
+		t.Fatal("group stayed collapsed after jumping to a member")
+	}
+	if want := targetIndex(m, "worker"); m.solo != want {
+		t.Fatalf("solo = %d, want worker at %d", m.solo, want)
+	}
+	if r, _ := m.cursorRow(); r.header || m.targets[r.target].spec.Name != "worker" {
+		t.Fatalf("cursor row = %+v, want the worker row", r)
+	}
+}
+
+func TestFinderEscLeavesScopeUnchanged(t *testing.T) {
+	m := newTestModel(t,
+		target("web"),
+		schemaTarget("api", "backend"),
+	)
+	m.cursor = m.indexOfKey("target:web")
+	r, _ := m.cursorRow()
+	m.applyRowScope(r)
+	before := m.scopeState()
+	m.Update(ctrlK)
+	press(m, "a", "p", "i")
+	press(m, "esc")
+	if m.finder.open {
+		t.Fatal("esc did not close the finder")
+	}
+	if got := m.scopeState(); got != before {
+		t.Fatalf("scope = %+v, want unchanged %+v", got, before)
+	}
+}
+
+func TestFinderEnterOnCollapsedGroupUnfoldsIt(t *testing.T) {
+	m := newTestModel(t,
+		target("web"),
+		schemaTarget("api", "backend"),
+	)
+	m.collapsed = map[string]bool{"backend": true}
+	m.Update(ctrlK)
+	press(m, "b", "a", "c", "k", "e", "n", "d")
+	press(m, "enter")
+	if m.collapsed["backend"] {
+		t.Fatal("jumping to a collapsed group left it folded")
+	}
+	if r, _ := m.cursorRow(); !r.header || r.schema != "backend" {
+		t.Fatalf("cursor row = %+v, want the backend header", r)
+	}
+}
+
+func TestFinderNestedSubHeaderRevealsItsChain(t *testing.T) {
+	omsxAPI := importTarget("omsx", "omsx-api", "omsx/backend")
+	omsxAPI.Schema = "omsx/backend"
+	server := schemaTarget("server", "backend")
+	m := newTestModel(t, omsxAPI, server)
+	m.collapsed = map[string]bool{importKeyPrefix + "omsx": true, "omsx/backend": true}
+	m.Update(ctrlK)
+	press(m, "omsx/backend")
+	if res := m.finderResults(m.finder.query); len(res) == 0 || res[0].name != "omsx/backend" {
+		t.Fatalf("results = %v, want the nested omsx/backend sub-header first", res)
+	}
+	press(m, "enter")
+	if m.collapsed[importKeyPrefix+"omsx"] || m.collapsed["omsx/backend"] {
+		t.Fatalf("collapsed = %v, want the import and its sub-header unfolded", m.collapsed)
+	}
+	if r, _ := m.cursorRow(); !r.header || r.schema != "omsx/backend" {
+		t.Fatalf("cursor row = %+v, want the omsx/backend sub-header", r)
+	}
+}
+
+func TestFinderDuplicateGroupLabelsStayDistinct(t *testing.T) {
+	omsxAPI := importTarget("omsx", "omsx-api", "omsx/backend")
+	omsxAPI.Schema = "omsx/backend"
+	server := schemaTarget("server", "backend")
+	m := newTestModel(t, omsxAPI, server)
+	names := map[string]bool{}
+	for _, c := range m.finderCandidates() {
+		if c.kind == "group" {
+			names[c.name] = true
+		}
+	}
+	if !names["backend"] || !names["omsx/backend"] {
+		t.Fatalf("group names = %v, want both backend and omsx/backend", names)
+	}
+}
+
+func TestFinderEnterWithNoMatchIsNoOp(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	press(m, "z", "z", "z")
+	before := m.cursor
+	press(m, "enter")
+	if !m.finder.open || m.finder.query != "zzz" {
+		t.Fatalf("finder open=%v query=%q, want it kept open with zzz", m.finder.open, m.finder.query)
+	}
+	if m.cursor != before || m.solo != -1 {
+		t.Fatalf("cursor = %d solo = %d, want both unchanged", m.cursor, m.solo)
+	}
+}
+
+func TestFinderSelectionClampsWhenQueryNarrows(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	press(m, "w", "o", "r", "k")
+	m.finder.sel = 2
+	press(m, "enter")
+	if want := targetIndex(m, "worker"); m.solo != want {
+		t.Fatalf("solo = %d, want worker at %d after the stale selection clamped", m.solo, want)
+	}
+}
+
+func TestFinderJumpScrollsToRowWithListScrolled(t *testing.T) {
+	var targets []Target
+	for i := range 30 {
+		targets = append(targets, target("t"+strconv.Itoa(i)))
+	}
+	m := newTestModel(t, targets...)
+	dest := m.indexOfKey("target:t25")
+	m.listScrolled = true
+	m.listScrollAt = dest
+	m.Update(ctrlK)
+	press(m, "t", "2", "5")
+	press(m, "enter")
+	top := m.listOffset()
+	if m.cursor != dest || m.cursor < top || m.cursor >= top+m.listHeight() {
+		t.Fatalf("cursor = %d, window = [%d,%d), want the jumped row on screen", m.cursor, top, top+m.listHeight())
+	}
+}
+
+func TestFinderIgnoresCtrlKInInputHelpAndQuitConfirm(t *testing.T) {
+	m := newTestModel(t)
+	press(m, "/")
+	m.Update(ctrlK)
+	if m.finder.open {
+		t.Fatal("ctrl+k opened the finder over the input bar")
+	}
+	press(m, "esc")
+
+	m = newTestModel(t)
+	press(m, "?")
+	m.Update(ctrlK)
+	if m.finder.open {
+		t.Fatal("ctrl+k opened the finder over help")
+	}
+
+	m = newTestModel(t)
+	press(m, "q")
+	m.Update(ctrlK)
+	if m.finder.open {
+		t.Fatal("ctrl+k opened the finder over the quit confirm")
+	}
+}
+
+func TestFinderIgnoresMouseWhileOpen(t *testing.T) {
+	plain := newTestModel(t)
+	plain.View()
+	plain.Update(mouse(2, 1, false))
+	if plain.solo == -1 {
+		t.Fatal("click on row 1 did not change the solo without the finder, so the test cannot tell")
+	}
+	m := newTestModel(t)
+	m.View()
+	m.Update(ctrlK)
+	m.Update(mouse(2, 1, false))
+	if m.solo != -1 {
+		t.Fatalf("solo = %d after a click under the finder, want none", m.solo)
+	}
+}
+
+func TestFinderSanitizesQueryAndDesc(t *testing.T) {
+	m := newTestModel(t, describe(target("docs"), "frontend   \n  docs"))
+	m.Update(ctrlK)
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("do\ncs\r\x1b")})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q"), Alt: true})
+	if m.finder.query != "docs" {
+		t.Fatalf("query = %q, want control characters and alt runes dropped", m.finder.query)
+	}
+	for _, c := range m.finderCandidates() {
+		if c.name == "docs" && c.desc != "frontend docs" {
+			t.Fatalf("desc = %q, want whitespace collapsed", c.desc)
+		}
+	}
+}
+
+func TestFinderLongQueryShowsTail(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 30, 20
+	m.Update(ctrlK)
+	press(m, strings.Repeat("a", 50)+"Z")
+	view := ansi.Strip(m.finderView())
+	if !strings.Contains(view, "Z_") {
+		t.Fatalf("popup hides the end of the query:\n%s", view)
+	}
+}
+
+func TestFinderTinyTerminalLinesFitWidth(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 20, 8
+	m.Update(ctrlK)
+	press(m, strings.Repeat("w", 40))
+	for i, line := range strings.Split(m.View(), "\n") {
+		if w := lipgloss.Width(line); w > 20 {
+			t.Fatalf("line %d is %d cells wide on a 20-wide terminal: %q", i, w, line)
+		}
+	}
+}
+
+func TestFinderBoxIsAtLeastHalfTheScreen(t *testing.T) {
+	for _, size := range [][2]int{{200, 50}, {80, 24}} {
+		m := newTestModel(t)
+		m.width, m.height = size[0], size[1]
+		m.Update(ctrlK)
+		top := strings.Split(ansi.Strip(m.finderView()), "\n")[0]
+		if w := lipgloss.Width(top); w < size[0]/2 || w > size[0] {
+			t.Fatalf("%dx%d: popup box is %d cells wide, want between %d and %d", size[0], size[1], w, size[0]/2, size[0])
+		}
+	}
+}

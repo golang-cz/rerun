@@ -299,6 +299,8 @@ type tuiModel struct {
 	schemaSel string
 	// collapsed holds the list headers folded shut, by group key; it lives in memory only.
 	collapsed map[string]bool
+	// finder is the Ctrl+K popup over targets and groups.
+	finder finderState
 	// listTop is the list's first visible row; it moves only when the cursor leaves the window.
 	listTop int
 	// listScrolled means a wheel moved the window off the cursor, which it left at listScrollAt.

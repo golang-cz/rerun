@@ -134,6 +134,9 @@ func (m *tuiModel) View() string {
 		}
 	}
 	frame := b.String()
+	if m.finder.open {
+		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
+	}
 	if m.confirmQuit {
 		return overlayCenter(frame, m.confirmQuitView(), m.width, m.height)
 	}
@@ -894,6 +897,7 @@ var helpShortKeys = [][2]string{
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
+	{"ctrl+k", "find a target or group and jump to it"},
 	{"q", "quit (asks first)"},
 }
 
@@ -908,6 +912,7 @@ var helpKeys = [][2]string{
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
 	{"m", "mute the target's stream (group row: its targets)"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
+	{"ctrl+k", "find a target or group: enter jumps, esc closes"},
 	{"o", "open the target's url"},
 	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},

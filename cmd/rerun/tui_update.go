@@ -104,6 +104,15 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// ctrl+k opens the finder from the list, not over the bar, help or quit confirm.
+	if msg.String() == "ctrl+k" && !m.finder.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+		m.finder = finderState{open: true}
+		return m, nil
+	}
+	if m.finder.open {
+		return m.handleFinderKey(msg)
+	}
+
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
 	// into the query instead of running their commands.
 	if m.inputMode != inputNone {
@@ -503,7 +512,7 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.help || m.confirmQuit || m.cfgErr != "" {
+	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open {
 		return m, nil
 	}
 
