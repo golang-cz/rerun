@@ -147,17 +147,60 @@ func TestStreamButtonSoloHidesOtherMuteStates(t *testing.T) {
 	}
 }
 
-func TestStreamButtonMuteOnSoloRowIsNoOp(t *testing.T) {
+func TestStreamButtonMuteOnSoloRowMutes(t *testing.T) {
 	m := newTestModel(t)
 	m.applyScope(1, "")
 
 	m.cursor = 1
 	press(m, "m")
 	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "S", " "}) {
-		t.Fatalf("buttons = %q, m on the solo row must be a no-op", got)
+		t.Fatalf("buttons = %q, the solo row keeps its S", got)
 	}
-	if m.targets[1].muted {
-		t.Error("m muted the solo row")
+	if !m.targets[1].muted {
+		t.Fatal("m did not mute the solo row")
+	}
+
+	press(m, "esc")
+	if got := buttons(m); !reflect.DeepEqual(got, []string{" ", "M", " "}) {
+		t.Fatalf("after clearing solo: buttons = %q, want row 2 M", got)
+	}
+}
+
+func TestMutedSoloTargetStreamsToItsOwnView(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
+	for _, ev := range []event{
+		{kind: evOutput, target: "web", line: "w1"},
+		{kind: evOutput, target: "api", line: "a1"},
+	} {
+		m.applyEvent(ev)
+	}
+
+	m.toggleMute(1)
+	m.applyScope(1, "")
+	if got, want := m.paneLines(), []string{"a1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("solo pane on a muted target = %q, want %q", got, want)
+	}
+}
+
+func TestMutedTargetStaysOutOfGroupAndCombinedOutput(t *testing.T) {
+	m := groupedModel(t)
+	m.toggleMute(0) // api, in the backend group
+
+	m.applyScope(-1, "backend")
+	if got := strings.Join(m.paneLines(), "\n"); !strings.Contains(got, "worker keep") {
+		t.Fatalf("group pane lost its unmuted member: %q", got)
+	}
+	for _, l := range m.paneLines() {
+		if strings.HasPrefix(l, "api") {
+			t.Fatalf("group pane shows muted api: %q", l)
+		}
+	}
+
+	m.applyScope(-1, "")
+	for _, l := range m.paneLines() {
+		if strings.HasPrefix(l, "api") {
+			t.Fatalf("combined pane shows muted api: %q", l)
+		}
 	}
 }
 

@@ -424,19 +424,20 @@ func (m *tuiModel) targetIndex(name string) int {
 	return -1
 }
 
-// streamsTo reports whether the target's output belongs in the merged stream:
-// muted targets are out, and a solo or schema selection drops the rest.
+// streamsTo reports whether the target's output belongs in the merged stream.
+// Solo wins over mute, so a muted solo row still shows its own logs.
 // rerun's own lines and lines whose row is gone always show.
 func (m *tuiModel) streamsTo(i int) bool {
 	if i < 0 || i >= len(m.targets) {
 		return true
 	}
+	if m.solo >= 0 {
+		return m.solo == i
+	}
 	if m.targets[i].muted {
 		return false
 	}
 	switch {
-	case m.solo >= 0:
-		return m.solo == i
 	case m.schemaSel != "":
 		return m.memberOf(i, m.schemaSel)
 	}
@@ -453,9 +454,6 @@ func (m *tuiModel) streamWord(i int) string {
 
 func (m *tuiModel) toggleMute(i int) {
 	t := m.targets[i]
-	if m.solo == i {
-		return // muting the solo row is a no-op
-	}
 	t.muted = !t.muted
 	m.mergedDirty = true
 	m.vpDirty = true
