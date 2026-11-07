@@ -30,14 +30,12 @@ type levelHit struct {
 type levelPaint struct {
 	fg, bg lipgloss.TerminalColor
 	bold   bool
-	// whole paints the text after the name prefix, not only the level cell.
-	whole bool
 }
 
-// levelSpan is the cells a level paints, and where the line's text starts.
+// levelSpan is the cells a level paints.
 type levelSpan struct {
-	from, to, text int
-	paint          levelPaint
+	from, to int
+	paint    levelPaint
 }
 
 // jsonLevel is the first level key present in the line, in key priority order.
@@ -78,9 +76,9 @@ func levelPaintOf(word string) (levelPaint, bool) {
 	case "WARN", "WARNING":
 		return levelPaint{fg: yellow}, true
 	case "ERROR", "ERR":
-		return levelPaint{fg: red, whole: true}, true
+		return levelPaint{fg: red}, true
 	case "ALERT", "CRITICAL", "CRIT", "FATAL", "EMERGENCY", "PANIC":
-		return levelPaint{fg: lipgloss.Color("15"), bg: red, bold: true, whole: true}, true
+		return levelPaint{fg: lipgloss.Color("15"), bg: red, bold: true}, true
 	}
 	return levelPaint{}, false
 }
@@ -106,8 +104,7 @@ func (m *tuiModel) levelFor(row int, line string, widths []int, budget int) (lev
 		if idx >= len(spans) {
 			return levelSpan{}, false
 		}
-		text := m.textCol()
-		return finishSpan(levelSpan{from: spans[idx].x0, to: spans[idx].x1, text: text, paint: paint}, line), true
+		return finishSpan(levelSpan{from: spans[idx].x0, to: spans[idx].x1, paint: paint}, line), true
 	}
 	hit := m.visibleLvl[r.raw]
 	paint, ok := levelPaintOf(hit.word)
@@ -119,19 +116,14 @@ func (m *tuiModel) levelFor(row int, line string, widths []int, budget int) (lev
 	return finishSpan(levelSpan{
 		from:  lead + displayWidth(raw[:hit.from]),
 		to:    lead + displayWidth(raw[:hit.to]),
-		text:  lead,
 		paint: paint,
 	}, line), true
 }
 
-// finishSpan widens a whole-text or screaming level to the cells it paints.
+// finishSpan widens a screaming level to the whole line, background included.
 func finishSpan(s levelSpan, line string) levelSpan {
-	w := displayWidth(line)
-	switch {
-	case s.paint.bg != nil:
-		s.from, s.to = 0, w
-	case s.paint.whole:
-		s.from, s.to = s.text, w
+	if s.paint.bg != nil {
+		s.from, s.to = 0, displayWidth(line)
 	}
 	return s
 }

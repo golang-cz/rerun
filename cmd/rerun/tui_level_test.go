@@ -48,14 +48,14 @@ func TestLevelPaintMapping(t *testing.T) {
 		{"Notice", levelPaint{fg: greenAdaptive}, true},
 		{"WARN", levelPaint{fg: yellowAdaptive}, true},
 		{"warning", levelPaint{fg: yellowAdaptive}, true},
-		{"error", levelPaint{fg: redAdaptive, whole: true}, true},
-		{"ERR", levelPaint{fg: redAdaptive, whole: true}, true},
-		{"alert", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
-		{"Critical", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
-		{"crit", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
-		{"FATAL", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
-		{"emergency", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
-		{"panic", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true, whole: true}, true},
+		{"error", levelPaint{fg: redAdaptive}, true},
+		{"ERR", levelPaint{fg: redAdaptive}, true},
+		{"alert", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"Critical", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"crit", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"FATAL", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"emergency", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"panic", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
 		{"bogus", levelPaint{}, false},
 	}
 	for _, c := range cases {
@@ -92,7 +92,7 @@ func TestINFOColorsOnlyTheLevelCell(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"level":"INFO","msg":"up"}`)
 	span := levelOfRow(t, m, 0)
-	if span.paint.whole || span.paint.bg != nil || span.paint.fg != greenAdaptive {
+	if span.paint.bg != nil || span.paint.fg != greenAdaptive {
 		t.Fatalf("paint = %+v, want green on the cell only", span.paint)
 	}
 	if got := sliceCells(ansi.Strip(m.visible[0]), span.from, span.to); got != `"INFO"` {
@@ -100,15 +100,18 @@ func TestINFOColorsOnlyTheLevelCell(t *testing.T) {
 	}
 }
 
-func TestERRORLineIsWholeRed(t *testing.T) {
+func TestERRORColorsOnlyTheLevelCell(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"level":"error","msg":"boom"}`)
 	span := levelOfRow(t, m, 0)
-	if !span.paint.whole || span.paint.fg != redAdaptive || span.paint.bg != nil {
-		t.Fatalf("paint = %+v, want red over the whole text", span.paint)
+	if span.paint.fg != redAdaptive || span.paint.bg != nil {
+		t.Fatalf("paint = %+v, want red on the cell only", span.paint)
 	}
-	if span.text != m.prefixW+2 || span.to != displayWidth(m.visible[0]) {
-		t.Fatalf("text starts at %d, to %d; want %d and the line end", span.text, span.to, m.prefixW+2)
+	if got := sliceCells(ansi.Strip(m.visible[0]), span.from, span.to); got != `"error"` {
+		t.Fatalf("painted cells = %q, want the level value", got)
+	}
+	if span.to >= displayWidth(m.visible[0]) {
+		t.Fatalf("painted to %d, want the message left uncolored", span.to)
 	}
 }
 

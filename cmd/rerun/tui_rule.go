@@ -312,7 +312,8 @@ func renderSep(s sepLine, w int, grouped bool) string {
 func sepStyle(t sepTone) lipgloss.Style {
 	switch t {
 	case toneOK:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorGreen))
+		// Muted: the ✓ already carries the good news.
+		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "65"})
 	case toneFail:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
 	}
