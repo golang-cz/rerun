@@ -1526,3 +1526,29 @@ func TestNameColumnOnlyInMultiTargetViews(t *testing.T) {
 		t.Fatalf("group pane = %q, want %q", got, want)
 	}
 }
+
+// A group or import view drops the prefix its members share; the combined view keeps full names.
+func TestGroupViewDropsSharedImportPrefix(t *testing.T) {
+	imported := func(name, sub string) Target {
+		tgt := target("omsx/" + name)
+		tgt.Import, tgt.Sub = "omsx", sub
+		return tgt
+	}
+	m := newTestModel(t, imported("api", "omsx/backend"), imported("worker", "omsx/backend"), imported("web", ""))
+	paneOut(m, "omsx/api", "api-line")
+	paneOut(m, "omsx/worker", "worker-line")
+	paneOut(m, "omsx/web", "web-line")
+
+	m.applyScope(-1, "omsx/backend")
+	if got, want := m.paneLines(), []string{"api     api-line", "worker  worker-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("group pane = %q, want %q", got, want)
+	}
+	m.applyScope(-1, importKeyPrefix+"omsx")
+	if got, want := m.paneLines(), []string{"api     api-line", "worker  worker-line", "web     web-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("import pane = %q, want %q", got, want)
+	}
+	m.applyScope(-1, "")
+	if got, want := m.paneLines(), []string{"omsx/api     api-line", "omsx/worker  worker-line", "omsx/web     web-line"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("all pane = %q, want %q", got, want)
+	}
+}

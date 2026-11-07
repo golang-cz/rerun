@@ -329,9 +329,11 @@ type tuiModel struct {
 	paneSel      []int
 	paneSelDirty bool
 
-	// prefixW is the pane prefix column: the longest target name, so every
+	// prefixW is the pane prefix column: the longest name in view, so every
 	// stream line starts its message in the same column.
 	prefixW int
+	// nameCut is the group or import prefix the pane drops from names, or "" for full names.
+	nameCut string
 
 	vp      viewport.Model
 	vpDirty bool
@@ -408,9 +410,7 @@ func newTUI(targets []Target) *tuiModel {
 	}
 	groupTargets(m.targets)
 	m.seedCollapsed(nil)
-	for _, t := range m.targets {
-		m.prefixW = max(m.prefixW, displayWidth(t.spec.Name))
-	}
+	m.refreshNames()
 	return m
 }
 
@@ -973,10 +973,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	if i := m.foldingHeader(cursorKey); !found && i >= 0 {
 		m.cursor = i
 	}
-	m.prefixW = 0
-	for _, row := range rows {
-		m.prefixW = max(m.prefixW, displayWidth(row.spec.Name))
-	}
+	m.refreshNames()
 	m.hover = -1
 	m.lastClick = -1
 	m.mergedDirty = true
@@ -1245,7 +1242,28 @@ func (m *tuiModel) namePrefix(name string) string {
 	if m.singleView() {
 		return ""
 	}
-	return padRight(name, m.prefixW) + "  "
+	return padRight(strings.TrimPrefix(name, m.nameCut), m.prefixW) + "  "
+}
+
+// refreshNames sets the name column for the pane's view. A group or import view
+// drops the prefix its members share with the key, unless it has no members.
+func (m *tuiModel) refreshNames() {
+	m.nameCut = ""
+	var names []string
+	if m.schemaSel != "" {
+		for _, i := range m.schemaMembers(m.schemaSel) {
+			names = append(names, m.targets[i].spec.Name)
+		}
+		m.nameCut = sharedNamePrefix(m.schemaSel, names)
+	} else {
+		for _, t := range m.targets {
+			names = append(names, t.spec.Name)
+		}
+	}
+	m.prefixW = 0
+	for _, n := range names {
+		m.prefixW = max(m.prefixW, displayWidth(strings.TrimPrefix(n, m.nameCut)))
+	}
 }
 
 // textCol is the cell where a line's message starts.

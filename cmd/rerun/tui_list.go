@@ -99,6 +99,22 @@ func inKey(t Target, key string) bool {
 	return t.Schema == key
 }
 
+// sharedNamePrefix is the leading path of a group or import key that every name starts with, or "".
+// It stops at the key's own segments, so a name keeps the rest of its path.
+func sharedNamePrefix(key string, names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	segs := strings.Split(groupLabel(key), "/")
+	for k := len(segs); k > 0; k-- {
+		cut := strings.Join(segs[:k], "/") + "/"
+		if !slices.ContainsFunc(names, func(n string) bool { return !strings.HasPrefix(n, cut) || len(n) <= len(cut) }) {
+			return cut
+		}
+	}
+	return ""
+}
+
 // groupLabel is the full name a group shows in the bottom line and the chips.
 func groupLabel(key string) string {
 	switch {
@@ -445,6 +461,7 @@ func (m *tuiModel) applyRowScope(r listRow) {
 func (m *tuiModel) applyScope(solo int, schema string) {
 	m.solo = solo
 	m.schemaSel = schema
+	m.refreshNames()
 	m.tableFlip = false
 	m.group.setSoloGuard(solo >= 0 || schema != "")
 	m.mergedDirty = true
