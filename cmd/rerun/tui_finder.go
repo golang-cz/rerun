@@ -154,10 +154,10 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	return out
 }
 
-// finderSize is the popup's outer box, border included: half the terminal, floored, never past the terminal.
+// finderSize is the popup's outer box, border included: 80% of the terminal, floored, never past it.
 func (m *tuiModel) finderSize() (int, int) {
-	w := min(max(m.width/2, min(finderMinWidth, m.width)), m.width)
-	h := min(max(m.height/2, min(finderMinHeight, m.height)), m.height)
+	w := min(max(m.width*4/5, min(finderMinWidth, m.width)), m.width)
+	h := min(max(m.height*4/5, min(finderMinHeight, m.height)), m.height)
 	return max(1, w), max(1, h)
 }
 

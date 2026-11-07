@@ -355,7 +355,7 @@ func TestFinderTinyTerminalLinesFitWidth(t *testing.T) {
 }
 
 func TestFinderBoxSizeIgnoresQuery(t *testing.T) {
-	sizes := []struct{ w, h, wantW, wantH int }{{200, 50, 100, 25}, {80, 24, 40, 12}}
+	sizes := []struct{ w, h, wantW, wantH int }{{200, 50, 160, 40}, {80, 24, 64, 19}}
 	for _, s := range sizes {
 		for _, q := range []string{"", "w", "zzzz-no-match", "web"} {
 			m := newTestModel(t, target("web"), target("worker"), schemaTarget("api", "backend"))
