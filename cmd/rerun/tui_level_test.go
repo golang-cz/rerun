@@ -6,15 +6,15 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 )
 
+// The dark palette the tests render with before any background is reported.
 var (
-	blueAdaptive   = compat.AdaptiveColor{Light: lipgloss.Color("25"), Dark: lipgloss.Color("39")}
-	greenAdaptive  = compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("46")}
-	yellowAdaptive = compat.AdaptiveColor{Light: lipgloss.Color("136"), Dark: lipgloss.Color("220")}
-	redAdaptive    = compat.AdaptiveColor{Light: lipgloss.Color("160"), Dark: lipgloss.Color("196")}
+	blueDark   = lipgloss.Color("39")
+	greenDark  = lipgloss.Color("46")
+	yellowDark = lipgloss.Color("220")
+	redDark    = lipgloss.Color("196")
 )
 
 func levelTableTarget(name string) Target {
@@ -42,25 +42,25 @@ func TestLevelPaintMapping(t *testing.T) {
 		want  levelPaint
 		known bool
 	}{
-		{"debug", levelPaint{fg: blueAdaptive}, true},
-		{"TRACE", levelPaint{fg: blueAdaptive}, true},
-		{" Default ", levelPaint{fg: blueAdaptive}, true},
-		{"info", levelPaint{fg: greenAdaptive}, true},
-		{"Notice", levelPaint{fg: greenAdaptive}, true},
-		{"WARN", levelPaint{fg: yellowAdaptive}, true},
-		{"warning", levelPaint{fg: yellowAdaptive}, true},
-		{"error", levelPaint{fg: redAdaptive}, true},
-		{"ERR", levelPaint{fg: redAdaptive}, true},
-		{"alert", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
-		{"Critical", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
-		{"crit", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
-		{"FATAL", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
-		{"emergency", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
-		{"panic", levelPaint{fg: lipgloss.Color("15"), bg: redAdaptive, bold: true}, true},
+		{"debug", levelPaint{fg: blueDark}, true},
+		{"TRACE", levelPaint{fg: blueDark}, true},
+		{" Default ", levelPaint{fg: blueDark}, true},
+		{"info", levelPaint{fg: greenDark}, true},
+		{"Notice", levelPaint{fg: greenDark}, true},
+		{"WARN", levelPaint{fg: yellowDark}, true},
+		{"warning", levelPaint{fg: yellowDark}, true},
+		{"error", levelPaint{fg: redDark}, true},
+		{"ERR", levelPaint{fg: redDark}, true},
+		{"alert", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
+		{"Critical", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
+		{"crit", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
+		{"FATAL", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
+		{"emergency", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
+		{"panic", levelPaint{fg: lipgloss.Color("15"), bg: redDark, bold: true}, true},
 		{"bogus", levelPaint{}, false},
 	}
 	for _, c := range cases {
-		got, ok := levelPaintOf(c.word)
+		got, ok := levelPaintOf(c.word, true)
 		if ok != c.known || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%q: paint %+v known %v, want %+v known %v", c.word, got, ok, c.want, c.known)
 		}
@@ -93,7 +93,7 @@ func TestINFOColorsOnlyTheLevelCell(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"level":"INFO","msg":"up"}`)
 	span := levelOfRow(t, m, 0)
-	if span.paint.bg != nil || span.paint.fg != greenAdaptive {
+	if span.paint.bg != nil || span.paint.fg != greenDark {
 		t.Fatalf("paint = %+v, want green on the cell only", span.paint)
 	}
 	if got := sliceCells(ansi.Strip(m.visible[0]), span.from, span.to); got != `"INFO"` {
@@ -105,7 +105,7 @@ func TestERRORColorsOnlyTheLevelCell(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"level":"error","msg":"boom"}`)
 	span := levelOfRow(t, m, 0)
-	if span.paint.fg != redAdaptive || span.paint.bg != nil {
+	if span.paint.fg != redDark || span.paint.bg != nil {
 		t.Fatalf("paint = %+v, want red on the cell only", span.paint)
 	}
 	if got := sliceCells(ansi.Strip(m.visible[0]), span.from, span.to); got != `"error"` {
@@ -120,7 +120,7 @@ func TestALERTIsScreaming(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"level":"ALERT","msg":"disk"}`)
 	span := levelOfRow(t, m, 0)
-	if span.paint.bg != redAdaptive || !span.paint.bold {
+	if span.paint.bg != redDark || !span.paint.bold {
 		t.Fatalf("paint = %+v, want bold on a red background", span.paint)
 	}
 	if got := paintSpan(m.visible[0], span); ansi.Strip(got) != m.visible[0] {
@@ -162,7 +162,7 @@ func TestTableLevelColumnIsPainted(t *testing.T) {
 	m.evaluateCells()
 	widths := m.tableWidths()
 	span, ok := m.levelFor(0, m.visible[0], widths, m.paneWidth())
-	if !ok || span.paint.fg != yellowAdaptive {
+	if !ok || span.paint.fg != yellowDark {
 		t.Fatalf("span = %+v ok %v, want the yellow level column", span, ok)
 	}
 	table := ansi.Strip(m.tableLines(m.visible)[0])

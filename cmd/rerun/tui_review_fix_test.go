@@ -1,12 +1,13 @@
 package main
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 	"time"
 
+	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 )
 
 // Stopping, starting, or rebooting ends the build in flight, so its ⚙ stops counting.
@@ -220,11 +221,38 @@ func TestEmptyStateHints(t *testing.T) {
 	}
 }
 
-func TestCursorAndFocusUseAdaptiveColors(t *testing.T) {
+// Styles are dark until the terminal answers, then follow the reported background.
+func TestStylesFollowTheReportedBackground(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	for name, st := range map[string]lipgloss.Style{"cursor": m.styles.cursor, "hover": m.styles.hover, "solo": m.styles.solo} {
-		if _, ok := st.GetBackground().(compat.AdaptiveColor); !ok {
-			t.Errorf("%s background is not adaptive", name)
+	if !m.isDark {
+		t.Fatal("styles are light before the terminal reports its background")
+	}
+	if got := m.styles.cursor.GetBackground(); got != lipgloss.Color("237") {
+		t.Fatalf("default cursor background = %v, want the dark palette 237", got)
+	}
+	if paint, ok := levelPaintOf("info", m.isDark); !ok || paint.fg != lipgloss.Color("46") {
+		t.Fatalf("default INFO foreground = %v, want the dark palette 46", paint.fg)
+	}
+
+	for _, c := range []struct {
+		name   string
+		msg    color.Color
+		dark   bool
+		cursor color.Color
+		info   color.Color
+	}{
+		{"light", color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}, false, lipgloss.Color("252"), lipgloss.Color("28")},
+		{"dark", color.RGBA{A: 0xff}, true, lipgloss.Color("237"), lipgloss.Color("46")},
+	} {
+		m.Update(tea.BackgroundColorMsg{Color: c.msg})
+		if m.isDark != c.dark {
+			t.Fatalf("%s background set isDark = %v", c.name, m.isDark)
+		}
+		if got := m.styles.cursor.GetBackground(); got != c.cursor {
+			t.Errorf("%s cursor background = %v, want %v", c.name, got, c.cursor)
+		}
+		if paint, ok := levelPaintOf("info", m.isDark); !ok || paint.fg != c.info {
+			t.Errorf("%s INFO foreground = %v, want %v", c.name, paint.fg, c.info)
 		}
 	}
 }

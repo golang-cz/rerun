@@ -49,7 +49,8 @@ func waitForEvents(ch <-chan event, stop <-chan struct{}) tea.Cmd {
 }
 
 func (m *tuiModel) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), waitForEvents(m.events, m.stop))
+	// The background query is a msg, so the runtime reads the reply while the TUI runs.
+	return tea.Batch(tickCmd(), waitForEvents(m.events, m.stop), tea.RequestBackgroundColor)
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -62,6 +63,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A rule's cut and its expansion depend on the width, so the rows are redone too.
 		m.dispDirty = true
 		m.fitEvents()
+		return m, nil
+
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
+		m.styles = newTUIStyles(m.isDark)
 		return m, nil
 
 	case tickMsg:

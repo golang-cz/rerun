@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -65,11 +64,12 @@ func tableLevel(t *tuiTarget, vals []string) (int, string) {
 }
 
 // levelPaintOf maps a level word, case-insensitively, to its paint.
-func levelPaintOf(word string) (levelPaint, bool) {
-	blue := compat.AdaptiveColor{Light: lipgloss.Color("25"), Dark: lipgloss.Color("39")}
-	green := compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("46")}
-	yellow := compat.AdaptiveColor{Light: lipgloss.Color("136"), Dark: lipgloss.Color("220")}
-	red := compat.AdaptiveColor{Light: lipgloss.Color("160"), Dark: lipgloss.Color("196")}
+func levelPaintOf(word string, isDark bool) (levelPaint, bool) {
+	lightDark := lipgloss.LightDark(isDark)
+	blue := lightDark(lipgloss.Color("25"), lipgloss.Color("39"))
+	green := lightDark(lipgloss.Color("28"), lipgloss.Color("46"))
+	yellow := lightDark(lipgloss.Color("136"), lipgloss.Color("220"))
+	red := lightDark(lipgloss.Color("160"), lipgloss.Color("196"))
 	switch strings.ToUpper(strings.TrimSpace(word)) {
 	case "DEBUG", "TRACE", "DEFAULT":
 		return levelPaint{fg: blue}, true
@@ -98,7 +98,7 @@ func (m *tuiModel) levelFor(row int, line string, widths []int, budget int) (lev
 			return levelSpan{}, false
 		}
 		idx, word := tableLevel(t, c.vals)
-		paint, ok := levelPaintOf(word)
+		paint, ok := levelPaintOf(word, m.isDark)
 		if idx < 0 || !ok {
 			return levelSpan{}, false
 		}
@@ -109,7 +109,7 @@ func (m *tuiModel) levelFor(row int, line string, widths []int, budget int) (lev
 		return finishSpan(levelSpan{from: spans[idx].x0, to: spans[idx].x1, paint: paint}, line), true
 	}
 	hit := m.visibleLvl[r.raw]
-	paint, ok := levelPaintOf(hit.word)
+	paint, ok := levelPaintOf(hit.word, m.isDark)
 	if !ok {
 		return levelSpan{}, false
 	}

@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
@@ -56,15 +55,16 @@ type tuiStyles struct {
 	chipFind     lipgloss.Style
 }
 
-func newTUIStyles() tuiStyles {
+func newTUIStyles(isDark bool) tuiStyles {
+	lightDark := lipgloss.LightDark(isDark)
 	return tuiStyles{
 		base:         lipgloss.NewStyle(),
 		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		cursor:       lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("252"), Dark: lipgloss.Color("237")}),
-		hover:        lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("254"), Dark: lipgloss.Color("235")}),
+		cursor:       lipgloss.NewStyle().Background(lightDark(lipgloss.Color("252"), lipgloss.Color("237"))),
+		hover:        lipgloss.NewStyle().Background(lightDark(lipgloss.Color("254"), lipgloss.Color("235"))),
 		muted:        lipgloss.NewStyle().Faint(true),
-		solo:         lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("253"), Dark: lipgloss.Color("234")}),
+		solo:         lipgloss.NewStyle().Background(lightDark(lipgloss.Color("253"), lipgloss.Color("234"))),
 		all:          lipgloss.NewStyle().Bold(true),
 		title:        lipgloss.NewStyle().Bold(true),
 		marker:       lipgloss.NewStyle().Reverse(true),

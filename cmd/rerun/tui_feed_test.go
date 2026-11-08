@@ -475,8 +475,8 @@ func TestDrawerFocusHighlightsItsCursorAndDimsTheList(t *testing.T) {
 	m.cursor = 0
 	m.frame()
 	leftW, _ := m.layoutWidths()
-	// The adaptive cursor background as v2 renders it: palette 237 in truecolor.
-	const cursorBg = "\x1b[48;2;58;58;58m"
+	// The dark cursor background as it renders: palette 237, the tests' default.
+	const cursorBg = "\x1b[48;5;237m"
 	if !strings.Contains(m.leftLine(0, leftW), cursorBg) {
 		t.Fatal("the list cursor is not highlighted before the drawer takes focus")
 	}

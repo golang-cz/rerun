@@ -363,6 +363,8 @@ type tuiModel struct {
 	hover int
 
 	layout tuiLayout
+	// isDark is the terminal's reported background; dark until it is heard from.
+	isDark bool
 	styles tuiStyles
 }
 
@@ -391,7 +393,8 @@ func newTUI(targets []Target) *tuiModel {
 		searchRow:  -1,
 		barSel:     -1,
 		paneCurSub: -1,
-		styles:     newTUIStyles(),
+		isDark:     true,
+		styles:     newTUIStyles(true),
 		// Kept non-nil: copy code walks these lists in parallel with visible.
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},

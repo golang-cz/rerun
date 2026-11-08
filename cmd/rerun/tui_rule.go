@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/compat"
 )
 
 // Color is extra: the text already says what happened.
@@ -311,7 +310,7 @@ func (m *tuiModel) sepLines(lines []string) []string {
 		if out == nil {
 			out = slices.Clone(lines)
 		}
-		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width())
+		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width(), m.isDark)
 	}
 	if out == nil {
 		return lines
@@ -319,16 +318,16 @@ func (m *tuiModel) sepLines(lines []string) []string {
 	return out
 }
 
-func renderSep(s sepLine, w int) string {
+func renderSep(s sepLine, w int, isDark bool) string {
 	head := ellipsize("── "+s.text(w)+" ", w)
-	return sepStyle(s.tone).Render(head + strings.Repeat("─", max(0, w-displayWidth(head))))
+	return sepStyle(s.tone, isDark).Render(head + strings.Repeat("─", max(0, w-displayWidth(head))))
 }
 
-func sepStyle(t sepTone) lipgloss.Style {
+func sepStyle(t sepTone, isDark bool) lipgloss.Style {
 	switch t {
 	case toneOK:
 		// Muted: the ✓ already carries the good news.
-		return lipgloss.NewStyle().Foreground(compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("65")})
+		return lipgloss.NewStyle().Foreground(lipgloss.LightDark(isDark)(lipgloss.Color("28"), lipgloss.Color("65")))
 	case toneFail:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
 	}
