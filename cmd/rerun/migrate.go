@@ -13,9 +13,9 @@ import (
 type migrateStatus int
 
 const (
-	migrated       migrateStatus = iota // targets moved under `targets:`
-	migrateAlready                     // the file already uses `targets:`
-	migrateNoTargets                   // no top-level target keys to move
+	migrated         migrateStatus = iota // targets moved under `targets:`
+	migrateAlready                        // the file already uses `targets:`
+	migrateNoTargets                      // no top-level target keys to move
 )
 
 // migrateConfig rewrites path's legacy top-level targets under a `targets:`
