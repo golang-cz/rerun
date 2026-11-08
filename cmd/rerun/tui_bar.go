@@ -83,20 +83,14 @@ func (m *tuiModel) barLine(w int) string {
 		x += displayWidth(text) + 1
 	}
 	switch {
-	case m.inputMode != inputNone:
-		prompt := "/ "
-		if m.inputMode == inputSearch {
-			prompt = "find "
-		}
-		text := prompt + m.input + "▏"
-		if m.inputMode == inputFilter && m.filterErr != "" {
-			text = prompt + m.input + "  yq: " + m.filterErr
-		}
-		parts = append(parts, m.styles.title.Render(text))
 	case len(chips) == 0:
 		parts = append(parts, m.styles.hint.Render("/ filter · ctrl+f find"))
 	default:
 		parts = append(parts, m.styles.hint.Render("/ add · ← backspace remove · ctrl+f find"))
+	}
+	// The typing box owns the prompt; a yq error still needs a home on the bar.
+	if m.inputMode == inputFilter && m.filterErr != "" {
+		parts = append(parts, m.styles.hint.Render("yq: "+m.filterErr))
 	}
 	return padRight(strings.Join(parts, " "), w)
 }

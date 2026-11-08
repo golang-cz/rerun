@@ -55,19 +55,22 @@ func TestSearchCounterIsIncremental(t *testing.T) {
 		t.Fatalf("inputMode = %d, want inputSearch", m.inputMode)
 	}
 	typeString(m, "line-1")
-	if got := bottomPaneLine(m); !strings.Contains(got, "find line-1 · 1/11") {
-		t.Fatalf("bottom line = %q, want find line-1 · 1/11", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "1/11") {
+		t.Fatalf("input box = %q, want line-1 and 1/11", got)
+	}
+	if got := bottomPaneLine(m); strings.Contains(got, "1/11") {
+		t.Fatalf("bottom line = %q, want no counter echo while the box is open", got)
 	}
 
 	typeString(m, "9")
-	if got := bottomPaneLine(m); !strings.Contains(got, "find line-19 · 1/1") {
-		t.Fatalf("bottom line = %q, want find line-19 · 1/1", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-19") || !strings.Contains(got, "1/1") {
+		t.Fatalf("input box = %q, want line-19 and 1/1", got)
 	}
 
 	// The counter lands on the first hit in view, so only the total is fixed.
 	press(m, "backspace")
-	if got := bottomPaneLine(m); !strings.HasPrefix(got, "find line-1 · ") || !strings.HasSuffix(got, "/11") {
-		t.Fatalf("after backspace bottom line = %q, want find line-1 · n/11", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "/11") {
+		t.Fatalf("after backspace box = %q, want line-1 and n/11", got)
 	}
 }
 
@@ -164,8 +167,8 @@ func TestSearchKeysInertWithoutQuery(t *testing.T) {
 	}
 }
 
-// esc while typing keeps the find query as a chip; esc in the list never clears it.
-func TestSearchEscKeepsTheChip(t *testing.T) {
+// esc in the open find box clears the query; enter keeps it, and esc in the list never clears it.
+func TestSearchEscInBoxClearsTheQuery(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.frame()
@@ -173,23 +176,24 @@ func TestSearchEscKeepsTheChip(t *testing.T) {
 	press(m, "ctrl+f")
 	typeString(m, "line")
 	press(m, "esc")
-	if m.inputMode != inputNone || m.barFocus || m.search != "line" {
-		t.Fatalf("esc while typing: mode=%d bar=%v search=%q, want the query kept and the bar blurred",
+	if m.inputMode != inputNone || m.barFocus || m.search != "" {
+		t.Fatalf("esc while typing: mode=%d bar=%v search=%q, want the query cleared and the bar blurred",
 			m.inputMode, m.barFocus, m.search)
+	}
+
+	press(m, "ctrl+f")
+	if m.input != "" {
+		t.Fatalf("reopening after esc seeded input = %q, want empty", m.input)
+	}
+	typeString(m, "line")
+	press(m, "enter")
+	if m.search != "line" || m.inputMode != inputNone {
+		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
 	}
 
 	press(m, "esc")
 	if m.search != "line" {
 		t.Fatalf("esc in the list cleared search = %q", m.search)
-	}
-
-	press(m, "ctrl+f")
-	if m.input != "line" {
-		t.Fatalf("reopening seeded input = %q, want line", m.input)
-	}
-	press(m, "enter")
-	if m.search != "line" || m.inputMode != inputNone {
-		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
 	}
 }
 
@@ -213,8 +217,11 @@ func TestBottomLinePrecedence(t *testing.T) {
 	}
 
 	press(m, "ctrl+f")
-	if got := paneOf(m)[0]; !strings.Contains(got, "find line") {
-		t.Fatalf("the open bar is not on the filter row: %q", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line") {
+		t.Fatalf("the input box lost the seeded query: %q", got)
+	}
+	if got := paneOf(m)[0]; strings.Contains(got, "find line") {
+		t.Fatalf("the bar still shows the prompt: %q", got)
 	}
 	if got := bottomPaneLine(m); !strings.Contains(got, "↓ 3 new") {
 		t.Fatalf("the open bar displaced the marker: %q", got)

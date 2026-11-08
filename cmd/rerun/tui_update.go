@@ -182,6 +182,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+f":
 		m.openBar(inputSearch)
 
+	case "ctrl+g":
+		m.searchJump(1)
+
 	case "ctrl+l":
 		m.clearKey()
 
@@ -398,7 +401,13 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		// Find drops the query; a line filter keeps its typed chip, as before.
+		if m.inputMode == inputSearch {
+			m.clearSearch()
+		}
 		m.leaveInput()
+	case "ctrl+g":
+		m.searchJump(1)
 	case "enter":
 		if m.inputMode == inputFilter && m.filterErr != "" {
 			return m, nil

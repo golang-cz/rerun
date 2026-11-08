@@ -145,6 +145,9 @@ func (m *tuiModel) frame() string {
 		}
 	}
 	frame := b.String()
+	if m.inputMode != inputNone {
+		frame = overlayAt(frame, m.inputBoxView(), m.layout.leftW+1, 0, m.width, m.height)
+	}
 	if m.finder.open {
 		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
 	}
@@ -214,15 +217,20 @@ func printable(s string, keepNL bool) string {
 // overlayCenter splices box into frame at the canvas center, so the stream and
 // drawer underneath keep updating while the modal is up.
 func overlayCenter(frame, box string, width, height int) string {
-	lines := strings.Split(frame, "\n")
-	boxLines := strings.Split(box, "\n")
 	bw := lipgloss.Width(box)
-	x := max(0, (width-bw)/2)
-	y := max(0, (height-len(boxLines))/2)
-	for i, bl := range boxLines {
+	y := max(0, (height-len(strings.Split(box, "\n")))/2)
+	return overlayAt(frame, box, max(0, (width-bw)/2), y, width, height)
+}
+
+// overlayAt splices box into frame at (x, y), so an anchored box cannot drift with the content.
+func overlayAt(frame, box string, x, y, width, height int) string {
+	lines := strings.Split(frame, "\n")
+	bw := lipgloss.Width(box)
+	x = max(0, x)
+	for i, bl := range strings.Split(box, "\n") {
 		row := y + i
-		if row >= len(lines) {
-			break
+		if row < 0 || row >= len(lines) {
+			continue
 		}
 		line := lines[row]
 		lines[row] = ansi.Cut(line, 0, x) + bl + ansi.Cut(line, x+bw, width)
@@ -276,6 +284,43 @@ func (m *tuiModel) modalBox(header, footer string, body []string, outerW, outerH
 
 	// v2's Width and Height are the whole block, border included.
 	return box.Width(outerW).Height(outerH).Render(strings.Join(lines, "\n"))
+}
+
+// inputBoxW is the input box's outer width: the pane's width less two cells, floored at modalMinWidth.
+func (m *tuiModel) inputBoxW() int {
+	_, rightW := m.layoutWidths()
+	return max(1, min(rightW, max(modalMinWidth, rightW-2)))
+}
+
+// inputPlaceholder is the faint hint an empty input box shows.
+func (m *tuiModel) inputPlaceholder() string {
+	if m.inputMode == inputSearch {
+		return "find in pane…"
+	}
+	return "filter lines…"
+}
+
+// inputCount is the box header's right-aligned count: match position for find, line count for filter.
+func (m *tuiModel) inputCount() string {
+	if m.inputMode == inputSearch {
+		return m.searchStatus()
+	}
+	return m.filterStatus()
+}
+
+// inputBoxView draws the typing box: one header row with the query and the count, then the keys footer.
+func (m *tuiModel) inputBoxView() string {
+	outerW := m.inputBoxW()
+	innerW := m.modalInnerW(outerW)
+	count := m.inputCount()
+	head := m.styles.chip.Render("❯ ")
+	if m.input == "" {
+		head += m.styles.paneCursor.Render(" ") + m.styles.hint.Render(m.inputPlaceholder())
+	} else {
+		head += finderTail(m.input, innerW-2-displayWidth(count)-2) + m.styles.paneCursor.Render(" ")
+	}
+	head += strings.Repeat(" ", max(1, innerW-displayWidth(head)-displayWidth(count))) + m.styles.hint.Render(count)
+	return m.modalBox(head, "enter keep · ctrl+g next · esc clear", nil, outerW, 0)
 }
 
 // layoutWidths splits the screen between the two columns.
@@ -816,7 +861,7 @@ func (m *tuiModel) rightLines(w int) []string {
 		case markerShown:
 			marker := fmt.Sprintf("↓ %d new", m.pending)
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
-		case m.search != "":
+		case m.search != "" && m.inputMode == inputNone:
 			out[last] = m.bottomLine(w, m.searchLine(), chip)
 		case m.filterOn():
 			out[last] = m.bottomLine(w, m.filterLine(), chip)
