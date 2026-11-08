@@ -532,6 +532,41 @@ func TestSpaceStopsAndStartsTheHighlightedTarget(t *testing.T) {
 	}
 }
 
+// Space toggles the row in the list; in the focused pane it jumps to the live tail instead.
+func TestSpaceInTheFocusedPaneJumpsToLive(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "old", 60).events)
+	m.frame()
+	m.cursor = 0
+	m.liveSelect()
+	press(m, "enter") // focuses the pane; web keeps running
+	if !m.paneFocus {
+		t.Fatal("enter did not focus the pane")
+	}
+	m.scrollUp(5)
+	if m.follow || m.vp.AtBottom() {
+		t.Fatalf("scrolling up left the pane live: follow=%v", m.follow)
+	}
+	before := m.targets[0].state
+
+	press(m, " ")
+
+	if !m.follow || m.pending != 0 {
+		t.Fatalf("space in the focused pane: follow=%v pending=%d, want live", m.follow, m.pending)
+	}
+	if !m.vp.AtBottom() {
+		t.Fatal("space did not jump the pane to the bottom")
+	}
+	if m.targets[0].state != before {
+		t.Fatalf("target state = %v, want %v unchanged", m.targets[0].state, before)
+	}
+	select {
+	case c := <-m.targets[0].runner.ctrlCh:
+		t.Fatalf("space sent %v to the runner, want no state change", c.kind)
+	default:
+	}
+}
+
 func TestUnselectedTargetStartsOff(t *testing.T) {
 	off := target("job")
 	off.Selected = false

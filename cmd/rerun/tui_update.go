@@ -254,6 +254,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "left":
 		if m.paneFocus {
+			if m.arrowCollapse() {
+				break
+			}
 			if m.paneCol > 0 {
 				m.paneCol--
 				m.vpDirty = true
@@ -271,7 +274,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			m.paneFocus = true
 			m.drawerFocus = false
-		} else {
+		} else if !m.arrowExpand() {
 			m.paneCol++
 			m.vpDirty = true
 		}
@@ -327,6 +330,11 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.saveColumns()
 
 	case "space":
+		// The pane owns the keys, so space jumps to the tail like end.
+		if m.paneFocus {
+			m.goLive()
+			break
+		}
 		if r, ok := m.cursorRow(); ok {
 			m.toggleRow(r)
 		}

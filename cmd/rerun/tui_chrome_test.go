@@ -79,7 +79,7 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 
 	press(m, "?")
 	full := ansi.Strip(m.View().Content)
-	for _, want := range []string{"ctrl+s", "backspace", "enter a f", "×", "rerun keys"} {
+	for _, want := range []string{"ctrl+s", "backspace", "enter → a f", "×", "rerun keys"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full help is missing %q", want)
 		}

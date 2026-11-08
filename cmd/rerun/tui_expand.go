@@ -224,6 +224,45 @@ func (m *tuiModel) toggleCursorExpand() {
 	m.toggleExpand(m.rowInfo(m.paneCursorRow()).raw)
 }
 
+// arrowExpand opens the cursor line, like enter, and claims the key on a line that
+// is already open; a plain line leaves the pane to its pan.
+func (m *tuiModel) arrowExpand() bool {
+	r, ok := m.cursorLine()
+	if !ok || !m.expandable(r.raw) {
+		return false
+	}
+	if !m.expanded[m.visibleSeq[r.raw]] {
+		m.toggleExpand(r.raw)
+	}
+	return true
+}
+
+// arrowCollapse closes the cursor's expansion and puts the cursor on its line.
+func (m *tuiModel) arrowCollapse() bool {
+	if m.paneLen() == 0 {
+		return false
+	}
+	r := m.rowInfo(m.paneCursorRow())
+	if !m.expanded[m.visibleSeq[r.raw]] {
+		return false
+	}
+	delete(m.expanded, m.visibleSeq[r.raw])
+	m.dispDirty = true
+	m.vpDirty = true
+	m.ensurePane()
+	m.setPaneCursor(m.lineRow(r.raw))
+	return true
+}
+
+// cursorLine is the shown line under the cursor, false while it sits on an expansion row.
+func (m *tuiModel) cursorLine() (dispRow, bool) {
+	if m.paneLen() == 0 {
+		return dispRow{}, false
+	}
+	r := m.rowInfo(m.paneCursorRow())
+	return r, r.sub < 0
+}
+
 // cursorField is the expansion row under the cursor, or nil on a shown line.
 func (m *tuiModel) cursorField() *jsonField {
 	if m.paneLen() == 0 {

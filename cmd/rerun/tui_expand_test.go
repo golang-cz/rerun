@@ -73,6 +73,83 @@ func TestEnterExpandsAndCollapsesTheBottomLine(t *testing.T) {
 	}
 }
 
+// → on the focused pane expands the cursor line, exactly like enter; → again changes nothing.
+func TestRightArrowExpandsTheCursorLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+
+	press(m, "right", "right") // focus the pane, then expand
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatalf("→ did not expand the cursor line:\n%s", plainPane(m))
+	}
+	if m.paneCol != 0 {
+		t.Fatalf("paneCol = %d, want the expansion instead of a pan", m.paneCol)
+	}
+	rows := m.paneLen()
+
+	press(m, "right")
+	if !m.expanded[m.visibleSeq[0]] || m.paneLen() != rows || m.paneCol != 0 {
+		t.Fatalf("→ on an open line: expanded=%v rows=%d col=%d, want no change",
+			m.expanded[m.visibleSeq[0]], m.paneLen(), m.paneCol)
+	}
+}
+
+// ← on a row of an expansion collapses the line and puts the cursor back on it.
+func TestLeftArrowCollapsesAnExpansionRow(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	press(m, "right", "right", "down") // focus, expand, step onto the first expansion row
+	if row := m.paneCursorRow(); row != 1 {
+		t.Fatalf("pane cursor = row %d, want 1, an expansion row", row)
+	}
+
+	press(m, "left")
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("← on an expansion row left the line expanded")
+	}
+	if m.paneCurRaw != 0 || m.paneCurSub != -1 {
+		t.Fatalf("cursor at raw=%d sub=%d, want the parent line", m.paneCurRaw, m.paneCurSub)
+	}
+	if !m.paneFocus {
+		t.Fatal("← on an expansion row dropped the pane focus")
+	}
+	if got := plainPane(m); strings.Contains(got, `status: 403`) {
+		t.Fatalf("pane still shows the block:\n%s", got)
+	}
+}
+
+// ← on the expanded line itself collapses it and keeps its focus.
+func TestLeftArrowOnAnExpandedLineCollapsesIt(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	press(m, "right", "right")
+	if m.paneCurSub != -1 {
+		t.Fatalf("cursor sub = %d, want the expanded line itself", m.paneCurSub)
+	}
+
+	press(m, "left")
+	if m.expanded[m.visibleSeq[0]] || !m.paneFocus || m.paneCurRaw != 0 {
+		t.Fatalf("← on an open line: expanded=%v focus=%v raw=%d, want it collapsed in place",
+			m.expanded[m.visibleSeq[0]], m.paneFocus, m.paneCurRaw)
+	}
+}
+
+// ← on a collapsed line keeps the old behavior: focus goes back to the list.
+func TestLeftArrowOnACollapsedLineReturnsToList(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	press(m, "right") // focus the pane only
+
+	press(m, "left")
+	if m.paneFocus || m.paneCol != 0 {
+		t.Fatalf("← on a collapsed line: focus=%v col=%d, want the list", m.paneFocus, m.paneCol)
+	}
+}
+
 // Clicking the (+) cell expands the line, and clicking the (−) cell collapses it.
 func TestClickingTheMarkerExpandsAndCollapses(t *testing.T) {
 	m := newTestModel(t, target("web"))

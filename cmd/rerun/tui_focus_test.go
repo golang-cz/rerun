@@ -246,3 +246,70 @@ func TestFocusedDividerIsHeavyCyan(t *testing.T) {
 		t.Fatal("plain divider still drawn while the pane has focus")
 	}
 }
+
+// drawnRow is the left column's line for the list row named key, styling kept.
+func drawnRow(t *testing.T, m *tuiModel, key string) string {
+	t.Helper()
+	m.frame()
+	idx := m.indexOfKey(key)
+	if idx < 0 {
+		t.Fatalf("row %q is not listed", key)
+	}
+	leftW, _ := m.layoutWidths()
+	return m.leftLine(idx-m.layout.offset, leftW)
+}
+
+// faintLine reports whether a drawn line carries the faint step-back style.
+func faintLine(line string) bool { return strings.Contains(line, "\x1b[2m") }
+
+// A focused pane dims every row it does not draw; its own row keeps full color.
+func TestPaneFocusDimsRowsOutsideScope(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	press(m, "enter")
+	if !m.paneFocus {
+		t.Fatal("enter did not focus the pane")
+	}
+
+	web := drawnRow(t, m, "target:web")
+	if !strings.Contains(web, "\x1b[") || faintLine(web) {
+		t.Fatalf("in-scope row = %q, want full color", web)
+	}
+	api := drawnRow(t, m, "target:api")
+	if !faintLine(api) {
+		t.Fatalf("out-of-scope row = %q, want faint", api)
+	}
+}
+
+// A group pane colors its own members and dims the headers and targets outside it.
+func TestPaneFocusGroupDimsOutsiders(t *testing.T) {
+	api, web, db := target("api"), target("web"), target("db")
+	api.Schema, web.Schema, db.Schema = "svc", "svc", "ops"
+	m := newTestModel(t, api, web, db)
+	m.applyScope(-1, "svc")
+	m.paneFocus = true
+
+	for _, key := range []string{"schema:svc", "target:api", "target:web"} {
+		if got := drawnRow(t, m, key); faintLine(got) {
+			t.Fatalf("in-scope %s = %q, want full color", key, got)
+		}
+	}
+	for _, key := range []string{"schema:ops", "target:db"} {
+		if got := drawnRow(t, m, key); !faintLine(got) {
+			t.Fatalf("out-of-scope %s = %q, want faint", key, got)
+		}
+	}
+}
+
+// The list owns the keys: no row is dimmed, and the cursor keeps its band.
+func TestListFocusKeepsRowsBright(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	for _, key := range []string{"target:web", "target:api"} {
+		got := drawnRow(t, m, key)
+		if faintLine(got) {
+			t.Fatalf("row %s = %q, want full color with the list focused", key, got)
+		}
+	}
+	if web := drawnRow(t, m, "target:web"); !strings.Contains(web, "\x1b[48;") {
+		t.Fatalf("cursor row = %q, want the cursor band", web)
+	}
+}

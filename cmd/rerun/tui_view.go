@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -601,8 +602,15 @@ func opColor(op string) string {
 }
 
 func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
+	// A focused pane dims every row it does not draw, so its own rows lead the eye.
+	if m.paneFocus && !m.rowInPaneScope(r) {
+		return m.styles.muted
+	}
 	switch {
 	case row == m.cursor && (m.drawerFocus || m.paneFocus || m.barFocus):
+		if m.paneFocus {
+			return m.styles.cursor // the in-scope cursor band keeps its brightness
+		}
 		return m.styles.muted // the cursor steps back while another region owns the keys
 	case row == m.cursor:
 		return m.styles.cursor
@@ -618,6 +626,15 @@ func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 		return m.styles.solo
 	}
 	return m.styles.base
+}
+
+// rowInPaneScope reports whether the pane's focused scope draws this row's output.
+func (m *tuiModel) rowInPaneScope(r listRow) bool {
+	if r.header {
+		return m.schemaSel == r.schema
+	}
+	members, ok := m.paneScope()
+	return ok && slices.Contains(members, r.target)
 }
 
 func stateColor(t *tuiTarget) string {
@@ -983,14 +1000,14 @@ func (m *tuiModel) allMuted() bool {
 // helpShortKeys is the help overlay's first view: the keys used most.
 var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
-	{"space", "start or stop the row"},
+	{"space", "start or stop the row · pane: jump to live"},
 	{"enter", "list: focus the pane, starting a stopped row or group"},
 	{"s", "stop the row (a group row: its running targets)"},
 	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
 	{"tab", "focus the fs drawer"},
-	{"enter a f", "pane: expand the line; a adds its key, f filters its value"},
+	{"enter → a f", "pane: expand the line · ← collapse · a adds its key, f filters its value"},
 	{"c", "toggle the columns table"},
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
@@ -1005,7 +1022,7 @@ var helpShortKeys = [][2]string{
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
 	{"←/→ enter", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane (enter too, starting a stopped row)"},
-	{"space s", "space starts / stops (group row: its targets); s stops (group row: its running targets)"},
+	{"space s", "space starts / stops · pane: jump to live (group row: its targets); s stops (group row: its running targets)"},
 	{"r", "reboot (grace applies; group row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
@@ -1018,7 +1035,7 @@ var helpKeys = [][2]string{
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d); a full page while the pane is focused"},
-	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},
+	{"enter → a f", "pane: enter or → expands the cursor line · ← collapses it; a adds its key, f filters its value"},
 	{"backspace ×", "pane: last chip · bar: ←/→ picks, backspace drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
