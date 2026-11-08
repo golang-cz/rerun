@@ -342,6 +342,7 @@ func findSnapshot(g *targetGroup, name string) (Target, bool) {
 }
 
 // waitForKindPoking waits for an event of kind, calling poke until it arrives.
+// Poke slower than configDebounce, or Linux inotify keeps resetting it.
 func waitForKindPoking(t *testing.T, sink *recordingSink, kind eventKind, timeout time.Duration, poke func()) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -354,7 +355,7 @@ func waitForKindPoking(t *testing.T, sink *recordingSink, kind eventKind, timeou
 		}
 		if time.Now().After(nextPoke) {
 			poke()
-			nextPoke = time.Now().Add(100 * time.Millisecond)
+			nextPoke = time.Now().Add(2 * configDebounce)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
