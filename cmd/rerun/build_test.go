@@ -85,7 +85,7 @@ func gatedBuild(t *testing.T) (script string, release func()) {
 func TestBuildSwapsOnlyAfterBuildFinishes(t *testing.T) {
 	script, release := gatedBuild(t)
 	r, log, ctx := buildRunner(t, "true", "sleep 30")
-	r.startBuild(ctx, nil)
+	r.startBuild(nil)
 	r.finishBuild(ctx, nextBuild(t, r))
 	old := r.currentCmd()
 	if old == nil || old.Exited() {
@@ -127,7 +127,7 @@ func TestBuildSwapsOnlyAfterBuildFinishes(t *testing.T) {
 
 func TestBuildFailureKeepsOldRun(t *testing.T) {
 	r, log, ctx := buildRunner(t, "true", "sleep 30")
-	r.startBuild(ctx, nil)
+	r.startBuild(nil)
 	r.finishBuild(ctx, nextBuild(t, r))
 	old := r.currentCmd()
 
@@ -153,7 +153,7 @@ func TestBuildFailureKeepsOldRun(t *testing.T) {
 
 func TestBuildFailureKeepsOnlyTheLastLines(t *testing.T) {
 	r, log, ctx := buildRunner(t, "i=1; while [ $i -le 250 ]; do echo line$i; i=$((i+1)); done; exit 1", "sleep 30")
-	r.startBuild(ctx, nil)
+	r.startBuild(nil)
 	r.finishBuild(ctx, nextBuild(t, r))
 	f := log.kind(evBuildFailed)[0]
 	if len(f.lines) != buildTailLines || f.lines[0] != "line51" || f.lines[len(f.lines)-1] != "line250" {
@@ -163,7 +163,7 @@ func TestBuildFailureKeepsOnlyTheLastLines(t *testing.T) {
 
 func TestFirstStartBuildFailureStartsNothing(t *testing.T) {
 	r, log, ctx := buildRunner(t, "exit 1", "sleep 30")
-	r.startBuild(ctx, nil)
+	r.startBuild(nil)
 	r.finishBuild(ctx, nextBuild(t, r))
 	if r.currentCmd() != nil {
 		t.Fatal("run started despite a failed first build")
@@ -306,8 +306,8 @@ func TestCancelBuildDoesNotHangOnAnEscapedChild(t *testing.T) {
 
 	// The setsid child leaves the process group yet keeps the build's stdout open.
 	script := perl + ` -e 'use POSIX; setsid(); exec "sleep","4"' & sleep 30`
-	r, _, ctx := buildRunner(t, script, "sleep 30")
-	r.startBuild(ctx, nil)
+	r, _, _ := buildRunner(t, script, "sleep 30")
+	r.startBuild(nil)
 	time.Sleep(100 * time.Millisecond)
 
 	done := make(chan struct{})

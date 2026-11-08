@@ -29,7 +29,8 @@ func findInPane(t *testing.T, m *tuiModel, needle string) (int, int) {
 func plainPane(m *tuiModel) string {
 	var b strings.Builder
 	for _, line := range paneOf(m) {
-		b.WriteString(ansi.Strip(line) + "\n")
+		b.WriteString(ansi.Strip(line))
+		b.WriteString("\n")
 	}
 	return b.String()
 }

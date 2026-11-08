@@ -105,7 +105,7 @@ func (b *tailBuffer) tail() []string {
 
 func (r *targetRunner) launch(ctx context.Context) {
 	if r.target.Build != "" {
-		r.startBuild(ctx, nil)
+		r.startBuild(nil)
 		return
 	}
 	r.spawn(ctx)
@@ -119,7 +119,7 @@ func (r *targetRunner) buildResult() <-chan buildResult {
 	return r.build.done
 }
 
-func (r *targetRunner) startBuild(ctx context.Context, files map[string]struct{}) {
+func (r *targetRunner) startBuild(files map[string]struct{}) {
 	union := make(map[string]struct{}, len(files))
 	if r.build != nil {
 		for f := range r.build.files {

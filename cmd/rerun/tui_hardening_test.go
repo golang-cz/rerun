@@ -185,7 +185,8 @@ func TestExpandedYAMLRoundTrips(t *testing.T) {
 		}
 		var doc strings.Builder
 		for _, r := range rows {
-			doc.WriteString(ansi.Strip(r.text) + "\n")
+			doc.WriteString(ansi.Strip(r.text))
+			doc.WriteString("\n")
 		}
 		var got map[string]any
 		if err := yaml.Unmarshal([]byte(doc.String()), &got); err != nil {

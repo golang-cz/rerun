@@ -268,7 +268,7 @@ func TestTailBufferEmitsEachLineAsItCompletes(t *testing.T) {
 
 func TestBuildStreamsItsOutputLiveWithItsStart(t *testing.T) {
 	r, log, ctx := buildRunner(t, "echo one; echo two", "sleep 30")
-	r.startBuild(ctx, nil)
+	r.startBuild(nil)
 	r.finishBuild(ctx, nextBuild(t, r))
 
 	started := log.kind(evBuildStarted)

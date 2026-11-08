@@ -302,9 +302,13 @@ func (c *composeBackend) followEvents(ctx context.Context, since time.Time, emit
 		n++
 		c.handleEvent(ctx, ev, emit)
 	}
+	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
 	if ctx.Err() != nil {
 		return n, nil
+	}
+	if scanErr != nil {
+		return n, fmt.Errorf("reading docker events: %w", scanErr)
 	}
 	if waitErr != nil {
 		return n, waitErr
@@ -595,6 +599,10 @@ func (c *composeBackend) tailLogs(ctx context.Context, id string, args []string,
 		if c.fresh(id, at, rest) {
 			emit(event{kind: evOutput, target: c.name, line: rest})
 		}
+	}
+	// A line past the cap ends the read; report it before Wait, which a stalled docker write would block.
+	if err := scanner.Err(); err != nil {
+		emit(event{kind: evOutput, target: c.name, line: fmt.Sprintf("rerun: reading logs: %v", err)})
 	}
 	_ = cmd.Wait()
 }

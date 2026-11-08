@@ -637,7 +637,7 @@ func (r *targetRunner) run(ctx context.Context) error {
 	if ctx.Err() == nil {
 		if !r.userStopped() && r.target.Start == startAuto {
 			if r.target.Build != "" {
-				r.startBuild(ctx, nil)
+				r.startBuild(nil)
 			} else if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 				return err
 			}
@@ -775,7 +775,7 @@ func (r *targetRunner) restart(ctx context.Context) {
 		return
 	}
 	if r.target.Build != "" {
-		r.startBuild(ctx, nil)
+		r.startBuild(nil)
 		return
 	}
 	r.cancelBuild()
@@ -810,7 +810,7 @@ func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeS
 
 	if r.target.Build != "" {
 		r.reportChange(changeSet, true)
-		r.startBuild(ctx, changeSet.Files)
+		r.startBuild(changeSet.Files)
 		return
 	}
 
@@ -1126,10 +1126,6 @@ func (r *targetRunner) waitDelay(ctx context.Context, d time.Duration) bool {
 		return false
 	}
 }
-
-// raw reports whether the target passes output through unprefixed. The ad-hoc
-// command is the only nameless target.
-func (r *targetRunner) raw() bool { return r.target.Name == "" }
 
 // waitCooldown holds a restart back until the cooldown since the last start.
 func (r *targetRunner) waitCooldown(ctx context.Context) {

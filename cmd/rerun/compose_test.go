@@ -493,6 +493,37 @@ func TestComposeLogsReattachWithoutRepeats(t *testing.T) {
 	}
 }
 
+// A log line past the scanner's cap ends the read, so the attach must report it
+// instead of going quiet mid-stream.
+func TestComposeLogLinePastTheCapIsReported(t *testing.T) {
+	dir := fakeDocker(t)
+	writeFake(t, dir, "logs.cid-a.1.txt", strings.Repeat("x", 2*1024*1024))
+
+	_, target := composeFixture(t, "postgres")
+	sink := &recordingSink{}
+	b := newComposeBackend(target, sink)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		b.tailLogs(ctx, "cid-a", []string{"logs", "-f", "--timestamps", "cid-a"}, sink.emit)
+	}()
+
+	got := waitEvents(t, sink, func(evs []event) bool { return len(evs) > 0 })
+	if ev := got[0]; ev.kind != evOutput || ev.target != "postgres" || !strings.Contains(ev.line, "token too long") {
+		t.Fatalf("event = %+v, want a postgres output line naming the scanner error", ev)
+	}
+	// The blocked docker write keeps Wait from returning on its own.
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("tailLogs did not return after the context was cancelled")
+	}
+}
+
 func TestComposeAlreadyRunningAtStartup(t *testing.T) {
 	fastRetries(t)
 	dir := fakeDocker(t)

@@ -292,7 +292,7 @@ func TestImportedTargetsRunFromTheirOwnDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("start %s: %v", tc.name, err)
 		}
-		if err := cmd.WaitExit(nil); err != nil {
+		if err := cmd.WaitExit(t.Context()); err != nil {
 			t.Fatalf("wait %s: %v", tc.name, err)
 		}
 	}

@@ -42,7 +42,7 @@ type finderItem struct {
 }
 
 // groupDesc is a group's description; groups have none until config supplies one.
-func groupDesc(schema string) string { return "" }
+func groupDesc() string { return "" }
 
 // finderDesc collapses a description onto one line, so a newline cannot break the popup.
 func finderDesc(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -53,7 +53,7 @@ func (m *tuiModel) finderCandidates() []finderItem {
 	out := make([]finderItem, 0, len(rows))
 	for i, r := range rows {
 		if r.header {
-			out = append(out, finderItem{kind: "group", name: groupLabel(r.schema), desc: finderDesc(groupDesc(r.schema)),
+			out = append(out, finderItem{kind: "group", name: groupLabel(r.schema), desc: finderDesc(groupDesc()),
 				enter: func(m *tuiModel) { m.finderJump(i) }})
 			continue
 		}
