@@ -41,13 +41,13 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 	}
 
 	lines := leftPane(m)
-	if !strings.HasPrefix(lines[0], "▾ backend") || !strings.Contains(lines[0], "2/2") {
-		t.Fatalf("header = %q, want `▾ backend` with its running count", lines[0])
+	if !strings.HasPrefix(lines[0], "▾") || !strings.Contains(lines[0], "backend") || !strings.Contains(lines[0], "2/2") {
+		t.Fatalf("header = %q, want the backend header with its running count", lines[0])
 	}
 	if !strings.HasPrefix(lines[1], " ● api") {
 		t.Fatalf("member = %q, want the name indented under its header", lines[1])
 	}
-	if !strings.HasPrefix(lines[5], "▾ all") {
+	if !strings.HasPrefix(lines[5], "▾") || !strings.Contains(lines[5], "all") {
 		t.Fatalf("header = %q, want the trailing default header", lines[5])
 	}
 	if !strings.HasPrefix(lines[6], " ● web") {
@@ -203,5 +203,48 @@ func TestNothingSelectedTablesOnlyWhenColumnsAreShared(t *testing.T) {
 	shared := newTestModel(t, tableTarget("api"), tableTarget("web"))
 	if !shared.tableOn() {
 		t.Fatal("shared columns did not start in table mode with nothing selected")
+	}
+}
+
+// A header whose members are all down and one auto-starts shows the play glyph.
+func TestHeaderShowsPlayGlyphWhenSpaceWouldStart(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"))
+	m.targets[0].state = stateStopped
+
+	if line := leftPane(m)[0]; !strings.HasPrefix(line, "▾ ▶ backend") {
+		t.Fatalf("header = %q, want the play glyph before the name", line)
+	}
+}
+
+// A member already up hides the play glyph: space would stop, not start.
+func TestHeaderHidesPlayGlyphWhileAMemberRuns(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("dash", "webapps"))
+	m.targets[0].state = stateRunning
+	m.targets[1].state = stateStopped
+	lines := leftPane(m)
+
+	if strings.Contains(lines[0], playGlyph) {
+		t.Fatalf("backend header = %q, want no play glyph while its member runs", lines[0])
+	}
+	if !strings.Contains(lines[2], playGlyph) {
+		t.Fatalf("webapps header = %q, want the play glyph on a startable group", lines[2])
+	}
+}
+
+// The reserved play column keeps names in one column across headers with and without the glyph.
+func TestHeaderNamesAlignWithAndWithoutPlayGlyph(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("dash", "webapps"))
+	m.targets[0].state = stateRunning
+	m.targets[1].state = stateStopped
+	lines := leftPane(m)
+
+	if strings.Contains(lines[0], playGlyph) || !strings.Contains(lines[2], playGlyph) {
+		t.Fatalf("headers = %q / %q, want the glyph only on webapps", lines[0], lines[2])
+	}
+	nameCol := func(line, name string) int {
+		return displayWidth(line[:strings.Index(line, name)])
+	}
+	if a, b := nameCol(lines[0], "backend"), nameCol(lines[2], "webapps"); a != b {
+		t.Fatalf("name columns = %d and %d, want the same column", a, b)
 	}
 }

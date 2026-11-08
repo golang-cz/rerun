@@ -85,3 +85,14 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 		t.Errorf("full help should name ctrl+f and / v:\n%s", view)
 	}
 }
+
+// The full help explains the play glyph on a startable group header.
+func TestHelpNamesThePlayGlyph(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 160, 40
+	press(m, "?")
+	press(m, "?")
+	if view := m.View().Content; !strings.Contains(view, "▶ starts its auto targets") {
+		t.Errorf("full help should explain the play glyph:\n%s", view)
+	}
+}

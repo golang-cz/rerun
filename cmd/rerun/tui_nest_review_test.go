@@ -141,7 +141,7 @@ func TestToggleHeaderStartsOnlyAutoMembers(t *testing.T) {
 	}
 }
 
-// space on a header of manual members (a Makefile import) starts nothing and hints.
+// space on a header of manual members (a Makefile import) does nothing, silently.
 func TestToggleHeaderOfManualMembersStartsNothing(t *testing.T) {
 	build := schemaTarget("build", "make")
 	build.Start = startManual
@@ -151,6 +151,9 @@ func TestToggleHeaderOfManualMembersStartsNothing(t *testing.T) {
 	for i := range m.targets {
 		m.targets[i].state = stateStopped
 	}
+	if line := leftPane(m)[0]; strings.Contains(line, playGlyph) {
+		t.Fatalf("header = %q, want no play glyph without a startable member", line)
+	}
 
 	m.toggleRow(headerRow(t, m))
 	for _, tg := range m.targets {
@@ -158,8 +161,8 @@ func TestToggleHeaderOfManualMembersStartsNothing(t *testing.T) {
 			t.Fatalf("%s state = %v, want stopped", tg.spec.Name, tg.state)
 		}
 	}
-	if got := "no auto-start targets in group; press space on a target to run it"; m.hint != got {
-		t.Fatalf("hint = %q, want %q", m.hint, got)
+	if m.hint != "" {
+		t.Fatalf("hint = %q, want none: space starts nothing here", m.hint)
 	}
 }
 

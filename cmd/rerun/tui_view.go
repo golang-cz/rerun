@@ -1138,7 +1138,7 @@ var helpShortKeys = [][2]string{
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
 	{"←/→ enter", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane (enter too, starting a stopped row)"},
-	{"space", "start or stop the row · pane: jump to live"},
+	{"space", "start or stop the row · group ▶ starts its auto targets · pane: jump to live"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r", "mute the stream (group row: its targets); r reboots (grace applies)"},
 	{"w t tab", "what changed (last minute) · t fs drawer, tab focuses it"},

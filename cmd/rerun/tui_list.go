@@ -19,6 +19,12 @@ const allKeyPrefix = "\x00all:"
 // indentCells is the list pane indent per nesting level.
 const indentCells = 1
 
+// playGlyph marks a header space would start: its members are down and one auto-starts.
+const playGlyph = "▶"
+
+// playW is the play column's width. Every header keeps it, so names stay aligned.
+const playW = 2
+
 // listRow is one list line: a group header, or a target, indented by its depth.
 type listRow struct {
 	header  bool
@@ -621,16 +627,25 @@ func (m *tuiModel) anyRunning(members []int) bool {
 
 // startTargets starts the group's auto-start members, the ones rerun.yml selects.
 func (m *tuiModel) startTargets(members []int) {
-	started := false
 	for _, i := range members {
 		if m.targets[i].spec.Start == startAuto && m.targets[i].spec.Selected {
 			m.startTarget(i)
-			started = true
 		}
 	}
-	if !started {
-		m.showHint("no auto-start targets in group; press space on a target to run it")
+}
+
+// startsOnSpace reports whether space on the header would start something:
+// no member is up, and at least one member auto-starts.
+func (m *tuiModel) startsOnSpace(members []int) bool {
+	if m.anyRunning(members) {
+		return false
 	}
+	for _, i := range members {
+		if t := m.targets[i]; t.spec.Start == startAuto && t.spec.Selected {
+			return true
+		}
+	}
+	return false
 }
 
 // rebootTargets reboots the members that rerun.yml selects.
@@ -670,13 +685,18 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		}
 	}
 	indent := r.indent()
-	nameW := max(0, nameWidth(leftW)-indent)
+	nameW := max(0, nameWidth(leftW)-indent-playW)
 	glyph := "▾"
 	if r.collapsed {
 		glyph = "▸"
 	}
+	play := seg{text: strings.Repeat(" ", playW)}
+	if m.startsOnSpace(r.members) {
+		play = seg{text: playGlyph + " ", faint: true}
+	}
 	segs := []seg{
 		{text: strings.Repeat(" ", indent) + glyph + " "},
+		play,
 		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
