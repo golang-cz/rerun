@@ -310,6 +310,9 @@ type tuiModel struct {
 
 	// pinSeq is the restart rule the pane holds at its top, 0 for none.
 	pinSeq int
+	// pinGap hides the pinned row and holds the one after it at the top, which
+	// is how a clear leaves the pane blank.
+	pinGap bool
 
 	// inputMode is the bar's open input and input its text; an open input owns every key.
 	inputMode int
@@ -838,7 +841,7 @@ func (m *tuiModel) applyEvent(ev event) {
 			t.lastRule = rr
 			m.addRule(i, sepLine{restart: rr, icon: "↻", full: rr.cmd})
 			if m.follow && m.solo == i && m.schemaSel == "" {
-				m.pinSeq = m.nextSeq
+				m.pinSeq, m.pinGap = m.nextSeq, false
 			}
 		} else {
 			t.lastRule = nil

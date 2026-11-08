@@ -854,7 +854,7 @@ func (m *tuiModel) copyHintActive() bool {
 func (m *tuiModel) syncContent() {
 	// A scroll-up drops the pin, and the padding it needed must go with it.
 	if !m.follow && m.pinSeq != 0 {
-		m.pinSeq = 0
+		m.unpin()
 		m.vpDirty = true
 	}
 	if m.vpDirty {
@@ -984,6 +984,8 @@ func (m *tuiModel) allMuted() bool {
 var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row"},
+	{"enter", "list: focus the pane, starting a stopped row or group"},
+	{"s", "stop the row (a group row: its running targets)"},
 	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
@@ -992,6 +994,7 @@ var helpShortKeys = [][2]string{
 	{"c", "toggle the columns table"},
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
+	{"pgup/pgdn", "scroll the pane; a full page while the pane is focused"},
 	{"ctrl+l", "clear the target's log (old lines stay in scrollback)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"ctrl+k", "find a target or group; enter jumps, runs a make target"},
@@ -1001,8 +1004,8 @@ var helpShortKeys = [][2]string{
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
-	{"←/→", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane"},
-	{"space", "start / stop (group row: its targets)"},
+	{"←/→ enter", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane (enter too, starting a stopped row)"},
+	{"space s", "space starts / stops (group row: its targets); s stops (group row: its running targets)"},
 	{"r", "reboot (grace applies; group row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
 	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
@@ -1014,7 +1017,7 @@ var helpKeys = [][2]string{
 	{"ctrl+l", "clear the target's log (group row: its targets); old lines stay in scrollback"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
-	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},
+	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d); a full page while the pane is focused"},
 	{"enter a f", "pane: expand the cursor line; a adds its key, f filters its value"},
 	{"backspace ×", "pane: last chip · bar: ←/→ picks, backspace drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},

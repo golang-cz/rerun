@@ -427,6 +427,40 @@ func (m *tuiModel) toggleRow(r listRow) {
 	m.toggleTarget(r.target)
 }
 
+// enterRow is enter on the list: focuses the pane, starting a stopped row first.
+func (m *tuiModel) enterRow() {
+	if r, ok := m.cursorRow(); ok {
+		switch {
+		case r.header && !m.anyRunning(r.members):
+			m.startTargets(r.members)
+		case !r.header && !m.targets[r.target].state.up():
+			m.toggleTarget(r.target) // the same path as space, so it never stops
+		}
+		m.applyRowScope(r)
+	}
+	m.drawerFocus = false
+	m.paneFocus = true
+}
+
+// stopRow is `s`: stops the cursor's row, or a header's running members. Never a toggle.
+func (m *tuiModel) stopRow() {
+	r, ok := m.cursorRow()
+	if !ok {
+		return
+	}
+	if r.header {
+		for _, i := range r.members {
+			if m.targets[i].state.up() {
+				m.stopTarget(i)
+			}
+		}
+		return
+	}
+	if m.targets[r.target].state.up() {
+		m.stopTarget(r.target)
+	}
+}
+
 // muteRow is `m`: mutes a target, or a header's members.
 func (m *tuiModel) muteRow(r listRow) {
 	if r.header {
@@ -449,11 +483,13 @@ func (m *tuiModel) rebootRow(r listRow) {
 func (m *tuiModel) clearKey() {
 	switch {
 	case m.paneFocus && m.solo >= 0:
-		m.clearTarget(m.solo)
+		m.clearTargets([]int{m.solo})
 	case m.paneFocus && m.schemaSel != "":
 		m.clearTargets(m.schemaMembers(m.schemaSel))
 	default:
 		if r, ok := m.cursorRow(); ok {
+			// Act on the row under the cursor, so a clear always has a pane to blank.
+			m.applyRowScope(r)
 			m.clearRow(r)
 		}
 	}
@@ -465,25 +501,45 @@ func (m *tuiModel) clearRow(r listRow) {
 		m.clearTargets(r.members)
 		return
 	}
-	m.clearTarget(r.target)
+	m.clearTargets([]int{r.target})
 }
 
-// clearTargets clears every member of a group, running or not.
+// clearTargets draws nothing and erases nothing: it holds the pane's top on the
+// row after its last line, so the pane reads blank and new output starts there.
+// The process, the state and the old lines above are all untouched.
 func (m *tuiModel) clearTargets(members []int) {
-	for _, i := range members {
-		m.clearTarget(i)
+	if !m.follow || !m.paneHoldsOnly(members) {
+		return
 	}
+	seq, ok := m.lastShownSeq()
+	if !ok {
+		return
+	}
+	m.pinSeq, m.pinGap = seq, true
+	m.vpDirty = true
 }
 
-// clearTarget leaves a cleared marker and holds it at the pane's top, the way
-// a restart's rule does; the target's process and state are untouched.
-func (m *tuiModel) clearTarget(i int) {
-	// The name travels in the marker, so several cleared groups do not draw alike.
-	s := sepLine{label: m.targets[i].spec.Name + " cleared " + m.now.Format("15:04:05")}
-	seq := m.addRow(i, s.raw(), s)
-	if m.follow && m.solo == i && m.schemaSel == "" {
-		m.pinSeq = seq
+// paneHoldsOnly reports whether the pane draws exactly these members, so clearing
+// a target it does not show cannot blank it.
+func (m *tuiModel) paneHoldsOnly(members []int) bool {
+	switch {
+	case m.solo >= 0:
+		return len(members) == 1 && members[0] == m.solo
+	case m.schemaSel != "":
+		return slices.Equal(members, m.schemaMembers(m.schemaSel))
 	}
+	return false
+}
+
+// lastShownSeq is the seq of the pane's last shown line, the anchor a clear hides behind.
+func (m *tuiModel) lastShownSeq() (int, bool) {
+	m.ensurePane()
+	for row := m.paneLen() - 1; row >= 0; row-- {
+		if m.rowInfo(row).sub < 0 {
+			return m.visibleSeq[m.paneRowRaw(row)], true
+		}
+	}
+	return 0, false
 }
 
 func (m *tuiModel) liveSelect() {
@@ -531,14 +587,7 @@ func (m *tuiModel) clearScope() {
 
 // toggleTargets is space on a header: stops the running members, else starts the ones rerun.yml auto-starts.
 func (m *tuiModel) toggleTargets(members []int) {
-	anyUp := false
-	for _, i := range members {
-		if m.targets[i].state.up() {
-			anyUp = true
-			break
-		}
-	}
-	if anyUp {
+	if m.anyRunning(members) {
 		for _, i := range members {
 			if m.targets[i].state.up() {
 				m.stopTarget(i)
@@ -546,6 +595,21 @@ func (m *tuiModel) toggleTargets(members []int) {
 		}
 		return
 	}
+	m.startTargets(members)
+}
+
+// anyRunning reports whether any member is up.
+func (m *tuiModel) anyRunning(members []int) bool {
+	for _, i := range members {
+		if m.targets[i].state.up() {
+			return true
+		}
+	}
+	return false
+}
+
+// startTargets starts the group's auto-start members, the ones rerun.yml selects.
+func (m *tuiModel) startTargets(members []int) {
 	started := false
 	for _, i := range members {
 		if m.targets[i].spec.Start == startAuto && m.targets[i].spec.Selected {

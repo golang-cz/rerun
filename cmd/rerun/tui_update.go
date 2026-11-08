@@ -305,7 +305,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case m.paneFocus:
 			m.toggleCursorExpand()
 		default:
-			m.paneFocus = true
+			m.enterRow()
 		}
 
 	case "a":
@@ -331,6 +331,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.toggleRow(r)
 		}
 
+	case "s":
+		m.stopRow()
+
 	case "m":
 		if r, ok := m.cursorRow(); ok {
 			m.muteRow(r)
@@ -349,10 +352,16 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.openTarget(i)
 		}
 
-	case "pgup", "ctrl+u":
+	case "pgup":
+		m.scrollUp(m.pageStep())
+
+	case "pgdown":
+		m.scrollDown(m.pageStep())
+
+	case "ctrl+u":
 		m.scrollUp(max(1, m.vp.Height()/2))
 
-	case "pgdown", "ctrl+d":
+	case "ctrl+d":
 		m.scrollDown(max(1, m.vp.Height()/2))
 	}
 	return m, nil
@@ -532,6 +541,14 @@ func (m *tuiModel) pauseTail() {
 	}
 	m.follow = false
 	m.pending = 0
+}
+
+// pageStep is a full pane while it owns the keys, half a pane otherwise.
+func (m *tuiModel) pageStep() int {
+	if m.paneFocus {
+		return max(1, m.vp.Height())
+	}
+	return max(1, m.vp.Height()/2)
 }
 
 // scrollDown resumes following once the pane is back at the bottom.

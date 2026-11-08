@@ -213,13 +213,25 @@ func startedRule(name string, at time.Time, cmd string) sepLine {
 // followTail pins the pane to the tail, or holds a restart rule at the top until output fills below it.
 func (m *tuiModel) followTail() {
 	if m.pinSeq != 0 {
-		if row, ok := m.ruleRow(m.pinSeq); ok && m.paneLen()-row <= m.vp.Height() {
+		if row, ok := m.pinTop(); ok && m.paneLen()-row <= m.vp.Height() {
 			m.vp.SetYOffset(row)
 			return
 		}
-		m.pinSeq = 0
+		m.unpin()
 	}
 	m.vp.GotoBottom()
+}
+
+// unpin releases the pane's held row.
+func (m *tuiModel) unpin() { m.pinSeq, m.pinGap = 0, false }
+
+// pinTop is the row the pin holds at the pane's top; a clear's pin holds the row after its anchor.
+func (m *tuiModel) pinTop() (int, bool) {
+	row, ok := m.ruleRow(m.pinSeq)
+	if ok && m.pinGap {
+		row++
+	}
+	return row, ok
 }
 
 // Blank rows let the viewport hold the rule at the top; it clamps the offset otherwise.
@@ -227,10 +239,11 @@ func (m *tuiModel) padForPin(out []string) []string {
 	if !m.follow || m.pinSeq == 0 {
 		return out
 	}
-	if row, ok := m.ruleRow(m.pinSeq); ok {
+	if row, ok := m.pinTop(); ok {
 		cue := len(out)
 		for len(out) < row+m.vp.Height() {
-			if len(out) == cue {
+			// A clear's pin draws no cue: the blank pane is the whole point.
+			if len(out) == cue && !m.pinGap {
 				out = append(out, m.styles.hint.Render("pinned"))
 				continue
 			}

@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func hasLine(lines []string, want string) bool {
@@ -14,82 +16,128 @@ func hasLine(lines []string, want string) bool {
 	return false
 }
 
-func clearedMarkers(m *tuiModel) int {
+// clearedText counts any cleared-marker text left in the pane or its rules.
+func clearedText(m *tuiModel) int {
 	n := 0
 	for _, line := range rawPane(m) {
 		if strings.Contains(line, " cleared ") {
 			n++
 		}
 	}
+	for _, s := range m.visibleSep {
+		if strings.Contains(s.label, "cleared") {
+			n++
+		}
+	}
 	return n
 }
 
-// ctrl+l marks the target's log cleared without touching its process or state.
-func TestClearLeavesTheProcessAndOldLinesAlone(t *testing.T) {
+// paneTop is the pane's first content row as drawn, styling stripped.
+func paneTop(m *tuiModel) string {
+	lines := paneOf(m)
+	return strings.TrimRight(ansi.Strip(lines[m.titleHeight()]), " ")
+}
+
+// noMarkerText fails when any cleared-marker text survives the clear.
+func noMarkerText(t *testing.T, m *tuiModel) {
+	t.Helper()
+	if got := clearedText(m); got != 0 {
+		t.Fatalf("cleared marker text = %d, want none", got)
+	}
+}
+
+// blankTop fails when the pane's first content row is not blank.
+func blankTop(t *testing.T, m *tuiModel) {
+	t.Helper()
+	if got := paneTop(m); got != "" {
+		t.Fatalf("pane top = %q, want it blank", got)
+	}
+}
+
+// ctrl+l writes no marker, blanks the pane's top, and leaves the process and
+// the old lines in the scrollback above it.
+func TestClearWritesNoMarkerAndBlanksTheTop(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.now = restartAt
 	addLines(m, "api", "old-1", "old-2")
 	m.frame()
+	m.cursor = 0
+	m.liveSelect()
 
 	before := m.targets[0].state
 	press(m, "ctrl+l")
-	m.frame()
 
 	if got := m.targets[0].state; got != before {
 		t.Fatalf("state = %v, want the process untouched", got)
 	}
-	raw := rawPane(m)
-	if !hasLine(raw, "api cleared 15:04:05") {
-		t.Fatalf("pane = %q, want the cleared marker", raw)
-	}
-	if !hasLine(raw, "old-1") || !hasLine(raw, "old-2") {
-		t.Fatalf("pane = %q, want the old lines kept in the scrollback", raw)
+	noMarkerText(t, m)
+	blankTop(t, m)
+
+	// The old lines stay above: one page up reaches them.
+	press(m, "pgup")
+	if got := plainPane(m); !strings.Contains(got, "old-1") || !strings.Contains(got, "old-2") {
+		t.Fatalf("scrolling up did not reach the old lines:\n%s", got)
 	}
 }
 
-// The marker is a sepLine, so the pane draws it as a dim rule, not a target line.
-func TestClearMarkerIsASepLine(t *testing.T) {
-	m := newTestModel(t, target("api"))
-	m.now = restartAt
+// A clear works before the cursor has ever scoped the pane.
+func TestClearWithoutAScopeBlanksTheCursorRow(t *testing.T) {
+	m := newTestModel(t, target("api"), target("web"))
+	addLines(m, "api", "api-1")
+	addLines(m, "web", "web-1")
+	m.frame()
+	if m.solo >= 0 || m.schemaSel != "" {
+		t.Fatal("the fixture must start unscoped")
+	}
+
 	press(m, "ctrl+l")
 
-	var sep sepLine
-	found := false
-	for i, s := range m.visibleSep {
-		if s.label == "api cleared 15:04:05" {
-			sep, found = s, true
-			if m.visibleRaw[i] != s.raw() {
-				t.Fatalf("raw = %q, want the label %q", m.visibleRaw[i], s.raw())
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("visibleSep = %+v, want the cleared marker", m.visibleSep)
-	}
-	if !sep.isSep() || sep.tone != toneNone {
-		t.Fatalf("sep = %+v, want a dim rule", sep)
-	}
-	if got := renderSep(sep, 40); !strings.Contains(got, "── api cleared 15:04:05 ") {
-		t.Fatalf("render = %q, want a ruled marker", got)
+	noMarkerText(t, m)
+	blankTop(t, m)
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want the cursor row scoped", m.solo)
 	}
 }
 
-// A header row clears every target in its group, running or off.
-func TestClearOnGroupHeaderClearsEveryMember(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
-	m.targets[1].spec.Selected = false
-	m.frame()
+// A clear adds no line at all, so the pane never draws a rule for it.
+func TestClearAddsNoLine(t *testing.T) {
+	m := newTestModel(t, target("api"))
 	m.cursor = 0
 	m.liveSelect()
+	addLines(m, "api", "old-1")
+	m.frame()
+	before := m.paneLen()
+
 	press(m, "ctrl+l")
 	m.frame()
 
-	if got := clearedMarkers(m); got != 2 {
-		t.Fatalf("cleared markers = %d, want 2 (every backend member)", got)
+	if got := m.paneLen(); got != before {
+		t.Fatalf("paneLen = %d, want %d (a clear must not add a line)", got, before)
+	}
+	for _, s := range m.visibleSep {
+		if strings.Contains(s.label, "cleared") {
+			t.Fatalf("sepLine = %+v, want no cleared rule", s)
+		}
 	}
 }
 
-// The clear only marks the pane: exit and error state stay as they were.
+// A header row clears every target it groups, and blanks the group's pane.
+func TestClearOnGroupHeaderBlanksTheGroupPane(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	m.cursor = 0
+	m.liveSelect()
+	addLines(m, "api", "api-1")
+	addLines(m, "worker", "worker-1")
+	addLines(m, "web", "web-1")
+	m.frame()
+
+	press(m, "ctrl+l")
+
+	noMarkerText(t, m)
+	blankTop(t, m)
+}
+
+// The clear only holds the pane: exit and error state stay as they were.
 func TestClearKeepsExitAndErrorState(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	tg := m.targets[0]
@@ -103,24 +151,33 @@ func TestClearKeepsExitAndErrorState(t *testing.T) {
 	}
 }
 
-// The marker holds at the pane's top the way a restart's rule does, while the
-// old lines scroll above it.
-func TestClearPinsTheMarkerAtThePaneTop(t *testing.T) {
+// The cleared pane holds its top on the row after the last line, so new output
+// starts at the top row and the old lines stay above.
+func TestClearPinsTheLineAfterTheLast(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	addLines(m, "api", streamLines("api", 30)...)
 	m.frame()
 	m.cursor = 0
 	m.liveSelect()
+	last := m.paneLen() - 1
 
 	press(m, "ctrl+l")
 	m.frame()
 
-	if m.pinSeq == 0 {
-		t.Fatal("pinSeq = 0, want the cleared marker pinned")
+	if m.pinSeq == 0 || !m.pinGap {
+		t.Fatalf("pinSeq = %d gap = %v, want the clear pinned", m.pinSeq, m.pinGap)
 	}
-	row, ok := m.ruleRow(m.pinSeq)
-	if !ok || m.vp.YOffset() != row {
-		t.Fatalf("row=%v row=%d YOffset=%d, want the marker at the top", ok, row, m.vp.YOffset())
+	row, ok := m.pinTop()
+	if !ok || row != last+1 {
+		t.Fatalf("pinTop = %d %v, want %d", row, ok, last+1)
+	}
+	if m.vp.YOffset() != last+1 {
+		t.Fatalf("YOffset = %d, want %d", m.vp.YOffset(), last+1)
+	}
+
+	addLines(m, "api", "fresh")
+	if got := paneTop(m); !strings.Contains(got, "fresh") {
+		t.Fatalf("pane top = %q, want the newest line", got)
 	}
 }
 
@@ -142,9 +199,11 @@ func TestHelpNamesClearKey(t *testing.T) {
 // Ctrl+l with the pane focused clears what the pane shows, not a stale list cursor.
 func TestClearInTheFocusedPaneClearsWhatItShows(t *testing.T) {
 	m := newTestModel(t, target("api"), target("web"))
-	m.now = restartAt
 	m.cursor = 0
 	m.liveSelect()
+	addLines(m, "api", "api-1")
+	addLines(m, "web", "web-1")
+	m.frame()
 	press(m, "right")
 	if !m.paneFocus {
 		t.Fatal("right did not focus the pane")
@@ -152,56 +211,33 @@ func TestClearInTheFocusedPaneClearsWhatItShows(t *testing.T) {
 	m.cursor = 1 // the pane owns the keys now, so the list cursor is stale
 
 	press(m, "ctrl+l")
-	m.frame()
 
-	raw := rawPane(m)
-	if !hasLine(raw, "api cleared 15:04:05") {
-		t.Fatalf("pane = %q, want the shown target cleared", raw)
-	}
-	if hasLine(raw, "web cleared 15:04:05") {
-		t.Fatalf("pane = %q, want the stale cursor row left alone", raw)
+	noMarkerText(t, m)
+	blankTop(t, m)
+	if !hasLine(rawPane(m), "api-1") {
+		t.Fatal("the cleared target's old line left the scrollback")
 	}
 }
 
-// A pane scoped to a group clears the group's members, named one by one.
+// A pane scoped to a group clears the group's members, stale cursor and all.
 func TestClearInTheFocusedPaneClearsAGroupScope(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
-	m.now = restartAt
-	m.frame()
 	m.cursor = 0
 	m.liveSelect()
+	addLines(m, "api", "api-1")
+	addLines(m, "worker", "worker-1")
+	addLines(m, "web", "web-1")
+	m.frame()
 	press(m, "right")
-	m.cursor = 2 // the stale cursor sits on web, outside the scope
+	m.cursor = 3 // the stale cursor sits on web, outside the scope
 
 	press(m, "ctrl+l")
-	m.frame()
 
-	raw := rawPane(m)
-	if !hasLine(raw, "api cleared 15:04:05") || !hasLine(raw, "worker cleared 15:04:05") {
-		t.Fatalf("pane = %q, want every scoped member cleared", raw)
-	}
-	if hasLine(raw, "web cleared 15:04:05") {
-		t.Fatalf("pane = %q, want the out-of-scope target left alone", raw)
-	}
+	noMarkerText(t, m)
+	blankTop(t, m)
 }
 
-// Every marker names its target, so two cleared groups do not draw identical rules.
-func TestClearMarkersNameTheirTarget(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
-	m.now = restartAt
-	m.frame()
-	m.cursor = 0
-	m.liveSelect()
-	press(m, "ctrl+l")
-	m.frame()
-
-	raw := rawPane(m)
-	if !hasLine(raw, "api cleared 15:04:05") || !hasLine(raw, "worker cleared 15:04:05") {
-		t.Fatalf("pane = %q, want both markers named", raw)
-	}
-}
-
-// A frozen pane keeps its offset: the marker counts as pending instead of pinning.
+// A frozen pane keeps its offset and adds no marker: the clear only waits.
 func TestClearInAFrozenPaneDoesNotJump(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	addLines(m, "api", streamLines("api", 30)...)
@@ -220,31 +256,33 @@ func TestClearInAFrozenPaneDoesNotJump(t *testing.T) {
 	if m.vp.YOffset() != off {
 		t.Fatalf("YOffset = %d, want %d (no jump)", m.vp.YOffset(), off)
 	}
-	if m.pending != pending+1 {
-		t.Fatalf("pending = %d, want %d", m.pending, pending+1)
+	if m.pending != pending {
+		t.Fatalf("pending = %d, want %d", m.pending, pending)
 	}
+	noMarkerText(t, m)
 }
 
 // A folded header still clears every member it hides.
-func TestClearOnACollapsedHeaderClearsEveryMember(t *testing.T) {
+func TestClearOnACollapsedHeaderBlanksTheGroupPane(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
-	m.frame()
 	m.cursor = 0
+	m.liveSelect()
+	addLines(m, "api", "api-1")
+	addLines(m, "worker", "worker-1")
+	m.frame()
 	press(m, "left")
 	if !m.collapsed["backend"] {
 		t.Fatal("left did not fold the backend header")
 	}
 
 	press(m, "ctrl+l")
-	m.frame()
 
-	if got := clearedMarkers(m); got != 2 {
-		t.Fatalf("cleared markers = %d, want 2 (both folded members)", got)
-	}
+	noMarkerText(t, m)
+	blankTop(t, m)
 }
 
-// An active filter narrows the output but never swallows the marker.
-func TestClearUnderAFilterKeepsTheMarker(t *testing.T) {
+// An active filter narrows the output but never blocks the clear.
+func TestClearUnderAFilterStillBlanksThePane(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.now = restartAt
 	addLines(m, "api", "keep this", "drop this")
@@ -254,19 +292,16 @@ func TestClearUnderAFilterKeepsTheMarker(t *testing.T) {
 	m.liveSelect()
 
 	press(m, "ctrl+l")
-	m.frame()
 
-	raw := rawPane(m)
-	if !hasLine(raw, "api cleared 15:04:05") {
-		t.Fatalf("pane = %q, want the marker kept under the filter", raw)
-	}
-	if hasLine(raw, "drop this") {
-		t.Fatalf("pane = %q, want the filter still narrowing", raw)
+	noMarkerText(t, m)
+	blankTop(t, m)
+	if got := plainPane(m); strings.Contains(got, "drop this") {
+		t.Fatalf("pane = %q, want the filter still narrowing", got)
 	}
 }
 
-// A second clear moves the pin to the newer marker.
-func TestClearingTwicePinsTheSecondMarker(t *testing.T) {
+// A second clear re-holds the same anchor: no line was added between them.
+func TestClearingTwiceKeepsThePaneBlank(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	addLines(m, "api", streamLines("api", 30)...)
 	m.frame()
@@ -277,13 +312,14 @@ func TestClearingTwicePinsTheSecondMarker(t *testing.T) {
 	m.frame()
 	first := m.pinSeq
 	press(m, "ctrl+l")
-	m.frame()
 
-	if m.pinSeq == first {
-		t.Fatalf("pinSeq = %d, want the second marker pinned", m.pinSeq)
+	if m.pinSeq == 0 || m.pinSeq != first {
+		t.Fatalf("pinSeq = %d, want %d", m.pinSeq, first)
 	}
-	row, ok := m.ruleRow(m.pinSeq)
-	if !ok || m.vp.YOffset() != row {
-		t.Fatalf("row = %v %d YOffset = %d, want the newer marker at the top", ok, row, m.vp.YOffset())
+	blankTop(t, m)
+
+	addLines(m, "api", "fresh")
+	if got := paneTop(m); !strings.Contains(got, "fresh") {
+		t.Fatalf("pane top = %q, want the newest line after a second clear", got)
 	}
 }

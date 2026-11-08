@@ -279,6 +279,9 @@ func (m *tuiModel) markLines(lines []string) []string {
 // clickPane handles a press in the viewport: the (+) cell, a key or value of an
 // expansion row, or else an anchor for a copy of the line.
 func (m *tuiModel) clickPane(x, y int) {
+	// A press anywhere in the pane takes the keys, even past the content.
+	m.paneFocus = true
+	m.drawerFocus = false
 	row := m.paneRow(x, y)
 	if row < 0 {
 		return
