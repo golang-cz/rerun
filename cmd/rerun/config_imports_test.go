@@ -109,6 +109,38 @@ func TestParseImports(t *testing.T) {
 			},
 		},
 		{
+			name:     "import start fills in for its targets, own start wins",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n    start: manual\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n\nweb:\n  cmd: echo\n  start: auto\n"},
+			wantNext: []string{"local", "bpn/api", "bpn/web"},
+			check: func(t *testing.T, cfg *Config) {
+				if api, _ := cfg.Find("bpn/api"); api.Start != startManual {
+					t.Errorf("api start = %q, want the import's manual", api.Start)
+				}
+				if web, _ := cfg.Find("bpn/web"); web.Start != startAuto {
+					t.Errorf("web start = %q, want its own auto", web.Start)
+				}
+			},
+		},
+		{
+			name:     "a group's start beats the import's start",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n    start: manual\n",
+			files:    map[string]string{"bpn/rerun.yml": "groups:\n  backend:\n    start: onchange\n\napi:\n  group: backend\n  cmd: echo\n"},
+			wantNext: []string{"bpn/api"},
+			check: func(t *testing.T, cfg *Config) {
+				api, _ := cfg.Find("bpn/api")
+				if api.Start != startOnChange {
+					t.Errorf("start = %q, want the group's onchange", api.Start)
+				}
+			},
+		},
+		{
+			name:    "an invalid import start is an error",
+			root:    "imports:\n  - path: ../bpn/rerun.yml\n    start: sometimes\n",
+			files:   map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n"},
+			wantErr: `expected auto, onchange, or manual, got "sometimes"`,
+		},
+		{
 			name:     "groups filter keeps only the listed groups",
 			root:     "imports:\n  - path: ../bpn/rerun.yml\n    groups: [backend]\n\nlocal:\n  cmd: echo\n",
 			files:    map[string]string{"bpn/rerun.yml": grouped},
@@ -681,6 +713,18 @@ func TestMakefileImports(t *testing.T) {
 			root:     "imports:\n  - path: ../bpn/rerun.yml\n",
 			files:    map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n", "bpn/Makefile": "build:\n"},
 			wantNext: []string{"bpn/api"},
+		},
+		{
+			name:     "import start auto overrides the manual Makefile default",
+			root:     "imports:\n  - path: ../tools/Makefile\n    start: auto\n\nlocal:\n  cmd: echo\n",
+			files:    map[string]string{"tools/Makefile": tools},
+			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
+			check: func(t *testing.T, cfg *Config) {
+				build, _ := cfg.Find("make/tools/build")
+				if build.Start != startAuto {
+					t.Errorf("start = %q, want the import's auto", build.Start)
+				}
+			},
 		},
 		{
 			name:     "groups entry hide false unfolds one make group",

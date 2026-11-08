@@ -162,7 +162,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field inside a schema",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
-			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, muted, hide"},
+			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, muted, hide, start"},
 		},
 		{
 			name:    "schemas with no targets",
@@ -332,7 +332,7 @@ func TestParseConfigErrorPositions(t *testing.T) {
 			name:    "unknown field inside a schema points at the key",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
 			head:    `:4:5: schema "backend": unknown field "bogus"`,
-			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, muted, hide"},
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, muted, hide, start"},
 		},
 		{
 			name:    "cmd is required points at the target",
@@ -670,6 +670,49 @@ job:
 	for i, mode := range want {
 		if got := cfg.Targets[i].Start; got != mode {
 			t.Errorf("%s start = %q, want %q", cfg.Targets[i].Name, got, mode)
+		}
+	}
+}
+
+func TestParseConfigGroupStartMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, `groups:
+  services:
+    start: manual
+
+worker:
+  group: services
+  cmd: echo worker
+
+api:
+  group: services
+  cmd: echo api
+  start: auto
+`)
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if worker, _ := cfg.Find("worker"); worker.Start != startManual {
+		t.Errorf("worker start = %q, want the group's manual", worker.Start)
+	}
+	if api, _ := cfg.Find("api"); api.Start != startAuto {
+		t.Errorf("api start = %q, want its own auto", api.Start)
+	}
+}
+
+func TestParseConfigRejectsUnknownGroupStartMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "groups:\n  backend:\n    start: sometimes\n\napi:\n  group: backend\n  cmd: echo hi\n")
+
+	_, err := ParseConfig(path)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	for _, sub := range []string{`group "backend"`, `field "start"`, `expected auto, onchange, or manual, got "sometimes"`} {
+		if !strings.Contains(err.Error(), sub) {
+			t.Errorf("error = %q, want substring %q", err.Error(), sub)
 		}
 	}
 }

@@ -20,7 +20,7 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "hide", "groups", "services", "profiles", "targets"}
+var importFields = []string{"path", "group", "optional", "hide", "start", "groups", "services", "profiles", "targets"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
@@ -32,7 +32,10 @@ type importSpec struct {
 	services []string
 	profiles []string
 	// targets is the Makefile-only filter: the rule names to keep.
-	targets   []string
+	targets []string
+	// start and startSet are the import's `start:` default for its members.
+	start     startMode
+	startSet  bool
 	pathNode  *yaml.Node
 	groupNode *yaml.Node
 	groupsRef *yaml.Node
@@ -258,6 +261,9 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if t.Muted == nil {
 					t.Muted = root.muted
 				}
+				if !t.startSet && root.startSet {
+					t.Start, t.startSet = root.start, true
+				}
 				if t.Muted == nil && root.hide {
 					muted := true
 					t.Muted = &muted
@@ -274,6 +280,9 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			}
 			// Makefile imports fold by default; a root groups: entry with hide: false unfolds one.
 			unfolded := rootSchemas[spec.group].hideSet && !rootSchemas[spec.group].hide
+			if !t.startSet && spec.startSet {
+				t.Start, t.startSet = spec.start, true
+			}
 			if spec.hide || (t.Kind == makeKind && !unfolded) {
 				t.GroupHide, t.ImportHide = true, true
 			}
@@ -431,6 +440,13 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			} else {
 				spec.hide = b
 			}
+
+		case "start":
+			m, err := parseStartMode(src, "import", field, value)
+			if err != nil {
+				return spec, err
+			}
+			spec.start, spec.startSet = m, true
 
 		case "groups":
 			list, _, err := stringOrList(src, "import", field, value)

@@ -183,7 +183,8 @@ omsx-api:
   cmd: make -C apps/api run
 ```
 
-A target's own `columns` wins over its group's. A `group:` that names no
+A target's own `columns` wins over its group's. A group's `start:` sets the
+first run for its members, and a target's own `start:` wins. A `group:` that names no
 group is a config error. A group's `muted: true` starts its members muted, and a
 target's own `muted: false` overrides it. A group's `hide: true` mutes its members the same way and starts the group's header folded. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
@@ -200,6 +201,7 @@ imports:
     group: bpn-api               # the section name; defaults to the file's dir name
     optional: true               # a missing file is skipped until it appears
     hide: true                   # start its targets muted and its section folded
+    start: auto                  # first run for its targets; default: the file's own
     groups: [backend]            # import only these groups of that file
 
 api:
@@ -210,6 +212,7 @@ api:
 - The imported file's groups get the prefix too: `bpn-api/backend`.
 - A group in this file with the import's name gives every imported target its columns.
 - An import's `hide: true` mutes its targets and folds its section. It is the outermost level: the target's own `muted` or `hide`, and a group's `muted` or `hide`, still win.
+- An import's `start:` fills in for its targets where neither they nor their group set one. It is the outermost level: the target's own `start` and a group's `start` still win. A rerun.yml import's targets default to `auto`, a Makefile or compose import's to `manual`.
 - A missing optional import shows one dim `bpn-api (not found)` row until its file appears.
 - Saving an imported file reloads the config. Column picks save into the file that defines the target or group.
 - An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.
@@ -232,6 +235,7 @@ imports:
 - A service shows as `devbox/postgres`, with the state, `▶ started`, `✗ exit 137`, `↻ restarted` and health marks.
 - `space` starts or stops a service. `r` restarts it.
 - Services have no file watching and no build. `docker compose watch` covers that.
+- Services start manually by default; an import's `start: auto` brings them up at session start.
 - rerun reads container state from `docker events`, and reconciles with `docker compose ps` after every reconnect.
 - Logs come from `docker logs -f`. Quitting rerun leaves the containers running.
 - If docker stops answering, the footer shows `docker unreachable, retrying`.
@@ -264,6 +268,7 @@ groups:
 - `targets:` keeps only the named targets. It works on Makefile imports only.
 - `targets:` fails the load when a listed target is gone from the Makefile.
 - Each target is a row that starts manually and does not watch files.
+- An import's `start:` overrides that default: `start: auto` brings every rule up at session start, and a target's or group's own `start:` still wins.
 - Enter in Ctrl+K runs a target. Enter on a running one focuses it.
 - A `.mk` file runs as `make -f <file>`.
 - A repo with only a Makefile opens rerun with the finder open.

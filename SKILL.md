@@ -114,11 +114,14 @@ imports:
     group: bpn-api               # section name and target prefix; default: the dir name
     optional: true               # skip the file while it is missing
     hide: true                   # start its targets muted and its section folded
+    start: auto                  # first run for its targets; a target's own wins
     groups: [backend]            # only these groups of that file
 ```
 
 Imported targets run from their own dir, and their names read `bpn-api/api`.
 An import's `hide: true` mutes its targets and folds its section. Its own `muted` or `hide` and a group's still win.
+An import's `start:` is the outermost level too: a target's own `start` and a group's `start` win.
+A rerun.yml import's targets default to `auto`; a Makefile or compose import's to `manual`.
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
 imported file is ignored. A compose file is imported as its services. See Docker Compose below.
 
@@ -139,6 +142,7 @@ imports:
 - `groups: make: hide: false` unfolds a Makefile group.
 - Descriptions come from a trailing `## text` or the comment above the target.
 - Targets start manually and do not watch files. Enter in Ctrl+K runs one.
+- An import's `start: auto` overrides that default; a target's or group's own `start:` still wins.
 - A `.mk` file runs as `make -f <file>`.
 
 ### Docker Compose: a compose file's services
@@ -156,6 +160,7 @@ imports:
 
 - Services show as `devbox/postgres`, with state, exit, restart and health rules.
 - Space starts or stops a service. `r` restarts it. Services never watch files or build.
+- Services start manually by default; an import's `start: auto` starts them at session start.
 - State comes from `docker events` and `docker compose ps`. Logs come from `docker logs -f`.
 - Quitting rerun leaves the containers running.
 - Needs the `docker` CLI on PATH. `groups:` is an error on a compose import.
@@ -202,7 +207,8 @@ Unknown fields, duplicate fields, and non-string values are errors.
 Targets that log the same JSON shape can share columns: define them once under
 the reserved top-level `groups:` key (`groups: {backend: {columns: ["level {.level}"]}}`)
 and set `group: backend` on each target. A target's own `columns` wins over its
-group's, and a `group:` naming no group is an error. A group may be empty (`webapps: {}`).
+group's, and a `group:` naming no group is an error. A group's `start:` sets the
+first run for its members, and a target's own `start:` wins. A group may be empty (`webapps: {}`).
 The older `schemas:`/`schema:` spelling still works; use one spelling per file. Quote each column entry,
 since a `{` inside a plain `[...]` entry is a YAML error.
 

@@ -85,6 +85,9 @@ type Target struct {
 	// Start is when the target first runs: startAuto at session start,
 	// startOnChange at the first file change, startManual on r only.
 	Start startMode
+	// startSet is set when the target's own or its group's `start:` fixed Start,
+	// so an import's start does not override it.
+	startSet bool
 	// NoGitignore turns off .gitignore filtering for this target.
 	NoGitignore bool
 	// Selected is false for `selected: false` targets: they exist in the
@@ -395,13 +398,16 @@ type parsedFile struct {
 	schemas map[string]groupDef
 }
 
-// groupDef is one `groups:` entry: its columns, and the `muted:` and `hide:` its members start with.
+// groupDef is one `groups:` entry: its columns, and the `muted:`, `hide:` and `start:` its members start with.
 type groupDef struct {
 	columns []Column
 	muted   *bool
 	hide    bool
 	// hideSet tells `hide: false` apart from no hide key, which Makefile groups read differently.
 	hideSet bool
+	// start and startSet carry the group's `start:` default to its members.
+	start    startMode
+	startSet bool
 }
 
 // parseFileBody reads a file's groups and targets under the names the file writes.
@@ -469,7 +475,7 @@ var (
 )
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "muted", "hide"}
+var schemaFields = []string{"columns", "muted", "hide", "start"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
@@ -562,6 +568,13 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 				return groupDef{}, err
 			}
 			def.hide, def.hideSet = b, true
+
+		case "start":
+			m, err := parseStartMode(src, owner, field, deref(node.Content[i+1]))
+			if err != nil {
+				return groupDef{}, err
+			}
+			def.start, def.startSet = m, true
 
 		default:
 			e := src.at(key, len(field), fmt.Sprintf("%s: unknown field %q", owner, field))
@@ -657,20 +670,11 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			target.Schema = s
 
 		case "start":
-			s, err := scalarField(src, name, field, value)
+			m, err := parseStartMode(src, owner, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			switch s {
-			case "auto":
-				target.Start = startAuto
-			case "onchange":
-				target.Start = startOnChange
-			case "manual":
-				target.Start = startManual
-			default:
-				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: expected auto, onchange, or manual, got %q", name, field, s))
-			}
+			target.Start, target.startSet = m, true
 
 		case "muted":
 			b, err := boolField(src, name, field, value)
@@ -735,6 +739,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			target.Muted = &muted
 		}
 		target.GroupHide = group.hide
+		if !target.startSet && group.startSet {
+			target.Start, target.startSet = group.start, true
+		}
 	}
 	if strings.TrimSpace(target.Cmd) == "" {
 		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: run is required", name))
@@ -748,6 +755,25 @@ func deref(node *yaml.Node) *yaml.Node {
 		node = node.Alias
 	}
 	return node
+}
+
+// parseStartMode reads a `start:` value: auto, onchange, or manual. owner names
+// the block for the error, such as `target "api"` or `group "backend"`.
+func parseStartMode(src *configSource, owner, field string, node *yaml.Node) (startMode, error) {
+	node = deref(node)
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return startAuto, src.at(node, nodeSpan(node), fmt.Sprintf("%s: field %q: expected a string, got %s", owner, field, yamlType(node)))
+	}
+	switch node.Value {
+	case "auto":
+		return startAuto, nil
+	case "onchange":
+		return startOnChange, nil
+	case "manual":
+		return startManual, nil
+	default:
+		return startAuto, src.at(node, nodeSpan(node), fmt.Sprintf("%s: field %q: expected auto, onchange, or manual, got %q", owner, field, node.Value))
+	}
 }
 
 func scalarField(src *configSource, name, field string, node *yaml.Node) (string, error) {
