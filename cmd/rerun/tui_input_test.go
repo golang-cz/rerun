@@ -94,6 +94,39 @@ func TestSearchBoxCtrlGJumpsNext(t *testing.T) {
 	}
 }
 
+// ctrl+shift+g is ctrl+g's mirror: it steps back a match, box open or closed.
+func TestSearchCtrlShiftGJumpsPrevious(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 60).events)
+	m.frame()
+
+	press(m, "ctrl+f")
+	typeString(m, "line")
+	start := m.searchRow
+	press(m, "ctrl+g")
+	if m.searchRow <= start {
+		t.Fatalf("ctrl+g did not advance from %d", start)
+	}
+	press(m, "ctrl+shift+g")
+	if m.searchRow != start {
+		t.Fatalf("ctrl+shift+g = %d, want back at %d", m.searchRow, start)
+	}
+	if m.inputMode != inputSearch {
+		t.Fatalf("inputMode = %d, want the box to stay open", m.inputMode)
+	}
+
+	press(m, "enter")
+	row := m.searchRow
+	press(m, "ctrl+g")
+	if m.searchRow <= row {
+		t.Fatalf("closed ctrl+g did not advance from %d", row)
+	}
+	press(m, "ctrl+shift+g")
+	if m.searchRow != row {
+		t.Fatalf("closed ctrl+shift+g = %d, want back at %d", m.searchRow, row)
+	}
+}
+
 // enter closes the box but keeps the query and its highlights; n and N then step.
 func TestSearchBoxEnterKeepsQueryThenNJJumps(t *testing.T) {
 	m := newTestModel(t, target("web"))

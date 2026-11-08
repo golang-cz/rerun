@@ -3,6 +3,10 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/fsnotify/fsnotify"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestMovingOntoAMutedTargetKeepsItMuted(t *testing.T) {
@@ -83,6 +87,99 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 	press(m, "?")
 	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ v") {
 		t.Errorf("full help should name ctrl+f and / v:\n%s", view)
+	}
+}
+
+// The kitty decoder reports some keys with a spelling legacy bytes cannot
+// produce; each one must still run the action its legacy form ran.
+func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
+	shifted := func(code, text rune) tea.KeyPressMsg {
+		return tea.KeyPressMsg{Code: code, Mod: tea.ModShift, Text: string(text), ShiftedCode: text}
+	}
+	armedSearch := func(m *tuiModel) {
+		m.applyEvents(streamEvents("web", "line", 60).events)
+		m.frame()
+		press(m, "ctrl+f")
+		typeString(m, "line")
+		press(m, "enter")
+	}
+
+	// shift+n reports as "N": it steps back to the previous match.
+	m := newTestModel(t, target("web"))
+	armedSearch(m)
+	first := m.searchRow
+	press(m, "n")
+	if m.searchRow <= first {
+		t.Fatalf("n did not advance from %d", first)
+	}
+	m.Update(shifted('n', 'N'))
+	if m.searchRow != first {
+		t.Fatalf("enhanced shift+n = %d, want back at %d", m.searchRow, first)
+	}
+
+	// shift+/ reports as "?": it opens the help.
+	m = newTestModel(t)
+	m.width, m.height = 100, 40
+	m.Update(shifted('/', '?'))
+	if !m.help {
+		t.Fatal("enhanced shift+/ did not open help")
+	}
+	// A terminal that drops the shifted text spells it shift+/ instead.
+	m.help = false
+	m.Update(tea.KeyPressMsg{Code: '/', Mod: tea.ModShift})
+	if !m.help {
+		t.Fatal("bare shift+/ did not open help")
+	}
+
+	// shift+tab is unbound, exactly as its legacy CSI Z was.
+	m = newTestModel(t, target("web"))
+	m.now = spawnClock
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if m.drawerFocus {
+		t.Fatal("shift+tab focused the drawer")
+	}
+	// tab focuses the drawer; ctrl+i is the same key once enhancements split it.
+	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if !m.drawerFocus {
+		t.Fatal("tab did not focus the drawer")
+	}
+	m.drawerFocus = false
+	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModCtrl})
+	if !m.drawerFocus {
+		t.Fatal("enhanced ctrl+i did not focus the drawer like tab")
+	}
+
+	// esc clears and closes the find box; ctrl+[ is the same key enhanced.
+	openSearch := func() *tuiModel {
+		box := newTestModel(t, target("web"))
+		box.applyEvents(streamEvents("web", "line", 10).events)
+		box.frame()
+		press(box, "ctrl+f")
+		typeString(box, "line")
+		return box
+	}
+	m = openSearch()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.inputMode != inputNone || m.search != "" {
+		t.Fatalf("enhanced esc: mode=%d search=%q, want cleared and closed", m.inputMode, m.search)
+	}
+	m = openSearch()
+	press(m, "ctrl+[")
+	if m.inputMode != inputNone || m.search != "" {
+		t.Fatalf("enhanced ctrl+[: mode=%d search=%q, want cleared and closed", m.inputMode, m.search)
+	}
+
+	// enter keeps the query and its highlights; ctrl+m is the same key enhanced.
+	m = openSearch()
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.inputMode != inputNone || m.search != "line" || len(m.searchMatches) == 0 {
+		t.Fatalf("enhanced enter: mode=%d search=%q, want the box closed with the query kept", m.inputMode, m.search)
+	}
+	m = openSearch()
+	press(m, "ctrl+m")
+	if m.inputMode != inputNone || m.search != "line" || len(m.searchMatches) == 0 {
+		t.Fatalf("enhanced ctrl+m: mode=%d search=%q, want the box closed with the query kept", m.inputMode, m.search)
 	}
 }
 

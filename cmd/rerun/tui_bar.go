@@ -191,7 +191,7 @@ func (m *tuiModel) handleBarNav(msg tea.KeyPressMsg) bool {
 			idx = len(chips) - 1
 		}
 		m.removeBarChip(chips[idx])
-	case "esc":
+	case "esc", "ctrl+[":
 		m.blurBar()
 	case "/", "v":
 		m.openBar(inputFilter)

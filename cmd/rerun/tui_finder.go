@@ -188,9 +188,9 @@ func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "esc", "ctrl+k":
+	case "esc", "ctrl+[", "ctrl+k":
 		m.finder = finderState{}
-	case "enter":
+	case "enter", "ctrl+m":
 		// With no match, enter keeps the popup and its query open.
 		if m.finder.sel >= n {
 			return m, nil

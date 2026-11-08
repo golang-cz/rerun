@@ -117,6 +117,10 @@ func (m *tuiModel) View() tea.View {
 	v := tea.NewView(m.frame())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// v2 always asks for basic key disambiguation, which is all we need: the
+	// decoder's own spellings (ctrl+shift+g, shift+n, shift+/) arrive whole.
+	// Every extra flag stays off, so no release or repeat events we never read.
+	v.KeyboardEnhancements = tea.KeyboardEnhancements{}
 	// The config-error modal owns the keys over an open input, so it takes the caret too.
 	if (m.finder.open || m.inputMode != inputNone) && m.cfgErr == "" {
 		v.Cursor = tea.NewCursor(m.layout.cursorX, m.layout.cursorY)
@@ -1189,7 +1193,7 @@ var helpKeys = [][2]string{
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
 	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
 	{"o", "open the target's url"},
-	{"ctrl+f", "find in the pane · ctrl+g next · n/N after enter"},
+	{"ctrl+f", "find in the pane · ctrl+g / ctrl+shift+g next/prev · n/N"},
 	{"ctrl+l", "clear the log; old lines stay in scrollback"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},

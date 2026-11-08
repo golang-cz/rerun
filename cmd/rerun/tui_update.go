@@ -101,7 +101,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// The quit confirm is routed first, so enter after q quits instead of closing the modal.
 	if m.cfgErr != "" && !m.confirmQuit {
 		switch msg.String() {
-		case "esc", "enter":
+		case "esc", "ctrl+[", "enter", "ctrl+m":
 			m.cfgErr = ""
 			return m, nil
 		case "ctrl+c":
@@ -152,7 +152,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.helpAll = true
 		case "m":
 			m.helpAll = true
-		case "esc", "enter", "space":
+		case "esc", "ctrl+[", "enter", "ctrl+m", "space":
 			m.help = false
 		}
 		return m, nil
@@ -163,7 +163,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.confirmQuit {
 		m.confirmQuit = false
 		switch msg.String() {
-		case "enter", "ctrl+c":
+		case "enter", "ctrl+m", "ctrl+c":
 			return m, tea.Quit
 		case "esc", "q":
 			return m, nil
@@ -185,7 +185,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		m.confirmQuit = true
 
-	case "?":
+	case "?", "shift+?", "shift+/":
 		m.help = true
 		m.helpAll = false
 
@@ -197,6 +197,10 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+g":
 		m.searchJump(1)
+
+	// The enhanced decoder spells the same key ctrl+shift+g.
+	case "ctrl+shift+g":
+		m.searchJump(-1)
 
 	case "ctrl+l":
 		m.clearKey()
@@ -217,10 +221,10 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		m.searchJump(1)
 
-	case "N":
+	case "N", "shift+n":
 		m.searchJump(-1)
 
-	case "esc":
+	case "esc", "ctrl+[":
 		switch {
 		case m.drawerFocus:
 			if m.feedOpened() != nil {
@@ -263,7 +267,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveCursor(1)
 		}
 
-	case "tab":
+	case "tab", "ctrl+i":
 		if m.drawerOpen && len(m.feed) > 0 {
 			m.setDrawerFocus(!m.drawerFocus)
 		}
@@ -317,7 +321,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.liveSelect()
 		}
 
-	case "enter":
+	case "enter", "ctrl+m":
 		switch {
 		case m.drawerFocus:
 			m.openCursorBatch()
@@ -416,7 +420,7 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "esc":
+	case "esc", "ctrl+[":
 		// Find drops the query; a line filter keeps its typed chip, as before.
 		if m.inputMode == inputSearch {
 			m.clearSearch()
@@ -424,7 +428,10 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.leaveInput()
 	case "ctrl+g":
 		m.searchJump(1)
-	case "enter":
+	// Mirror ctrl+g: the enhanced decoder keeps the shift distinct.
+	case "ctrl+shift+g":
+		m.searchJump(-1)
+	case "enter", "ctrl+m":
 		if m.inputMode == inputFilter && m.filterErr != "" {
 			return m, nil
 		}

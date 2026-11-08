@@ -123,13 +123,13 @@ func (m *tuiModel) handleEventsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
-	case "esc":
+	case "esc", "ctrl+[":
 		m.eventsModal = eventsState{}
 	case "j", "down":
 		m.moveEvents(1)
 	case "k", "up":
 		m.moveEvents(-1)
-	case "right", "enter":
+	case "right", "enter", "ctrl+m":
 		m.expandEvents()
 	case "left":
 		m.collapseEvents()
