@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // jsonField is what a click on an expansion row can pick: the key's yq path and
@@ -33,6 +35,20 @@ var identKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var yamlNumber = regexp.MustCompile(`^(0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|[-+]?(\.[0-9_]+|[0-9][0-9_]*(\.[0-9_]*)?)([eE][-+]?[0-9_]+)?)$`)
 
 var yamlDate = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}`)
+
+// Injected by tests so a timestamp renders the same on every machine.
+var (
+	yamlNow      = time.Now
+	yamlLocation = time.Local
+)
+
+const (
+	yamlClockLayout = "15:04:05.000"
+	yamlDateLayout  = "2006-01-02 "
+)
+
+// The keys a logger writes its timestamp under, at any depth.
+var yamlTimeKeys = map[string]bool{"ts": true, "time": true, "timestamp": true, "@timestamp": true}
 
 func isJSONObject(line string) bool {
 	s := strings.TrimSpace(line)
@@ -183,6 +199,9 @@ func (w *yamlWriter) scalar(head string, col int, n *yNode, path, key string, ke
 		return
 	}
 	text := yamlScalar(n.tok)
+	if ts, ok := yamlTimeText(key, n.tok); ok {
+		text = ts
+	}
 	start := displayWidth(head)
 	w.add(head+sgrValOn+text+sgrValOff, &jsonField{keyX: keyX, valX: [2]int{start, start + displayWidth(text)}, path: path, key: key, lit: lit})
 }
@@ -209,6 +228,72 @@ func yamlBlock(s string) (string, []string) {
 		}
 	}
 	return "|" + indent + chomp, body
+}
+
+// yamlTimeText rewrites a timestamp key's value as local time. A value it
+// cannot parse, or any other key, is left exactly as the log wrote it.
+func yamlTimeText(key string, tok json.Token) (string, bool) {
+	if !yamlTimeKeys[key] {
+		return "", false
+	}
+	t, ok := yamlParseTime(tok)
+	if !ok {
+		return "", false
+	}
+	loc := yamlLocation
+	t = t.In(loc)
+	if t.Format("2006-01-02") == yamlNow().In(loc).Format("2006-01-02") {
+		return t.Format(yamlClockLayout), true
+	}
+	return t.Format(yamlDateLayout + yamlClockLayout), true
+}
+
+func yamlParseTime(tok json.Token) (time.Time, bool) {
+	switch v := tok.(type) {
+	case string:
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return t, true
+	case json.Number:
+		return yamlParseEpoch(v.String())
+	}
+	return time.Time{}, false
+}
+
+// The unit is read off the magnitude, since a logger rarely says which one it used.
+func yamlParseEpoch(s string) (time.Time, bool) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return time.Time{}, false
+	}
+	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		switch {
+		case f < 1e11:
+			return time.Unix(n, 0), true
+		case f < 1e14:
+			return time.UnixMilli(n), true
+		case f < 1e17:
+			return time.UnixMicro(n), true
+		default:
+			return time.Unix(0, n), true
+		}
+	}
+	var scale float64
+	switch {
+	case f < 1e11:
+		scale = 1
+	case f < 1e14:
+		scale = 1e3
+	case f < 1e17:
+		scale = 1e6
+	default:
+		scale = 1e9
+	}
+	sec := f / scale
+	whole := math.Floor(sec)
+	return time.Unix(int64(whole), int64((sec-whole)*1e9)), true
 }
 
 func yamlScalar(tok json.Token) string {
