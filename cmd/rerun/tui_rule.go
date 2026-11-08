@@ -40,9 +40,9 @@ type sepLine struct {
 func (s sepLine) isSep() bool { return s.label != "" || s.restart != nil }
 
 // text is the rule's label cut to fit a rule of width w.
-func (s sepLine) text(w int, grouped bool) string {
+func (s sepLine) text(w int) string {
 	if s.restart != nil {
-		return s.restart.label(max(0, w-4), grouped)
+		return s.restart.label(max(0, w-4))
 	}
 	return s.label
 }
@@ -52,7 +52,7 @@ func (s sepLine) expandable(w int) bool {
 	if s.build != nil {
 		return s.build.note != "" || len(s.build.files) > 1 || len(s.build.out) > 0
 	}
-	return s.full != "" && displayWidth("── "+s.label+" ") > w
+	return s.full != "" && displayWidth("── "+s.raw()+" ") > w
 }
 
 // hit reports whether a press at pane cell px opens the rule: its icon, or its "+N more".
@@ -71,7 +71,7 @@ func (s sepLine) hit(px, w int) bool {
 // raw is the rule's full text, kept as its pane line for copy and search.
 func (s sepLine) raw() string {
 	if s.restart != nil {
-		return s.restart.label(1<<16, false)
+		return s.restart.label(1 << 16)
 	}
 	return s.label
 }
@@ -87,9 +87,8 @@ type restartRule struct {
 	cmd     string
 }
 
-// label cuts from the end, so the name and time survive a narrow pane. The
-// command is appended only when grouped.
-func (r *restartRule) label(maxW int, grouped bool) string {
+// label cuts meta from the end so the name survives; renderSep cuts the command.
+func (r *restartRule) label(maxW int) string {
 	segs := []string{fmt.Sprintf("↻ %s restarted %s", r.name, r.at.Format("15:04:05"))}
 	if f := filesSummary(r.files); f != "" {
 		segs = append(segs, f)
@@ -103,15 +102,17 @@ func (r *restartRule) label(maxW int, grouped bool) string {
 	if r.healthy > 0 {
 		segs = append(segs, "healthy in "+fmtDur(r.healthy))
 	}
-	if grouped && r.cmd != "" {
-		segs = append(segs, "$ "+r.cmd)
-	}
+	cut := ellipsize(segs[0], maxW)
 	for n := len(segs); n > 1; n-- {
 		if s := strings.Join(segs[:n], " · "); displayWidth(s) <= maxW {
-			return s
+			cut = s
+			break
 		}
 	}
-	return ellipsize(segs[0], maxW)
+	if r.cmd != "" {
+		cut += " · " + r.cmd
+	}
+	return cut
 }
 
 func filesSummary(files []string) string {
@@ -283,9 +284,6 @@ func exitStatus(code int, err error) string {
 	return "failed: " + ellipsize(oneLine(printable(msg, false)), 40)
 }
 
-// interleaved is true when several targets share the stream, so a rule names its command.
-func (m *tuiModel) interleaved() bool { return m.solo < 0 }
-
 // Drawn at view time, so a resize redraws the rule at the new width.
 func (m *tuiModel) sepLines(lines []string) []string {
 	var out []string
@@ -297,7 +295,7 @@ func (m *tuiModel) sepLines(lines []string) []string {
 		if out == nil {
 			out = slices.Clone(lines)
 		}
-		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width(), m.interleaved())
+		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width())
 	}
 	if out == nil {
 		return lines
@@ -305,8 +303,8 @@ func (m *tuiModel) sepLines(lines []string) []string {
 	return out
 }
 
-func renderSep(s sepLine, w int, grouped bool) string {
-	head := ellipsize("── "+s.text(w, grouped)+" ", w)
+func renderSep(s sepLine, w int) string {
+	head := ellipsize("── "+s.text(w)+" ", w)
 	return sepStyle(s.tone).Render(head + strings.Repeat("─", max(0, w-displayWidth(head))))
 }
 

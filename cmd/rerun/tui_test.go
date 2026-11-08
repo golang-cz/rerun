@@ -59,6 +59,8 @@ func keyMsg(s string) tea.Msg {
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "ctrl+f":
 		return tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+	case "ctrl+l":
+		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 	case "ctrl+s":
 		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
 	case "ctrl+c":
@@ -559,8 +561,8 @@ func TestNamedRunListsEveryTargetAndStartsOffOnDemand(t *testing.T) {
 	if len(m.targets) != 3 {
 		t.Fatalf("got %d rows, want 3", len(m.targets))
 	}
-	if m.targets[0].state != stateRunning {
-		t.Errorf("named target state = %v, want running", m.targets[0].state)
+	if m.targets[0].state != stateStarting {
+		t.Errorf("named target state = %v, want starting", m.targets[0].state)
 	}
 	for i := 1; i < len(m.targets); i++ {
 		if m.targets[i].state != stateOff {
@@ -664,6 +666,7 @@ func TestChipHiddenWhileInputOpen(t *testing.T) {
 
 func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
+	m.targets[0].state = stateRunning
 	m.now = m.targets[0].lastStart.Add(48 * time.Second)
 	m.targets[1].state = stateExited
 	m.targets[1].exitCode = 0
@@ -1034,6 +1037,7 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 
 func TestRowStatusText(t *testing.T) {
 	m := newTestModel(t, target("web"))
+	m.targets[0].state = stateRunning
 	m.now = m.targets[0].lastStart.Add(65 * time.Second)
 	if got := m.status(m.targets[0]); got != "1m05s" {
 		t.Errorf("running status = %q, want 1m05s", got)
@@ -1270,6 +1274,7 @@ func TestSelfExitedTargetWaitsForChange(t *testing.T) {
 // the running glyph and a ticking uptime.
 func TestRunnerErrorLeavesRunningState(t *testing.T) {
 	m := newTestModel(t, target("web"))
+	m.targets[0].state = stateRunning
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state = %v, want running before the error", m.targets[0].state)
 	}

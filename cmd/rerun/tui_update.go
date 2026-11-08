@@ -182,6 +182,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+f":
 		m.openBar(inputSearch)
 
+	case "ctrl+l":
+		m.clearKey()
+
 	case "[", "shift+up":
 		if m.listFocused() {
 			m.jumpGroup(-1)

@@ -69,6 +69,7 @@ func TestBuildNeverChangesTheRowCount(t *testing.T) {
 
 func TestBuildStatusTextPerState(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.targets[0].state = stateRunning
 	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
 	row := func() string { return strings.TrimRight(leftLineRaw(m, 0), " ") }
@@ -111,6 +112,7 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 // The duration must start in the same cell whether the gear shows or not.
 func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
+	m.targets[0].state = stateRunning
 	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
 	leftW, _ := m.layoutWidths()

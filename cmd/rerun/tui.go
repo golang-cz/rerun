@@ -125,7 +125,8 @@ func initialState(spec Target) procState {
 	case spec.Start == startManual:
 		return stateManual
 	}
-	return stateRunning
+	// Gray until the first evStarted, so a fresh row never reads as running.
+	return stateStarting
 }
 
 // tuiTarget is one row: its process state, its stream state, and its output.
@@ -540,7 +541,7 @@ func (m *tuiModel) addLine(i int, line string) {
 
 // refreshRule rewrites a rule's stored raw text, so copy and search match what it now draws.
 func (m *tuiModel) refreshRule(rr *restartRule) {
-	raw := rr.label(1<<16, false)
+	raw := rr.label(1 << 16)
 	for k := range m.merged {
 		if m.merged[k].sep.restart == rr {
 			m.merged[k].text = raw
@@ -835,7 +836,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		if ev.restart {
 			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp, cmd: oneLine(t.spec.Cmd)}
 			t.lastRule = rr
-			m.addRule(i, sepLine{restart: rr})
+			m.addRule(i, sepLine{restart: rr, icon: "↻", full: rr.cmd})
 			if m.follow && m.solo == i && m.schemaSel == "" {
 				m.pinSeq = m.nextSeq
 			}
@@ -923,7 +924,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		row, exists := byName[spec.Name]
 		if !exists {
 			row = &tuiTarget{runner: c.runners[i], state: initialState(spec), exitCode: -1, lastStart: m.now, muted: spec.mutedAtStart()}
-			if i < len(c.stopped) && c.stopped[i] && row.state == stateRunning {
+			if i < len(c.stopped) && c.stopped[i] && row.state == stateStarting {
 				row.state = stateOff // the group holds it down until space or r
 			}
 		}
@@ -1362,6 +1363,10 @@ func (m *tuiModel) status(t *tuiTarget) string {
 	case stateOnChange:
 		return "waiting"
 	case stateManual:
+		// Every Makefile target starts manual, so the word would repeat on each row.
+		if t.spec.Kind == makeKind {
+			return ""
+		}
 		return "manual"
 	}
 	return "off"

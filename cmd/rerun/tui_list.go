@@ -445,6 +445,47 @@ func (m *tuiModel) rebootRow(r listRow) {
 	m.rebootTarget(r.target)
 }
 
+// clearKey is ctrl+l: a focused pane clears what it shows, else the cursor's row.
+func (m *tuiModel) clearKey() {
+	switch {
+	case m.paneFocus && m.solo >= 0:
+		m.clearTarget(m.solo)
+	case m.paneFocus && m.schemaSel != "":
+		m.clearTargets(m.schemaMembers(m.schemaSel))
+	default:
+		if r, ok := m.cursorRow(); ok {
+			m.clearRow(r)
+		}
+	}
+}
+
+// clearRow is ctrl+l: clears a target's log, or a header's members.
+func (m *tuiModel) clearRow(r listRow) {
+	if r.header {
+		m.clearTargets(r.members)
+		return
+	}
+	m.clearTarget(r.target)
+}
+
+// clearTargets clears every member of a group, running or not.
+func (m *tuiModel) clearTargets(members []int) {
+	for _, i := range members {
+		m.clearTarget(i)
+	}
+}
+
+// clearTarget leaves a cleared marker and holds it at the pane's top, the way
+// a restart's rule does; the target's process and state are untouched.
+func (m *tuiModel) clearTarget(i int) {
+	// The name travels in the marker, so several cleared groups do not draw alike.
+	s := sepLine{label: m.targets[i].spec.Name + " cleared " + m.now.Format("15:04:05")}
+	seq := m.addRow(i, s.raw(), s)
+	if m.follow && m.solo == i && m.schemaSel == "" {
+		m.pinSeq = seq
+	}
+}
+
 func (m *tuiModel) liveSelect() {
 	if m.paneFocus || m.drawerFocus {
 		return
@@ -554,13 +595,14 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		}
 	}
 	indent := r.indent()
+	nameW := max(0, nameWidth(leftW)-indent)
 	glyph := "▾"
 	if r.collapsed {
 		glyph = "▸"
 	}
 	segs := []seg{
 		{text: strings.Repeat(" ", indent) + glyph + " "},
-		{text: padRight(r.label, max(0, nameWidth(leftW)-indent))},
+		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
 	}

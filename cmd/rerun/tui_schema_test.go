@@ -122,7 +122,7 @@ func TestSpaceOnSchemaRowTogglesItsMembers(t *testing.T) {
 			t.Fatalf("member %s state = %v, want stopped", m.targets[i].spec.Name, m.targets[i].state)
 		}
 	}
-	if m.targets[2].state != stateRunning {
+	if m.targets[2].state != stateStarting {
 		t.Fatalf("web state = %v, want it untouched", m.targets[2].state)
 	}
 

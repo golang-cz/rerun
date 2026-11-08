@@ -163,7 +163,7 @@ func TestExitRuleNamesSignalsAndErrors(t *testing.T) {
 }
 
 func TestRuleTruncatesWithAnEllipsis(t *testing.T) {
-	out := ansi.Strip(renderSep(sepLine{label: strings.Repeat("long ", 20)}, 20, false))
+	out := ansi.Strip(renderSep(sepLine{label: strings.Repeat("long ", 20)}, 20))
 	if displayWidth(out) != 20 || !strings.Contains(out, "…") {
 		t.Fatalf("rule = %q, want 20 cells ending in an ellipsis", out)
 	}

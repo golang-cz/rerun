@@ -23,7 +23,7 @@ func ruleLine(m *tuiModel, marker string) string {
 	return ""
 }
 
-func TestRulesNameTheCommandOnlyInGroupView(t *testing.T) {
+func TestRulesNameTheCommand(t *testing.T) {
 	m := newTestModel(t, cmdTarget("api", "go run ./api"), cmdTarget("web", "npm start"))
 	m.applyEvents([]event{
 		{kind: evStarted, target: "api", at: restartAt, buildDur: 2 * time.Second},
@@ -35,38 +35,48 @@ func TestRulesNameTheCommandOnlyInGroupView(t *testing.T) {
 	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
 		t.Errorf("group start rule = %q, want the command named", got)
 	}
-	if got := ruleLine(m, "↻ web restarted"); !strings.Contains(got, "· $ npm start") {
+	if got := ruleLine(m, "↻ web restarted"); !strings.Contains(got, "· npm start") {
 		t.Errorf("group restart rule = %q, want the command last", got)
 	}
 
 	m.applyScope(0, "")
 	m.frame()
-	if got := ruleLine(m, "▶ api started"); got == "" || strings.Contains(got, "$ go run") {
-		t.Errorf("single-target start rule = %q, want no command", got)
+	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
+		t.Errorf("single-target start rule = %q, want the command named", got)
 	}
 }
 
-func TestRestartRuleCommandIsCutFirst(t *testing.T) {
+func TestRestartRuleLabelCutsMetaBeforeCommand(t *testing.T) {
 	rr := &restartRule{name: "api", at: restartAt, built: 2 * time.Second, cmd: "go run ./api"}
 	full := "↻ api restarted 15:04:05 · built 2s"
-	if got := rr.label(1<<16, true); got != full+" · $ go run ./api" {
-		t.Errorf("grouped label = %q", got)
+	if got := rr.label(1 << 16); got != full+" · go run ./api" {
+		t.Errorf("label = %q", got)
 	}
-	if got := rr.label(displayWidth(full)+2, true); got != full {
-		t.Errorf("narrow grouped label = %q, want the command dropped", got)
-	}
-	if got := rr.label(1<<16, false); got != full {
-		t.Errorf("label = %q, want no command outside group view", got)
+	short := "↻ api restarted 15:04:05"
+	if got := rr.label(displayWidth(short) + 2); got != short+" · go run ./api" {
+		t.Errorf("narrow label = %q, want the build segment cut and the command kept", got)
 	}
 }
 
 func TestRestartRuleWithoutBuildOmitsIt(t *testing.T) {
 	rr := &restartRule{name: "api", at: restartAt, cmd: "go run ./api"}
-	if got := rr.label(1<<16, false); got != "↻ api restarted 15:04:05" {
+	if got := rr.label(1 << 16); got != "↻ api restarted 15:04:05 · go run ./api" {
 		t.Errorf("label = %q, want no build segment", got)
 	}
-	if got := rr.label(1<<16, true); got != "↻ api restarted 15:04:05 · $ go run ./api" {
-		t.Errorf("grouped label = %q", got)
+}
+
+func TestLongRestartCommandExpandsToFullText(t *testing.T) {
+	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
+	m := newTestModel(t, cmdTarget("api", long))
+	m.applyEvents([]event{restartEvent("api", nil, 0, time.Minute)})
+	m.frame()
+	row := m.paneCursorRow()
+	if !m.expandable(row) {
+		t.Fatal("a cut-short restart command is not expandable")
+	}
+	m.toggleExpand(row)
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
+		t.Fatalf("expansion lacks the full command: %q", rows)
 	}
 }
 
@@ -75,23 +85,7 @@ func TestMultiLineCommandStaysOnOneRuleLine(t *testing.T) {
 	m.applyEvents([]event{restartEvent("api", nil, 0, time.Minute)})
 	m.applyScope(-1, "")
 	m.frame()
-	if got := ruleLine(m, "↻ api restarted"); !strings.Contains(got, "· $ go run ./api") {
+	if got := ruleLine(m, "↻ api restarted"); !strings.Contains(got, "· go run ./api") {
 		t.Errorf("rule = %q, want the command flattened to one line", got)
-	}
-}
-
-func TestInterleavedFollowsTheStreamScope(t *testing.T) {
-	m := newTestModel(t, cmdTarget("api", "go run ./api"), cmdTarget("web", "npm start"))
-	m.applyScope(-1, "")
-	if !m.interleaved() {
-		t.Error("all-targets view is not interleaved")
-	}
-	m.applyScope(-1, "backend")
-	if !m.interleaved() {
-		t.Error("schema selection is not interleaved")
-	}
-	m.applyScope(0, "")
-	if m.interleaved() {
-		t.Error("single-target view is interleaved")
 	}
 }

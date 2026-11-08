@@ -403,7 +403,7 @@ func TestStoppedMakeRowShowsRunAgainHint(t *testing.T) {
 	m.targets[i].state = stateExited
 	m.applyScope(i, "")
 	lines := m.rightLines(100)
-	if last := lines[len(lines)-1]; !strings.Contains(last, "r run again · ctrl+k find") {
+	if last := lines[len(lines)-1]; !strings.Contains(last, "r run again · ctrl+l clear · ctrl+k find") {
 		t.Fatalf("bottom line = %q, want the run-again hint", last)
 	}
 }

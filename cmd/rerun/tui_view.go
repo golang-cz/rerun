@@ -30,6 +30,9 @@ const (
 // `backoff 10s` (11 cells).
 const statusW = 11
 
+// maxNameW caps the name column; longer names get a middle ellipsis.
+const maxNameW = 28
+
 // narrowW is the screen width under which the left column shrinks to its names.
 const narrowW = 100
 
@@ -241,6 +244,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	if m.hasGroups() {
 		nameW = max(nameW, displayWidth(groupLabel(ungrouped)))
 	}
+	nameW = min(nameW, maxNameW)
 	leftW = nameW + statusW + 4
 	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
 	// the version; a narrow one shrinks to the names, down to 16.
@@ -510,6 +514,40 @@ func ellipsize(s string, w int) string {
 	return truncate(s, w-1) + "…"
 }
 
+// ellipsizeMiddle cuts s to w cells from its middle, keeping both ends with an
+// ellipsis between. The head gets the extra cell, so `test-integration-postgres`
+// at 20 keeps `test-integ` and `-postgres`.
+func ellipsizeMiddle(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if displayWidth(s) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	headW := w / 2
+	tailW := w - 1 - headW
+	return padRight(s, headW) + "…" + tailCells(s, tailW)
+}
+
+// tailCells returns the last n cells of s, padded on the left when a wide rune
+// would not fit whole.
+func tailCells(s string, n int) string {
+	rs := []rune(s)
+	cells, start := 0, len(rs)
+	for start > 0 {
+		rw := displayWidth(string(rs[start-1]))
+		if cells+rw > n {
+			break
+		}
+		cells += rw
+		start--
+	}
+	return strings.Repeat(" ", n-cells) + string(rs[start:])
+}
+
 // ellipsizeLeft cuts s to w cells from its left, with an ellipsis at the cut, so a
 // path keeps its end.
 func ellipsizeLeft(s string, w int) string {
@@ -531,6 +569,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
 
 	indent := r.indent()
+	nameW := max(0, nameWidth(leftW)-indent)
 	var segs []seg
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
@@ -538,7 +577,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(t.spec.localName(), max(0, nameWidth(leftW)-indent)), link: t.spec.URL},
+		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.URL},
 		seg{text: marker(m.targetDirty(t))},
 		seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)},
 	)
@@ -879,7 +918,7 @@ func (m *tuiModel) runAgainHint() string {
 	if t.spec.Kind != makeKind || (t.state != stateExited && t.state != stateStopped) {
 		return ""
 	}
-	return "r run again · ctrl+k find"
+	return "r run again · ctrl+l clear · ctrl+k find"
 }
 
 // makeEmptyHint points at the finder before any target ran, since a Makefile's targets stay folded until found.
@@ -953,6 +992,7 @@ var helpShortKeys = [][2]string{
 	{"c", "toggle the columns table"},
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
+	{"ctrl+l", "clear the target's log (old lines stay in scrollback)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"ctrl+k", "find a target or group; enter jumps, runs a make target"},
 	{"q", "quit (asks first)"},
@@ -960,9 +1000,8 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows, selecting each; enter focuses the log pane"},
+	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
 	{"←/→", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane"},
-	{"home/end", "first/last row; pane top-left / live tail when focused"},
 	{"space", "start / stop (group row: its targets)"},
 	{"r", "reboot (grace applies; group row: its selected targets)"},
 	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
@@ -972,6 +1011,7 @@ var helpKeys = [][2]string{
 	{"ctrl+k", "find a target or group: enter jumps or runs a make target, esc closes"},
 	{"o", "open the target's url"},
 	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
+	{"ctrl+l", "clear the target's log (group row: its targets); old lines stay in scrollback"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d)"},

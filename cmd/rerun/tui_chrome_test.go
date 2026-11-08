@@ -5,11 +5,15 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/golang-cz/rerun"
 )
 
 // The marker cells sit between the name and the status, so neither touches either.
 func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
+	m.targets[0].state = stateRunning
+	m.targets[1].state = stateRunning
 	m.setEdit(colNode{name: "api"}, []Column{{Name: "level", Expr: ".level"}})
 	m.frame()
 
@@ -125,5 +129,87 @@ func TestLeftColumnWidthFollowsTheScreen(t *testing.T) {
 	m.width = 120
 	if leftW, _ := m.layoutWidths(); leftW != 24 {
 		t.Errorf("wide leftW = %d, want 24", leftW)
+	}
+}
+
+func TestEllipsizeMiddle(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+		w              int
+	}{
+		{name: "fits", in: "web", w: 5, want: "web"},
+		{name: "exact fit", in: "web", w: 3, want: "web"},
+		{name: "cut keeps both ends", in: "test-integration-postgres", w: 20, want: "test-integ…-postgres"},
+		{name: "even split", in: "abcdefgh", w: 4, want: "ab…h"},
+		{name: "one cell", in: "abcdefgh", w: 1, want: "…"},
+		{name: "wide runes", in: "日本語テスト", w: 7, want: "日 … ト"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ellipsizeMiddle(tt.in, tt.w)
+			if got != tt.want {
+				t.Fatalf("ellipsizeMiddle(%q, %d) = %q, want %q", tt.in, tt.w, got, tt.want)
+			}
+			if w := displayWidth(got); w > tt.w {
+				t.Fatalf("width = %d, want at most %d", w, tt.w)
+			}
+		})
+	}
+}
+
+// A Makefile target starts manual, but the status word would repeat on every row.
+func TestMakeTargetStatusIsEmptyAndYamlManualShowsIt(t *testing.T) {
+	mk := Target{Name: "build", Cmd: "make build", Kind: makeKind, Start: startManual, Selected: true, Grace: rerun.DefaultGrace}
+	mm := newTestModel(t, mk)
+	if got := mm.status(mm.targets[0]); got != "" {
+		t.Errorf("make target status = %q, want empty", got)
+	}
+	if strings.Contains(ansi.Strip(mm.View().Content), "manual") {
+		t.Errorf("make target view shows manual, want no status word")
+	}
+
+	ym := newTestModel(t, Target{Name: "job", Cmd: "true", Start: startManual, Selected: true, Grace: rerun.DefaultGrace})
+	if got := ym.status(ym.targets[0]); got != "manual" {
+		t.Errorf("yaml manual status = %q, want manual", got)
+	}
+	if !strings.Contains(ansi.Strip(ym.View().Content), "manual") {
+		t.Errorf("yaml manual view lacks the manual status word")
+	}
+}
+
+// A long name is capped at maxNameW and cut from the middle, so the status stays put.
+func TestLongTargetNameIsCapped(t *testing.T) {
+	m := newTestModel(t, target("services-payments-ledger-reconciler-worker-nightly-backfill"))
+	m.width, m.height = 120, 20
+	m.frame()
+
+	leftW, _ := m.layoutWidths()
+	if want := maxNameW + statusW + 4; leftW != want {
+		t.Fatalf("leftW = %d, want %d", leftW, want)
+	}
+	row := ansi.Strip(m.leftLine(0, leftW))
+	if !strings.Contains(row, "services-") || !strings.Contains(row, "backfill") || !strings.Contains(row, "…") {
+		t.Fatalf("row = %q, want the name kept at both ends with an ellipsis", row)
+	}
+	if strings.Contains(row, "nightly-backfill") {
+		t.Fatalf("row = %q, want the middle of the name cut", row)
+	}
+}
+
+// An auto target is gray and starting from the first frame, not green and running.
+func TestFreshAutoTargetStartsGray(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	row := m.targets[0]
+	if row.state != stateStarting {
+		t.Fatalf("state = %v, want starting", row.state)
+	}
+	if got := m.status(row); got != "starting" {
+		t.Errorf("status = %q, want starting", got)
+	}
+	if got := stateColor(row); got != colorGray {
+		t.Errorf("color = %q, want gray %q", got, colorGray)
+	}
+	if got := row.glyph(); got != "●" {
+		t.Errorf("glyph = %q, want ●", got)
 	}
 }

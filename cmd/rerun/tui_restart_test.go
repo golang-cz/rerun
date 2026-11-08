@@ -42,7 +42,7 @@ func TestRestartRuleTextAndOmissions(t *testing.T) {
 			"↻ api restarted 15:04:05 · only.go"},
 	}
 	for _, c := range cases {
-		if got := c.rr.label(200, false); got != c.want {
+		if got := c.rr.label(200); got != c.want {
 			t.Errorf("%s: label = %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -52,13 +52,13 @@ func TestRestartRuleTruncatesRestLastAndKeepsNameAndTime(t *testing.T) {
 	full := &restartRule{name: "api", at: restartAt, files: []string{"/src/handler.go", "/src/a.go"},
 		built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second}
 	headFiles := "↻ api restarted 15:04:05 · handler.go +1"
-	if got := full.label(displayWidth(headFiles), false); got != headFiles {
+	if got := full.label(displayWidth(headFiles)); got != headFiles {
 		t.Errorf("label at name+time+files width = %q, want %q (the rest dropped first)", got, headFiles)
 	}
-	if got := full.label(displayWidth(headFiles)-1, false); got != "↻ api restarted 15:04:05" {
+	if got := full.label(displayWidth(headFiles) - 1); got != "↻ api restarted 15:04:05" {
 		t.Errorf("one cell narrower = %q, want the files segment dropped as a unit", got)
 	}
-	if got := full.label(10, false); !strings.HasPrefix(got, "↻ api") {
+	if got := full.label(10); !strings.HasPrefix(got, "↻ api") {
 		t.Errorf("narrowest label = %q, want the name kept", got)
 	}
 }
@@ -77,7 +77,7 @@ func TestHealthyAppendsToItsRestartRule(t *testing.T) {
 	}
 
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(1800 * time.Millisecond), runAt: restartAt, dur: 1800 * time.Millisecond}})
-	if got := m.targets[0].lastRule.label(200, false); !strings.HasSuffix(got, " · healthy in 1s") {
+	if got := m.targets[0].lastRule.label(200); !strings.Contains(got, " · healthy in 1s") {
 		t.Fatalf("label = %q, want healthy in 1s appended", got)
 	}
 
