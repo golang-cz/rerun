@@ -71,6 +71,8 @@ the longest target so messages start in a fixed column. A `muted: true` field in
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
+More keys: `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous find match, and `ctrl+l` clears the log (older lines stay in scrollback).
+
 Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
 becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click the icon or
 `+N more`, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
@@ -171,29 +173,30 @@ Flat top-level map, one entry per target (Makefile-like). `run` (older spelling:
 everything else is optional. Durations are Go-style strings (`200ms`, `5s`).
 
 ```yaml
-frontend:
-  desc: Vite dev server          # shown in output listings
-  on: web                       # string or list; gitignore-style globs
-  except: [node_modules, dist]  # adds to .gitignore, which always applies
-  run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
-  build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
-  health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
-  url: http://localhost:5173     # o opens it; the row links to it
-  open: true                     # open the url once at startup
-  delay: 200ms                  # batch file events before restarting
-  cooldown: 2s                  # min time between restarts (event storms)
-  grace: 5s                     # SIGTERM → wait → SIGKILL
+targets:
+  frontend:
+    desc: Vite dev server          # shown in output listings
+    on: web                       # string or list; gitignore-style globs
+    except: [node_modules, dist]  # adds to .gitignore, which always applies
+    run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
+    build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
+    health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
+    url: http://localhost:5173     # o opens it; the row links to it
+    open: true                     # open the url once at startup
+    delay: 200ms                  # batch file events before restarting
+    cooldown: 2s                  # min time between restarts (event storms)
+    grace: 5s                     # SIGTERM → wait → SIGKILL
 
-api:
-  on: [cmd, internal]
-  cmd: go run ./cmd/api --addr :8080
-  selected: false               # listed in the TUI, starts off (space starts it)
+  api:
+    on: [cmd, internal]
+    cmd: go run ./cmd/api --addr :8080
+    selected: false               # listed in the TUI, starts off (space starts it)
 
-test:
-  on: ['**/*.go']
-  cmd: go test ./...
-  delay: 500ms
-  start: onchange               # auto (default), onchange, or manual
+  test:
+    on: ['**/*.go']
+    cmd: go test ./...
+    delay: 500ms
+    start: onchange               # auto (default), onchange, or manual
 ```
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
@@ -218,10 +221,26 @@ spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
 fields shows `disk full ENOSPC`, and a line with only `.error` shows `ENOSPC`. A
 bad expression shows `bad column "msg": <error>` in the title row.
 
+### `targets:` and `-migrate`
+
+Targets sit under a top-level `targets:` key:
+
+```yaml
+targets:
+  api:
+    run: go run ./cmd/api
+```
+
+- The top level holds only rerun's own keys: `imports:`, `groups:` and `targets:`. Any other key is an error.
+- A file without `targets:` still loads the old way, with one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
+- `rerun -migrate` rewrites the nearest rerun.yml in place under `targets:`, keeping comments and key order and dropping blank lines.
+- A target under `targets:` may be called `imports` or `groups`.
+
 ## Flags
 
 - `-delay`, `-cooldown`, `-grace` — override per run (CLI wins over rerun.yml)
 - `-no-gitignore` — turn off .gitignore filtering and watch ignored files too
+- `-migrate` — move rerun.yml's top-level targets under `targets:`
 - `-h`, `-version`
 
 ## Shutdown

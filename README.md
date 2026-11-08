@@ -38,6 +38,9 @@ scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `ente
 `ctrl+f` finds in it (`n`/`N` step matches); `esc` never clears filters or find, `backspace` removes the last chip; `c` toggles the columns
 table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
+
+More keys: `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous find match, and `ctrl+l` clears the log (older lines stay in scrollback).
+
 Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or press
 `enter` with the pane focused (it acts on the cursor line, which starts on the newest
 line), to show the pretty-printed object; `(−)` collapses it. Moving the cursor off the
@@ -108,6 +111,7 @@ $ find . -name '*.go' | rerun -- go test ./...
 -cooldown <dur>   minimum time between restarts (default 0s)
 -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
 -no-gitignore     do not filter watched files through .gitignore
+-migrate          move rerun.yml's top-level targets under targets:
 -h, -help         show this help
 -version          show version
 ```
@@ -124,19 +128,20 @@ Place a `rerun.yml` anywhere in the repo. rerun walks up from the current
 directory, stopping at the git root, and takes the first one it finds.
 
 ```yaml
-frontend:
-  desc: Vite dev server
-  on: web
-  except: [node_modules, dist]
-  run: pnpm run dev
-  delay: 250ms
-  cooldown: 2s
-  grace: 1s
+targets:
+  frontend:
+    desc: Vite dev server
+    on: web
+    except: [node_modules, dist]
+    run: pnpm run dev
+    delay: 250ms
+    cooldown: 2s
+    grace: 1s
 
-api:
-  on: [cmd, internal]
-  except: vendor
-  run: go run ./cmd/api
+  api:
+    on: [cmd, internal]
+    except: vendor
+    run: go run ./cmd/api
 ```
 
 Each top-level key is one target. Fields:
@@ -167,6 +172,22 @@ spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
 fields shows `disk full ENOSPC`, and a line with only `.error` shows `ENOSPC`. A
 bad expression shows `bad column "msg": <error>` in the title row.
 
+#### `targets:`
+
+Targets sit under a top-level `targets:` key:
+
+```yaml
+targets:
+  api:
+    run: go run ./cmd/api
+    on: [cmd, internal]
+```
+
+- The top level holds only rerun's own keys: `imports:`, `groups:` and `targets:`. Any other top-level key is an error, so a typo surfaces.
+- A file without a `targets:` key is read the old way, with its targets at the top level. rerun shows one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
+- `rerun -migrate` rewrites the nearest rerun.yml in place, so its targets move under `targets:`. It keeps comments and key order, and drops blank lines.
+- A target under `targets:` may be called `imports` or `groups`, because it no longer collides with those reserved top-level keys.
+
 #### Groups
 
 Targets that log the same JSON shape can share columns. Define them once under
@@ -178,9 +199,10 @@ groups:
   backend:
     columns: ["level {.level}", "msg {.msg}", "status {.status}"]
 
-omsx-api:
-  group: backend
-  cmd: make -C apps/api run
+targets:
+  omsx-api:
+    group: backend
+    cmd: make -C apps/api run
 ```
 
 A target's own `columns` wins over its group's. A group's `start:` sets the
@@ -204,8 +226,9 @@ imports:
     start: auto                  # first run for its targets; default: the file's own
     groups: [backend]            # import only these groups of that file
 
-api:
-  cmd: make run
+targets:
+  api:
+    cmd: make run
 ```
 
 - An imported target runs from its own file's dir. It shows under its `group` section as `bpn-api/api`.
