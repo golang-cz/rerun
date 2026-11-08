@@ -87,6 +87,40 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 	assertBoxRows(t, full, 30, "full help")
 }
 
+// Help is an overlay: the live frame, its log lines included, stays visible around the box.
+func TestHelpOverlaysTheLiveFrame(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 120, 40
+	m.applyEvents(streamEvents("web", "logline", 20).events)
+	press(m, "?")
+
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, "rerun keys") {
+		t.Errorf("help overlay is missing its header:\n%s", view)
+	}
+	if !strings.Contains(view, "? m all keys  esc close") {
+		t.Errorf("help overlay is missing its footer:\n%s", view)
+	}
+
+	lines := strings.Split(view, "\n")
+	top, bottom := -1, -1
+	for i, line := range lines {
+		if top < 0 && strings.Contains(line, "╭") {
+			top = i
+		}
+		if strings.Contains(line, "╰") {
+			bottom = i
+		}
+	}
+	if top < 0 || bottom < top {
+		t.Fatalf("no help box in view:\n%s", view)
+	}
+	outside := strings.Join(append(append([]string{}, lines[:top]...), lines[bottom+1:]...), "\n")
+	if !strings.Contains(outside, "logline-") {
+		t.Fatalf("the frame around the help box shows no log line:\n%s", view)
+	}
+}
+
 // assertBoxRows checks the help box's border rows span at most max rows.
 func assertBoxRows(t *testing.T, view string, max int, what string) {
 	t.Helper()

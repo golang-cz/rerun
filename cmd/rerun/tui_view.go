@@ -123,9 +123,6 @@ func (m *tuiModel) frame() string {
 		m.height = 24
 	}
 	m.layout = tuiLayout{marker: rect{x: -1, y: -1}}
-	if m.help {
-		return m.helpView()
-	}
 
 	leftW, rightW := m.layoutWidths()
 	m.layout.leftW = leftW
@@ -150,6 +147,9 @@ func (m *tuiModel) frame() string {
 	frame := b.String()
 	if m.finder.open {
 		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
+	}
+	if m.help {
+		frame = overlayCenter(frame, m.helpView(), m.width, m.height)
 	}
 	if m.confirmQuit {
 		return overlayCenter(frame, m.confirmQuitView(), m.width, m.height)
@@ -228,6 +228,54 @@ func overlayCenter(frame, box string, width, height int) string {
 		lines[row] = ansi.Cut(line, 0, x) + bl + ansi.Cut(line, x+bw, width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// modalMinWidth is the narrowest a modal box shrinks to, terminal permitting.
+const modalMinWidth = 40
+
+// modalWidth is a modal box's outer width: 80% of the terminal, floored, never past it.
+func modalWidth(termW int) int {
+	return max(1, min(max(termW*4/5, min(modalMinWidth, termW)), termW))
+}
+
+// modalInnerW is the box's content width, border and padding excluded.
+func (m *tuiModel) modalInnerW(outerW int) int {
+	return max(1, outerW-m.styles.box.GetHorizontalFrameSize())
+}
+
+// modalFit pads or truncates s to exactly width cells, so the box's rows stay aligned.
+func modalFit(s string, width int) string {
+	return lipgloss.NewStyle().Width(width).Render(ansi.Truncate(s, width, "…"))
+}
+
+// modalBox draws a popup: a header row over a rule of the inner width, the body rows, and a
+// faint footer dropped when the box is too short. outerH 0 sizes the box to its content,
+// capped at two rows less than the terminal.
+func (m *tuiModel) modalBox(header, footer string, body []string, outerW, outerH int) string {
+	box := m.styles.box
+	innerW := m.modalInnerW(outerW)
+	if outerH <= 0 {
+		outerH = box.GetVerticalFrameSize() + 2 + len(body)
+		if footer != "" {
+			outerH++
+		}
+		outerH = min(outerH, max(1, m.height-2))
+	}
+	innerH := max(1, outerH-box.GetVerticalFrameSize())
+	lines := []string{
+		modalFit(header, innerW),
+		modalFit(m.styles.divider.Render(strings.Repeat("─", innerW)), innerW),
+	}
+	for _, l := range body {
+		lines = append(lines, modalFit(l, innerW))
+	}
+	if footer != "" && len(lines) < innerH {
+		lines = append(lines, modalFit(m.styles.hint.Render(footer), innerW))
+	}
+	lines = lines[:min(len(lines), innerH)]
+
+	// v2's Width and Height are the whole block, border included.
+	return box.Width(outerW).Height(outerH).Render(strings.Join(lines, "\n"))
 }
 
 // layoutWidths splits the screen between the two columns.
@@ -1051,23 +1099,26 @@ var helpMouse = []string{
 }
 
 // helpView draws the help overlay: the short key list, or the full one when helpAll is set.
+// modalBox keeps it a popup, so the live frame stays visible around it.
 func (m *tuiModel) helpView() string {
-	var b strings.Builder
-	b.WriteString(m.styles.title.Render("rerun keys") + "\n")
-	keys, footer := helpShortKeys, "? or m: all keys · esc closes"
+	keys, footer := helpShortKeys, "? m all keys  esc close"
 	if m.helpAll {
-		keys, footer = helpKeys, "esc closes"
+		keys, footer = helpKeys, "esc close"
 	}
+	body := make([]string, 0, len(keys)+len(helpMouse)+1)
 	for _, kv := range keys {
-		b.WriteString(m.styles.key.Render(padRight(kv[0], 12)) + " " + kv[1] + "\n")
+		body = append(body, m.styles.key.Render(padRight(kv[0], 12))+" "+kv[1])
 	}
 	if m.helpAll {
-		b.WriteString("\n")
+		body = append(body, "")
 		for _, line := range helpMouse {
-			b.WriteString(m.styles.hint.Render(line) + "\n")
+			body = append(body, m.styles.hint.Render(line))
 		}
 	}
-	b.WriteString("\n" + m.styles.hint.Render(footer))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		m.styles.box.Render(b.String()))
+	// Content-sized, capped at two rows less than the terminal; the header and the
+	// footer keep their rows, so the body gives up its last rows first.
+	outerH := m.styles.box.GetVerticalFrameSize() + 3 + len(body)
+	outerH = min(outerH, max(1, m.height-2))
+	body = body[:min(len(body), max(0, outerH-m.styles.box.GetVerticalFrameSize()-3))]
+	return m.modalBox(m.styles.title.Render("rerun keys"), footer, body, modalWidth(m.width), outerH)
 }

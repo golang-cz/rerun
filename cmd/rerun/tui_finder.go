@@ -16,7 +16,6 @@ import (
 
 // The popup's outer box never shrinks below these, but the terminal still caps it.
 const (
-	finderMinWidth  = 40
 	finderMinHeight = 10
 	// finderChromeRows are the input, rule and footer lines around the match rows.
 	finderChromeRows = 3
@@ -156,7 +155,7 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 
 // finderSize is the popup's outer box, border included: 80% of the terminal, floored, never past it.
 func (m *tuiModel) finderSize() (int, int) {
-	w := min(max(m.width*4/5, min(finderMinWidth, m.width)), m.width)
+	w := modalWidth(m.width)
 	h := min(max(m.height*4/5, min(finderMinHeight, m.height)), m.height)
 	return max(1, w), max(1, h)
 }
@@ -284,15 +283,10 @@ func finderTail(s string, width int) string {
 // finderView draws the popup at a fixed size: input and count, a rule, the ranked matches, then the footer.
 func (m *tuiModel) finderView() string {
 	outerW, outerH := m.finderSize()
-	box := m.styles.box
-	innerW := max(1, outerW-box.GetHorizontalFrameSize())
-	innerH := max(1, outerH-box.GetVerticalFrameSize())
+	innerW := m.modalInnerW(outerW)
 	res := m.finderResults(m.finder.query)
 	rows := m.finderListRows()
 	nameW := finderNameWidth(res[:min(len(res), rows)], innerW)
-	fit := func(s string) string {
-		return lipgloss.NewStyle().Width(innerW).Render(ansi.Truncate(s, innerW, "…"))
-	}
 
 	n := 0
 	if len(res) > 0 {
@@ -309,36 +303,28 @@ func (m *tuiModel) finderView() string {
 	gap := max(1, innerW-lipgloss.Width(input)-lipgloss.Width(count))
 	input += strings.Repeat(" ", gap) + m.styles.hint.Render(count)
 
-	lines := []string{
-		fit(input),
-		fit(m.styles.divider.Render(strings.Repeat("─", innerW))),
-	}
+	body := make([]string, 0, rows)
 	for i := range rows {
 		switch {
 		case i == 0 && len(res) == 0:
-			lines = append(lines, fit("  "+m.styles.hint.Render("no matches for \""+m.finder.query+"\"")))
+			body = append(body, "  "+m.styles.hint.Render("no matches for \""+m.finder.query+"\""))
 		case i < len(res):
-			lines = append(lines, fit(m.finderLine(res[i], i == m.finder.sel, nameW, innerW)))
+			body = append(body, m.finderLine(res[i], i == m.finder.sel, nameW, innerW))
 		default:
-			lines = append(lines, fit(""))
+			body = append(body, "")
 		}
 	}
+	footer := ""
 	if m.finderHasFooter() {
-		footer := "↑↓ move  ⏎ jump  esc close"
+		footer = "↑↓ move  ⏎ jump  esc close"
 		if m.finder.sel < len(res) && res[m.finder.sel].make {
 			footer = "↑↓ move  ⏎ run  esc close"
 		}
 		if len(res) == 0 {
 			footer = "esc close"
 		}
-		lines = append(lines, fit(m.styles.hint.Render(footer)))
 	}
-	lines = lines[:min(len(lines), innerH)]
-
-	// v2's Width and Height are the whole block, border included.
-	return box.Width(outerW).
-		Height(outerH).
-		Render(strings.Join(lines, "\n"))
+	return m.modalBox(input, footer, body, outerW, outerH)
 }
 
 // finderNameWidth is the name column: the longest shown name, capped at 55% of the row and floored at 12.
