@@ -677,12 +677,16 @@ func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 }
 
 // rowInPaneScope reports whether the pane's focused scope draws this row's output.
+// A focused pane with no scope draws every target, so nothing dims.
 func (m *tuiModel) rowInPaneScope(r listRow) bool {
+	members, ok := m.paneScope()
+	if !ok {
+		return true
+	}
 	if r.header {
 		return m.schemaSel == r.schema
 	}
-	members, ok := m.paneScope()
-	return ok && slices.Contains(members, r.target)
+	return slices.Contains(members, r.target)
 }
 
 func stateColor(t *tuiTarget) string {
@@ -1050,7 +1054,7 @@ var helpShortKeys = [][2]string{
 	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
 	{"space", "start or stop the row · pane: jump to live"},
 	{"enter", "list: focus the pane, starting a stopped row or group"},
-	{"s", "stop the row (a group row: its running targets)"},
+	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
@@ -1070,11 +1074,10 @@ var helpShortKeys = [][2]string{
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
 	{"←/→ enter", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane (enter too, starting a stopped row)"},
-	{"space s", "space starts / stops · pane: jump to live (group row: its targets); s stops (group row: its running targets)"},
-	{"r", "reboot (grace applies; group row: its selected targets)"},
-	{"t", "toggle the fs drawer (the change feed, seven lines at most)"},
-	{"tab", "focus the fs drawer (j/k move, enter lists a batch's files, esc closes)"},
-	{"m", "mute the target's stream (group row: its targets)"},
+	{"space", "start or stop the row · pane: jump to live"},
+	{"s", "stop the row · pane: stop what the pane shows"},
+	{"m r", "mute the stream (group row: its targets); r reboots (grace applies)"},
+	{"t tab", "t toggles the fs drawer; tab focuses it (j/k move, enter lists a batch's files, esc closes)"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
 	{"ctrl+k", "find a target or group: enter jumps or runs a make target, esc closes"},
 	{"o", "open the target's url"},
@@ -1094,7 +1097,7 @@ var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
 	"click a group scopes to its targets; click a batch lists its files",
 	"drag copies a range; shift-drag uses the terminal's selection",
-	"⚙ building  ● starting (gray)  ● run  ▲ unhealthy  ■ failed",
+	"⚙ building  ● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",
 }
 
@@ -1110,7 +1113,6 @@ func (m *tuiModel) helpView() string {
 		body = append(body, m.styles.key.Render(padRight(kv[0], 12))+" "+kv[1])
 	}
 	if m.helpAll {
-		body = append(body, "")
 		for _, line := range helpMouse {
 			body = append(body, m.styles.hint.Render(line))
 		}

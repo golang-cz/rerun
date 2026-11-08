@@ -174,6 +174,58 @@ func TestYamlTimestampEpochUnits(t *testing.T) {
 	}
 }
 
+// pinZone freezes the clock and shows timestamps in loc.
+func pinZone(t *testing.T, now time.Time, loc *time.Location) {
+	t.Helper()
+	prevNow, prevLoc := yamlNow, yamlLocation
+	yamlNow = func() time.Time { return now }
+	yamlLocation = loc
+	t.Cleanup(func() { yamlNow, yamlLocation = prevNow, prevLoc })
+}
+
+// A duration under a time key is not a timestamp.
+func TestYamlTimestampLeavesSmallNumbersAlone(t *testing.T) {
+	pinTime(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
+	got := yamlRows(t, `{"time":12,"ts":0}`)
+	if want := []string{"time: 12", "ts: 0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+}
+
+func TestYamlTimestampLeavesNegativeEpochAlone(t *testing.T) {
+	pinTime(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
+	got := yamlRows(t, `{"time":-1,"ts":-1762182245}`)
+	if want := []string{"time: -1", "ts: -1762182245"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+}
+
+func TestYamlTimestampFloatEpochKeepsFraction(t *testing.T) {
+	pinTime(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
+	got := yamlRows(t, `{"ts":1793718245.5}`)
+	if want := []string{"ts: 2026-11-03 15:04:05.500"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+}
+
+func TestYamlTimestampZoneLessLayouts(t *testing.T) {
+	pinTime(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
+	got := yamlRows(t, `{"ts":"2026-11-04T01:02:03.5","time":"2026-11-04 01:02:03"}`)
+	want := []string{"ts: 01:02:03.500", "time: 01:02:03.000"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+}
+
+// An offset string is shown in yamlLocation, not in its own offset.
+func TestYamlTimestampOffsetShownInLocation(t *testing.T) {
+	pinZone(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC), time.FixedZone("plus2", 2*60*60))
+	got := yamlRows(t, `{"ts":"2026-11-04T15:04:05+02:00"}`)
+	if want := []string{"ts: 15:04:05.000"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+}
+
 func TestYamlTimestampFormatsNestedKeys(t *testing.T) {
 	pinTime(t, time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
 	got := yamlRows(t, `{"request":{"time":"2026-11-04T01:02:03Z"},"items":[{"timestamp":"2026-11-04T01:02:03Z"}]}`)

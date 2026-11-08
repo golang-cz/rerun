@@ -248,18 +248,38 @@ func yamlTimeText(key string, tok json.Token) (string, bool) {
 	return t.Format(yamlDateLayout + yamlClockLayout), true
 }
 
+// A zone-less layout is read in yamlLocation, the zone the value is shown in.
+var yamlZoneLessLayouts = []string{
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02 15:04:05.999999999",
+}
+
 func yamlParseTime(tok json.Token) (time.Time, bool) {
 	switch v := tok.(type) {
 	case string:
-		t, err := time.Parse(time.RFC3339Nano, v)
-		if err != nil {
-			return time.Time{}, false
+		if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+			return t, true
 		}
-		return t, true
+		for _, layout := range yamlZoneLessLayouts {
+			if t, err := time.ParseInLocation(layout, v, yamlLocation); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, false
 	case json.Number:
 		return yamlParseEpoch(v.String())
 	}
 	return time.Time{}, false
+}
+
+// A duration or a counter under a time key must stay the number it was.
+var (
+	yamlEpochMin = time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)
+	yamlEpochMax = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+)
+
+func yamlEpochInRange(t time.Time) bool {
+	return !t.Before(yamlEpochMin) && t.Before(yamlEpochMax)
 }
 
 // The unit is read off the magnitude, since a logger rarely says which one it used.
@@ -269,16 +289,18 @@ func yamlParseEpoch(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+		var t time.Time
 		switch {
 		case f < 1e11:
-			return time.Unix(n, 0), true
+			t = time.Unix(n, 0)
 		case f < 1e14:
-			return time.UnixMilli(n), true
+			t = time.UnixMilli(n)
 		case f < 1e17:
-			return time.UnixMicro(n), true
+			t = time.UnixMicro(n)
 		default:
-			return time.Unix(0, n), true
+			t = time.Unix(0, n)
 		}
+		return t, yamlEpochInRange(t)
 	}
 	var scale float64
 	switch {
@@ -293,7 +315,8 @@ func yamlParseEpoch(s string) (time.Time, bool) {
 	}
 	sec := f / scale
 	whole := math.Floor(sec)
-	return time.Unix(int64(whole), int64((sec-whole)*1e9)), true
+	t := time.Unix(int64(whole), int64((sec-whole)*1e9))
+	return t, yamlEpochInRange(t)
 }
 
 func yamlScalar(tok json.Token) string {

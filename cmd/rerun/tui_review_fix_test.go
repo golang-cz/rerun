@@ -174,6 +174,7 @@ func TestBarHintNamesTheKeys(t *testing.T) {
 func TestFocusVisibility(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.cursor = 0
+	m.applyScope(1, "") // solo api, so the cursor row is out of the pane's scope
 	r, _ := m.cursorRow()
 	if m.rowStyle(0, r).GetFaint() {
 		t.Fatal("cursor row is faint with the list focused")
@@ -242,6 +243,57 @@ func TestNarrowBarFoldsOldestChips(t *testing.T) {
 	if displayWidth(line) != 34 {
 		t.Fatalf("bar width = %d, want 34", displayWidth(line))
 	}
+}
+
+// A focused pane with no scope draws every target, so nothing dims.
+func TestFocusedPaneWithoutScopeDimsNothing(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.paneFocus = true
+	if m.solo >= 0 || m.schemaSel != "" {
+		t.Fatal("fixture must have no pane scope")
+	}
+	for _, key := range []string{"target:web", "target:api"} {
+		if got := drawnRow(t, m, key); !strings.Contains(got, "\x1b[") || faintLine(got) {
+			t.Fatalf("%s = %q, want full color with nothing dimmed", key, got)
+		}
+	}
+}
+
+// s on a focused group pane stops every running member, not the stale cursor row.
+func TestStopInTheFocusedPaneStopsAGroupScope(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	m.applyScope(-1, "backend")
+	m.paneFocus = true
+	m.cursor = 3 // web, outside the scope
+	for i := range m.targets {
+		m.targets[i].state = stateRunning
+	}
+
+	press(m, "s")
+
+	if m.targets[0].state != stateStopped || m.targets[1].state != stateStopped {
+		t.Fatalf("backend states = %v, %v, want both stopped", m.targets[0].state, m.targets[1].state)
+	}
+	if m.targets[2].state != stateRunning {
+		t.Fatalf("web state = %v, want running (outside the scope)", m.targets[2].state)
+	}
+}
+
+// ctrl+l on a focused group pane blanks the group, not the stale cursor row.
+func TestClearInTheFocusedPaneBlanksAGroupScope(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	m.applyScope(-1, "backend")
+	addLines(m, "api", "api-1")
+	addLines(m, "worker", "worker-1")
+	addLines(m, "web", "web-1")
+	m.frame()
+	m.paneFocus = true
+	m.cursor = 3 // web, outside the scope
+
+	press(m, "ctrl+l")
+
+	noMarkerText(t, m)
+	blankTop(t, m)
 }
 
 func TestPinnedRuleShowsCue(t *testing.T) {

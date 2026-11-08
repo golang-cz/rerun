@@ -229,8 +229,7 @@ func TestMutedTargetStaysOutOfGroupAndCombinedOutput(t *testing.T) {
 
 func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
-	// The full help needs a 32-row screen or taller; the box stops two rows short of it.
-	m.width, m.height = 100, 36
+	m.width, m.height = 100, 30
 	m.help, m.helpAll = true, true
 	view := m.View().Content
 	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off"} {
@@ -620,8 +619,7 @@ func TestNamedRunListsEveryTargetAndStartsOffOnDemand(t *testing.T) {
 
 func TestHelpOverlayToggles(t *testing.T) {
 	m := newTestModel(t)
-	// The full help's mouse notes need a 32-row screen or taller.
-	m.width, m.height = 100, 36
+	m.width, m.height = 100, 30
 	press(m, "?")
 	if !m.help || m.helpAll {
 		t.Fatal("? did not open the short help overlay")

@@ -224,8 +224,7 @@ func (m *tuiModel) toggleCursorExpand() {
 	m.toggleExpand(m.rowInfo(m.paneCursorRow()).raw)
 }
 
-// arrowExpand opens the cursor line, like enter, and claims the key on a line that
-// is already open; a plain line leaves the pane to its pan.
+// arrowExpand only opens: a right arrow on an open line must keep panning, not collapse it.
 func (m *tuiModel) arrowExpand() bool {
 	r, ok := m.cursorLine()
 	if !ok || !m.expandable(r.raw) {

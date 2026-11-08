@@ -84,6 +84,12 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 			t.Errorf("full help is missing %q", want)
 		}
 	}
+	// The last legend row and the footer prove no row was clipped off the bottom.
+	for _, want := range []string{"· off", "esc close"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("full help is clipped: missing %q", want)
+		}
+	}
 	assertBoxRows(t, full, 30, "full help")
 }
 
