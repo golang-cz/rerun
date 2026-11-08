@@ -156,3 +156,39 @@ func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 		t.Fatalf("bar line = %q, want no filter prompt", got)
 	}
 }
+
+// The filter box has its own footer; the find box keeps the ctrl+g hint.
+func TestInputBoxFootersPerMode(t *testing.T) {
+	m := alphaModel(t)
+
+	press(m, "ctrl+f")
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter keep · ctrl+g next · esc clear") {
+		t.Fatalf("find box = %q, want its ctrl+g footer", box)
+	}
+	press(m, "esc")
+
+	press(m, "/")
+	box := ansi.Strip(m.inputBoxView())
+	if !strings.Contains(box, "enter keep · esc close") {
+		t.Fatalf("filter box = %q, want its own footer", box)
+	}
+	if strings.Contains(box, "ctrl+g next") {
+		t.Fatalf("filter box = %q, want no ctrl+g hint", box)
+	}
+}
+
+// A narrow pane keeps the filter's line count beside the query.
+func TestNarrowInputBoxKeepsTheCount(t *testing.T) {
+	m := alphaModel(t)
+	m.width, m.height = 30, 20
+	press(m, "/")
+	typeString(m, "alpha")
+
+	count := m.inputCount()
+	if count == "" {
+		t.Fatal("the filter status is empty, so the check is vacuous")
+	}
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, count) {
+		t.Fatalf("box = %q, want the count %q kept", box, count)
+	}
+}

@@ -320,10 +320,18 @@ func (m *tuiModel) inputBoxView() string {
 	if m.input == "" {
 		head += m.styles.paneCursor.Render(" ") + m.styles.hint.Render(m.inputPlaceholder())
 	} else {
-		head += finderTail(m.input, innerW-2-displayWidth(count)-2) + m.styles.paneCursor.Render(" ")
+		head += finderTail(m.input, max(0, innerW-2-displayWidth(count)-2)) + m.styles.paneCursor.Render(" ")
 	}
-	head += strings.Repeat(" ", max(1, innerW-displayWidth(head)-displayWidth(count))) + m.styles.hint.Render(count)
-	return m.modalBox(head, "enter keep · ctrl+g next · esc clear", nil, outerW, 0)
+	// Reserve the count's cells on a narrow pane: the query trims first, the count stays whole.
+	countW := displayWidth(count)
+	head = truncate(head, max(0, innerW-countW-1))
+	head += strings.Repeat(" ", max(1, innerW-displayWidth(head)-countW)) + m.styles.hint.Render(count)
+	// The find box jumps between matches; the filter box only keeps or closes.
+	footer := "enter keep · ctrl+g next · esc clear"
+	if m.inputMode == inputFilter {
+		footer = "enter keep · esc close"
+	}
+	return m.modalBox(head, footer, nil, outerW, 0)
 }
 
 // layoutWidths splits the screen between the two columns.

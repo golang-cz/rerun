@@ -61,10 +61,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vpDirty = true
 		// A rule's cut and its expansion depend on the width, so the rows are redone too.
 		m.dispDirty = true
+		m.fitWatch()
 		return m, nil
 
 	case tickMsg:
 		m.now = time.Time(msg)
+		m.fitWatch()
 		return m, tickCmd()
 
 	case eventsMsg:
@@ -587,7 +589,7 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open {
+	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.watch.open {
 		return m, nil
 	}
 	e := msg.Mouse()

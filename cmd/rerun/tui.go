@@ -690,6 +690,7 @@ func (m *tuiModel) applyEvents(events []event) {
 	if m.search != "" {
 		m.recomputeSearch(false)
 	}
+	m.fitWatch()
 }
 
 func (m *tuiModel) applyEvent(ev event) {

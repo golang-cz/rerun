@@ -82,12 +82,21 @@ type drawerRow struct {
 
 // recordFeed folds one change batch into the feed and returns the batch's id, or 0
 // for an empty batch. A change within feedJoin of the newest batch's first event
-// joins it, so one save of one file is one line.
+// joins it, so one save of one file is one line. Files and a watcher error never
+// share a batch: the modal draws one or the other.
 func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) int {
 	if len(cs.Files) == 0 && cs.Error == nil {
 		return 0
 	}
-	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin {
+	// A mixed ChangeSet becomes two batches, so its error cannot swallow its files.
+	if cs.Error != nil && len(cs.Files) > 0 {
+		clean := cs
+		clean.Error = nil
+		m.recordFeed(clean, at, owner)
+		cs.Files, cs.Ops = nil, nil
+	}
+	isErr := cs.Error != nil
+	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin || (m.feed[n-1].err != nil) != isErr {
 		m.feedSeq++
 		m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{}, dirs: map[string]bool{}})
 	}

@@ -195,8 +195,14 @@ func TestWatcherErrorReachesTheFeedWithoutRestart(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.width, m.height = 100, 30
 	m.applyEvents(sink.all())
-	if n := len(m.feed); n != 1 || m.feed[0].err == nil {
-		t.Fatalf("feed = %d batches, want one carrying the error", n)
+	if n := len(m.feed); n != 2 {
+		t.Fatalf("feed = %d batches, want the files and the error kept apart", n)
+	}
+	if m.feed[0].err != nil || len(m.feed[0].files) != 1 {
+		t.Fatalf("file batch = %+v, want the file with no error", m.feed[0])
+	}
+	if m.feed[1].err == nil {
+		t.Fatalf("feed = %+v, want the error batch as the newest", m.feed)
 	}
 	if got := m.feed[0].targets; len(got) != 0 {
 		t.Fatalf("feed targets = %v, want none triggered", got)
@@ -212,4 +218,62 @@ func TestWatcherErrorReachesTheFeedWithoutRestart(t *testing.T) {
 		}
 	}
 	t.Fatalf("drawer = %q, want the watcher's error text", drawerOf(m))
+}
+
+// Clicks and wheels under the w modal reach nothing: the frame stays as it was.
+func TestWatchModalBlocksMouse(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 24
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.now = spawnClock
+	press(m, "w")
+
+	watch, cursor, offset, follow := m.watch, m.cursor, m.vp.YOffset(), m.follow
+	m.handleMouse(mouse(2, 2, false))
+	m.handleMouse(wheelDown(2, 1))
+	m.handleMouse(wheelUp(2, 1))
+
+	if m.watch != watch || m.cursor != cursor || m.vp.YOffset() != offset || m.follow != follow {
+		t.Fatalf("mouse reached the frame under the modal: watch=%+v cursor=%d offset=%d follow=%v", m.watch, m.cursor, m.vp.YOffset(), m.follow)
+	}
+}
+
+// An empty feed shows a faint placeholder instead of a blank body.
+func TestWatchModalEmptyFeedPlaceholder(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 24
+	press(m, "w")
+
+	if body := strings.Join(watchBody(m), "\n"); !strings.Contains(body, "no changes in the last minute") {
+		t.Fatalf("empty feed body = %q, want the placeholder", body)
+	}
+}
+
+// Drawing the modal twice is identical and moves no state; the handlers clamp top.
+func TestWatchViewStaysPure(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 24
+	for i := range 30 {
+		changeAt(m, "web", spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	}
+	m.now = spawnClock.Add(30 * time.Second)
+	press(m, "w")
+	for range 30 {
+		press(m, "j")
+	}
+
+	top := m.watch.top
+	if top == 0 {
+		t.Fatal("the cursor did not scroll the modal, so the purity check is vacuous")
+	}
+	first := m.watchView()
+	if m.watch.top != top {
+		t.Fatalf("watchView moved top from %d to %d", top, m.watch.top)
+	}
+	if second := m.watchView(); second != first {
+		t.Fatal("two renders of the same state differ")
+	}
+	if m.watch.top != top {
+		t.Fatalf("the second render moved top from %d to %d", top, m.watch.top)
+	}
 }

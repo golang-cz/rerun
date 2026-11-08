@@ -14,6 +14,9 @@ const watchTitle = "what changed"
 // watchFooter is the modal's key line.
 const watchFooter = "j k move · → files · ← back · esc close"
 
+// watchEmpty is the modal's placeholder while no batch sits in the window.
+const watchEmpty = "no changes in the last minute"
+
 // watchState is the `w` what-changed modal: the last minute's change batches read
 // over the live frame. cursor and openID name batches, never indexes, so a batch
 // that arrives while the modal is open cannot move the cursor off its own row.
@@ -32,6 +35,7 @@ func (m *tuiModel) openWatch() {
 		id = batches[0].id
 	}
 	m.watch = watchState{open: true, cursor: id}
+	m.fitWatch()
 }
 
 // watchSize is the modal's outer box: the finder's width, 80% of the terminal's height.
@@ -130,7 +134,26 @@ func (m *tuiModel) handleWatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "left":
 		m.collapseWatch()
 	}
+	m.fitWatch()
 	return m, nil
+}
+
+// fitWatch clamps the modal's scroll window to its cursor. The handlers call it,
+// never the render, so drawing the same state twice changes nothing.
+func (m *tuiModel) fitWatch() {
+	if !m.watch.open {
+		return
+	}
+	batches, dim := m.feedVisible()
+	rows := m.watchRows(batches, dim)
+	sel := 0
+	for i, r := range rows {
+		if r.sel {
+			sel = i
+			break
+		}
+	}
+	m.watch.top = scrollTop(m.watch.top, len(rows), m.watchBodyRows(), sel)
 }
 
 // watchView draws the modal: the batches, the open batch's files, and the key line.
@@ -141,17 +164,11 @@ func (m *tuiModel) watchView() string {
 	rows := m.watchRows(batches, dim)
 	body := m.watchBodyRows()
 
-	sel := 0
-	for i, r := range rows {
-		if r.sel {
-			sel = i
-			break
-		}
-	}
-	m.watch.top = scrollTop(m.watch.top, len(rows), body, sel)
-
 	// The body fills its rows, so the footer lands on the box's last inner row.
 	lines := make([]string, 0, body)
+	if len(rows) == 0 {
+		lines = append(lines, m.styles.hint.Render(watchEmpty))
+	}
 	for i := m.watch.top; i < len(rows) && len(lines) < body; i++ {
 		lines = append(lines, m.watchLine(rows[i], innerW))
 	}

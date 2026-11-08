@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -8,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
+	"github.com/golang-cz/rerun"
 )
 
 // feedWidth is a column wide enough for a whole feed line, so a test reads text
@@ -505,5 +508,48 @@ func TestDrawerCursorResetsToNewestOnFocus(t *testing.T) {
 	press(m, "esc", "tab")
 	if m.feedCursor != newest {
 		t.Fatalf("drawer cursor = %d after refocus, want the newest batch %d", m.feedCursor, newest)
+	}
+}
+
+// An error batch never joins a file batch, and a mixed ChangeSet keeps its files.
+func TestFeedKeepsErrorAndFileBatchesApart(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.now = spawnClock
+	web := m.targets[0].spec
+
+	m.recordFeed(rerun.ChangeSet{Error: errors.New("too many open files")}, spawnClock, web)
+	m.recordFeed(oneFile("a.go"), spawnClock.Add(50*time.Millisecond), web)
+
+	if len(m.feed) != 2 {
+		t.Fatalf("batches = %d, want the error and the file kept apart", len(m.feed))
+	}
+	if m.feed[0].err == nil || len(m.feed[0].files) != 0 {
+		t.Fatalf("error batch = %+v, want the error alone", m.feed[0])
+	}
+	file := m.feed[1]
+	if file.err != nil || len(file.files) != 1 {
+		t.Fatalf("file batch = %+v, want a.go without the error", file)
+	}
+
+	// The file's drawer row keeps its plain paint, not the error's red.
+	rows := feedBatchRows([]feedBatch{file}, false, file.id, m.now)
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed)).Render("x")
+	if got := batchLine(rows[0], feedWidth, m.styles.base); strings.Contains(got, red[:strings.Index(red, "x")]) {
+		t.Fatalf("file batch row = %q, want no error paint", ansi.Strip(got))
+	}
+
+	// A ChangeSet carrying both keeps its files in a batch of their own.
+	mixed := oneFile("b.go")
+	mixed.Error = errors.New("too many open files")
+	m.recordFeed(mixed, spawnClock.Add(time.Second), web)
+
+	if got := len(m.feed); got != 4 {
+		t.Fatalf("batches = %d, want the mixed change split into a file and an error batch", got)
+	}
+	if m.feed[2].err != nil || len(m.feed[2].files) != 1 {
+		t.Fatalf("mixed files batch = %+v, want b.go alone", m.feed[2])
+	}
+	if m.feed[3].err == nil {
+		t.Fatalf("mixed error batch = %+v, want the error alone", m.feed[3])
 	}
 }
