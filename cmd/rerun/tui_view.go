@@ -151,6 +151,9 @@ func (m *tuiModel) frame() string {
 	if m.finder.open {
 		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
 	}
+	if m.watch.open {
+		frame = overlayCenter(frame, m.watchView(), m.width, m.height)
+	}
 	if m.help {
 		frame = overlayCenter(frame, m.helpView(), m.width, m.height)
 	}
@@ -562,6 +565,13 @@ func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
 // first; the path takes the rest and cuts from its left, so the file name survives.
 func batchLine(row drawerRow, leftW int, base lipgloss.Style) string {
 	age := strings.Repeat(" ", max(0, feedAgeW-displayWidth(row.age))) + row.age
+	if row.err != nil {
+		return renderSegs([]seg{
+			{text: age, faint: true},
+			{text: "  "},
+			{text: printable(row.err.Error(), false), color: colorRed},
+		}, base, leftW)
+	}
 	path := row.label
 	if row.extra > 0 {
 		path += fmt.Sprintf(" +%d", row.extra)
@@ -1104,6 +1114,7 @@ var helpShortKeys = [][2]string{
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
 	{"tab", "focus the fs drawer"},
+	{"w", "what changed (last minute)"},
 	{"enter → a f", "pane: expand the line · ← collapse · a adds its key, f filters its value"},
 	{"c", "toggle the columns table"},
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
@@ -1122,11 +1133,11 @@ var helpKeys = [][2]string{
 	{"space", "start or stop the row · pane: jump to live"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r", "mute the stream (group row: its targets); r reboots (grace applies)"},
-	{"t tab", "t toggles the fs drawer; tab focuses it (j/k move, enter lists a batch's files, esc closes)"},
+	{"w t tab", "what changed (last minute) · t fs drawer, tab focuses it"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
 	{"ctrl+k", "find a target or group: enter jumps or runs a make target, esc closes"},
 	{"o", "open the target's url"},
-	{"ctrl+f", "find in the pane (n/N next/prev; chip ×, esc keeps it)"},
+	{"ctrl+f", "find in the pane (ctrl+g next; after enter n/N next/prev; esc clears)"},
 	{"ctrl+l", "clear the target's log (group row: its targets); old lines stay in scrollback"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
@@ -1162,8 +1173,9 @@ func (m *tuiModel) helpView() string {
 			body = append(body, m.styles.hint.Render(line))
 		}
 	}
-	// Content-sized, capped at two rows less than the terminal; the header and the
-	// footer keep their rows, so the body gives up its last rows first.
+	// Content-sized, capped at two rows less than the terminal so the full list
+	// fits a 30-row screen; the header and the footer keep their rows, so the
+	// body gives up its last rows first.
 	outerH := m.styles.box.GetVerticalFrameSize() + 3 + len(body)
 	outerH = min(outerH, max(1, m.height-2))
 	body = body[:min(len(body), max(0, outerH-m.styles.box.GetVerticalFrameSize()-3))]

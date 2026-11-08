@@ -109,12 +109,17 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ctrl+k opens the finder from the list, not over the bar, help or quit confirm.
-	if msg.String() == "ctrl+k" && !m.finder.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+	if msg.String() == "ctrl+k" && !m.finder.open && !m.watch.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
 		m.finder = finderState{open: true}
 		return m, nil
 	}
 	if m.finder.open {
 		return m.handleFinderKey(msg)
+	}
+
+	// The what-changed modal owns every key while it is up, the way the finder does.
+	if m.watch.open {
+		return m.handleWatchKey(msg)
 	}
 
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
@@ -357,6 +362,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "t":
 		m.toggleDrawer()
+
+	case "w":
+		m.openWatch()
 
 	case "o":
 		if i := m.cursorTarget(); i >= 0 {

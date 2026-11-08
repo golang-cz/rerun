@@ -790,8 +790,9 @@ func (r *targetRunner) restart(ctx context.Context) {
 }
 
 func (r *targetRunner) handleChange(ctx context.Context, changeSet rerun.ChangeSet) {
+	// The error rides the change batch into the feed; no target triggers for it.
 	if changeSet.Error != nil {
-		r.sink.emit(event{kind: evWatcherErr, target: r.target.Name, err: changeSet.Error})
+		r.reportChange(changeSet, false)
 		return
 	}
 

@@ -50,6 +50,9 @@ type feedBatch struct {
 	files   map[string]byte
 	dirs    map[string]bool
 	targets []string
+	// err is the watcher error the batch's ChangeSet carried, so the modal can
+	// show what went wrong instead of files.
+	err error
 }
 
 type drawerKind int
@@ -72,6 +75,7 @@ type drawerRow struct {
 	glyph   string
 	age     string
 	targets []string
+	err     error
 	dim     bool
 	cursor  bool
 }
@@ -80,7 +84,7 @@ type drawerRow struct {
 // for an empty batch. A change within feedJoin of the newest batch's first event
 // joins it, so one save of one file is one line.
 func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) int {
-	if len(cs.Files) == 0 {
+	if len(cs.Files) == 0 && cs.Error == nil {
 		return 0
 	}
 	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin {
@@ -88,6 +92,9 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) in
 		m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{}, dirs: map[string]bool{}})
 	}
 	b := &m.feed[len(m.feed)-1]
+	if cs.Error != nil {
+		b.err = cs.Error // a later clean change in the same batch must not clear it
+	}
 	for path := range cs.Files {
 		key := m.feedPath(path, owner)
 		b.files[key] = mergeOp(b.files[key], opGlyph(cs.Ops[path]))
@@ -217,8 +224,14 @@ func (m *tuiModel) feedVisible() ([]feedBatch, bool) {
 // feedCursorIndex is the cursor's batch within the visible list, the newest when
 // the cursor names a batch that has aged out.
 func (m *tuiModel) feedCursorIndex(batches []feedBatch) int {
+	return batchIndex(batches, m.feedCursor)
+}
+
+// batchIndex is the position of the named batch in the visible list, the newest
+// (0) when no batch carries that id.
+func batchIndex(batches []feedBatch, id int) int {
 	for i, b := range batches {
-		if b.id == m.feedCursor {
+		if b.id == id {
 			return i
 		}
 	}
@@ -326,15 +339,21 @@ func (m *tuiModel) drawerRows() []drawerRow {
 // fitFeed keeps the scroll window inside the lines and, in feed mode, keeps the
 // cursor's line visible. A negative cursor means the file list, which has no cursor.
 func (m *tuiModel) fitFeed(n, body, cursor int) {
+	m.feedTop = scrollTop(m.feedTop, n, body, cursor)
+}
+
+// scrollTop keeps a scroll window inside n lines and the cursor's line visible. A
+// negative cursor means no cursor, as in the file list.
+func scrollTop(top, n, body, cursor int) int {
 	if cursor >= 0 {
-		if cursor < m.feedTop {
-			m.feedTop = cursor
+		if cursor < top {
+			top = cursor
 		}
-		if cursor >= m.feedTop+body {
-			m.feedTop = cursor - body + 1
+		if cursor >= top+body {
+			top = cursor - body + 1
 		}
 	}
-	m.feedTop = min(max(m.feedTop, 0), max(0, n-body))
+	return min(max(top, 0), max(0, n-body))
 }
 
 func drawerWindow(header drawerRow, lines []drawerRow, top, body int) []drawerRow {
@@ -352,6 +371,7 @@ func feedBatchRows(batches []feedBatch, dim bool, cursor int, now time.Time) []d
 			extra:   len(b.files) - 1,
 			age:     fmtDur(now.Sub(b.at)),
 			targets: b.targets,
+			err:     b.err,
 			dim:     dim,
 			cursor:  b.id == cursor,
 		})
@@ -365,6 +385,9 @@ func feedFirstFile(b feedBatch) string {
 	paths := make([]string, 0, len(b.files))
 	for p := range b.files {
 		paths = append(paths, p)
+	}
+	if len(paths) == 0 {
+		return "" // an error batch carries no file to name
 	}
 	first := slices.Min(paths)
 	if b.dirs[first] {

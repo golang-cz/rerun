@@ -133,6 +133,13 @@ func (s *plainSink) render(ev event) string {
 		return fmt.Sprintf("[%s] %s\n", ev.target, ev.line)
 
 	case evChanged:
+		// An error batch keeps the plain path's watcher-error line.
+		if ev.change.Error != nil {
+			if raw {
+				return fmt.Sprintf("%v\n", ev.change.Error)
+			}
+			return fmt.Sprintf("[%s] watcher error: %v\n", ev.target, ev.change.Error)
+		}
 		plural := ""
 		if ev.count > 1 {
 			plural = "s"
