@@ -63,6 +63,8 @@ func keyMsg(s string) tea.Msg {
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "ctrl+f":
 		return tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+	case "ctrl+h":
+		return tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl}
 	case "ctrl+g":
 		return tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
 	case "ctrl+l":

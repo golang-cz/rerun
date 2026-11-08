@@ -113,6 +113,22 @@ func TestBackspaceRemovesTheFocusedChip(t *testing.T) {
 	}
 }
 
+// ctrl+h removes the bar's focused chip, exactly as backspace does.
+func TestCtrlHRemovesTheFocusedChip(t *testing.T) {
+	m := alphaModel(t)
+	commitText(m, "/", "alpha")
+	commitText(m, "/", "beta")
+
+	press(m, "v", "left")
+	if !m.barFocus || m.inputMode != inputNone || m.barSel != 1 {
+		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last chip", m.barFocus, m.inputMode, m.barSel)
+	}
+	press(m, "ctrl+h")
+	if len(m.filters) != 1 || m.filters[0].query != "alpha" {
+		t.Fatalf("filters = %+v, want beta removed by ctrl+h", m.filters)
+	}
+}
+
 // Esc backs out one level per focus and never clears filters, find, or chips.
 func TestEscLadderNeverClearsFilters(t *testing.T) {
 	m := groupedModel(t)

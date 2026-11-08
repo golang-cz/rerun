@@ -201,16 +201,18 @@ func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.finder.sel = max(0, m.finder.sel-1)
 	case "down", "ctrl+n":
 		m.finder.sel = min(max(0, n-1), m.finder.sel+1)
-	case "backspace":
+	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
+	case "backspace", "ctrl+h":
 		if r := []rune(m.finder.query); len(r) > 0 {
 			m.finder.query = string(r[:len(r)-1])
 			m.finder.sel = 0
 		}
 	default:
-		if msg.Mod.Contains(tea.ModAlt) {
-			break
-		}
 		m.finderPaste(msg.Text)
+		// v1 handed an alt combo over as key runes, so a printable one typed its letter.
+		if msg.Text == "" && msg.Mod.Contains(tea.ModAlt) && unicode.IsPrint(msg.Code) {
+			m.finderPaste(string(msg.Code))
+		}
 	}
 	return m, nil
 }

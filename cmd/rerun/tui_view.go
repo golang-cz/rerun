@@ -378,6 +378,8 @@ func (m *tuiModel) inputBoxView() string {
 	footer := "enter keep · ctrl+g next · esc clear"
 	if m.inputMode == inputFilter {
 		footer = "enter keep · esc close"
+	} else if wide := "enter keep · ctrl+g next · ctrl+shift+g prev · esc clear"; displayWidth(wide) <= innerW {
+		footer = wide
 	}
 	return m.modalBox(head, footer, nil, outerW, 0)
 }

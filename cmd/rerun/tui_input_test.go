@@ -28,7 +28,7 @@ func TestSearchBoxAtPaneTop(t *testing.T) {
 	if !strings.Contains(box, "find in pane…") {
 		t.Fatalf("box = %q, want the find placeholder", box)
 	}
-	if !strings.Contains(box, "enter keep · ctrl+g next · esc clear") {
+	if !strings.Contains(box, "enter keep · ctrl+g next") {
 		t.Fatalf("box = %q, want the keys footer", box)
 	}
 	if top := boxTop(m); !strings.Contains(top, "find in pane…") {
@@ -190,12 +190,38 @@ func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 	}
 }
 
+// Kitty's disambiguation spells backspace as ctrl+h; the input must delete on both.
+func TestCtrlHDeletesLikeBackspaceInInput(t *testing.T) {
+	m := alphaModel(t)
+	press(m, "ctrl+f")
+	typeString(m, "alpha")
+	press(m, "ctrl+h")
+	if m.input != "alph" {
+		t.Fatalf("input = %q after ctrl+h, want %q", m.input, "alph")
+	}
+	if m.inputMode != inputSearch {
+		t.Fatalf("mode = %d after ctrl+h, want the find box still open", m.inputMode)
+	}
+}
+
+// ctrl+h on an empty input removes the last chip, exactly as backspace does.
+func TestCtrlHOnEmptyInputRemovesLastChip(t *testing.T) {
+	m := alphaModel(t)
+	commitText(m, "/", "alpha")
+	commitText(m, "/", "beta")
+
+	press(m, "v", "ctrl+h")
+	if len(m.filters) != 1 || m.filters[0].query != "alpha" || m.inputMode != inputFilter {
+		t.Fatalf("filters = %+v mode = %d after ctrl+h, want alpha kept and the input open", m.filters, m.inputMode)
+	}
+}
+
 // The filter box has its own footer; the find box keeps the ctrl+g hint.
 func TestInputBoxFootersPerMode(t *testing.T) {
 	m := alphaModel(t)
 
 	press(m, "ctrl+f")
-	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter keep · ctrl+g next · esc clear") {
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter keep · ctrl+g next") {
 		t.Fatalf("find box = %q, want its ctrl+g footer", box)
 	}
 	press(m, "esc")
@@ -207,6 +233,35 @@ func TestInputBoxFootersPerMode(t *testing.T) {
 	}
 	if strings.Contains(box, "ctrl+g next") {
 		t.Fatalf("filter box = %q, want no ctrl+g hint", box)
+	}
+}
+
+// The find box names the previous-match key only when the box can hold the longer footer.
+func TestInputBoxFooterGrowsWithWidth(t *testing.T) {
+	m := alphaModel(t)
+	long := "enter keep · ctrl+g next · ctrl+shift+g prev · esc clear"
+	short := "enter keep · ctrl+g next · esc clear"
+
+	press(m, "ctrl+f")
+	m.width, m.height = 200, 20
+	if innerW := m.modalInnerW(m.inputBoxW()); innerW < displayWidth(long) {
+		t.Fatalf("wide innerW = %d, want at least %d", innerW, displayWidth(long))
+	}
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, long) {
+		t.Fatalf("wide find box = %q, want the four-key footer %q", box, long)
+	}
+
+	// A middling pane keeps today's shorter text instead of showing a cut hint.
+	m.width, m.height = 80, 20
+	if innerW := m.modalInnerW(m.inputBoxW()); innerW < displayWidth(short) || innerW >= displayWidth(long) {
+		t.Fatalf("mid innerW = %d, want it to fit %d but not %d", innerW, displayWidth(short), displayWidth(long))
+	}
+	box := ansi.Strip(m.inputBoxView())
+	if !strings.Contains(box, short) {
+		t.Fatalf("mid find box = %q, want %q", box, short)
+	}
+	if strings.Contains(box, "ctrl+shift+g") {
+		t.Fatalf("narrow find box = %q, want no ctrl+shift+g hint", box)
 	}
 }
 

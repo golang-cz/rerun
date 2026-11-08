@@ -182,7 +182,8 @@ func (m *tuiModel) handleBarNav(msg tea.KeyPressMsg) bool {
 				m.barSel = -1
 			}
 		}
-	case "backspace", "delete":
+	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
+	case "backspace", "ctrl+h", "delete":
 		if len(chips) == 0 {
 			break
 		}

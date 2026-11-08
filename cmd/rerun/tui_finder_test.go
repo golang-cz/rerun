@@ -270,14 +270,34 @@ func TestFinderSanitizesQueryAndDesc(t *testing.T) {
 	m := newTestModel(t, describe(target("docs"), "frontend   \n  docs"))
 	m.Update(ctrlK)
 	m.Update(tea.PasteMsg{Content: "do\ncs\r\x1b"})
-	m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModAlt})
 	if m.finder.query != "docs" {
-		t.Fatalf("query = %q, want control characters and alt runes dropped", m.finder.query)
+		t.Fatalf("query = %q, want control characters dropped", m.finder.query)
 	}
 	for _, c := range m.finderCandidates() {
 		if c.name == "docs" && c.desc != "frontend docs" {
 			t.Fatalf("desc = %q, want whitespace collapsed", c.desc)
 		}
+	}
+}
+
+// Kitty's disambiguation spells backspace as ctrl+h; the finder must delete on both.
+func TestFinderCtrlHDeletesLikeBackspace(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	press(m, "w", "o", "r")
+	press(m, "ctrl+h")
+	if m.finder.query != "wo" {
+		t.Fatalf("query = %q after ctrl+h, want %q", m.finder.query, "wo")
+	}
+}
+
+// The bar types an alt+printable combo; the finder must do the same.
+func TestFinderTypesAltPrintableLikeTheBar(t *testing.T) {
+	m := newTestModel(t)
+	m.Update(ctrlK)
+	m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModAlt})
+	if m.finder.query != "q" {
+		t.Fatalf("query = %q after alt+q, want %q typed like the bar", m.finder.query, "q")
 	}
 }
 

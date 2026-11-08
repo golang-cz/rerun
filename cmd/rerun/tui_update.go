@@ -165,7 +165,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter", "ctrl+m", "ctrl+c":
 			return m, tea.Quit
-		case "esc", "q":
+		case "esc", "ctrl+[", "q":
 			return m, nil
 		}
 	}
@@ -442,7 +442,8 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.inputMode = inputNone
 			m.barSel = len(chips) - 1
 		}
-	case "backspace":
+	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
+	case "backspace", "ctrl+h":
 		if m.input != "" {
 			r := []rune(m.input)
 			m.input = string(r[:len(r)-1])

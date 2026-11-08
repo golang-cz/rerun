@@ -100,6 +100,21 @@ func TestQuitConfirmEscCancels(t *testing.T) {
 	}
 }
 
+// ctrl+[ is the enhanced spelling of esc, so it dismisses the modal too.
+func TestQuitConfirmCtrlOpenBracketCancels(t *testing.T) {
+	m := newTestModel(t)
+	press(m, "q")
+	if _, cmd := m.Update(keyMsg("ctrl+[")); cmd != nil {
+		t.Fatal("ctrl+[ on the confirm modal returned a quit command")
+	}
+	if m.confirmQuit {
+		t.Fatal("ctrl+[ did not dismiss the confirm modal")
+	}
+	if strings.Contains(m.View().Content, "Quit rerun?") {
+		t.Fatal("the confirm modal is still rendering after ctrl+[")
+	}
+}
+
 // Any other key cancels the modal and still runs normally.
 func TestQuitConfirmOtherKeyStays(t *testing.T) {
 	m := newTestModel(t)
