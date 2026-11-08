@@ -77,11 +77,11 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 100, 40
 	press(m, "?")
-	if view := m.View(); !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "filter") {
+	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "filter") {
 		t.Errorf("short help should name ctrl+f and the filter:\n%s", view)
 	}
 	press(m, "?")
-	if view := m.View(); !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ v") {
+	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ v") {
 		t.Errorf("full help should name ctrl+f and / v:\n%s", view)
 	}
 }

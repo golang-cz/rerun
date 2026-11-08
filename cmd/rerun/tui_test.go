@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/golang-cz/rerun"
 )
 
@@ -32,33 +32,46 @@ func newTestModel(t *testing.T, targets ...Target) *tuiModel {
 	return m
 }
 
-func keyMsg(s string) tea.KeyMsg {
+// keyMsg builds the message v2's decoder sends for a key name.
+func keyMsg(s string) tea.Msg {
 	switch s {
 	case " ":
-		return tea.KeyMsg{Type: tea.KeySpace}
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEsc}
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "left":
-		return tea.KeyMsg{Type: tea.KeyLeft}
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case "right":
-		return tea.KeyMsg{Type: tea.KeyRight}
+		return tea.KeyPressMsg{Code: tea.KeyRight}
 	case "home":
-		return tea.KeyMsg{Type: tea.KeyHome}
+		return tea.KeyPressMsg{Code: tea.KeyHome}
 	case "end":
-		return tea.KeyMsg{Type: tea.KeyEnd}
+		return tea.KeyPressMsg{Code: tea.KeyEnd}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	case "ctrl+f":
-		return tea.KeyMsg{Type: tea.KeyCtrlF}
-	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		return tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl}
+	case "ctrl+s":
+		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	case "ctrl+c":
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+	case "shift+up":
+		return tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}
+	case "shift+down":
+		return tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift}
 	}
+	if r := []rune(s); len(r) == 1 {
+		return tea.KeyPressMsg{Code: r[0], Text: s}
+	}
+	return tea.PasteMsg{Content: s}
 }
 
 func press(m *tuiModel, keys ...string) {
@@ -68,11 +81,15 @@ func press(m *tuiModel, keys ...string) {
 }
 
 func mouse(x, y int, shift bool) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Y: y, Shift: shift, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft}
+	var mod tea.KeyMod
+	if shift {
+		mod = tea.ModShift
+	}
+	return tea.MouseClickMsg{X: x, Y: y, Mod: mod, Button: tea.MouseLeft}
 }
 
 func motion(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionMotion}
+	return tea.MouseMotionMsg{X: x, Y: y}
 }
 
 // slowClick expires the double-click window, so the next click reads as a
@@ -207,7 +224,7 @@ func TestMutedTargetStaysOutOfGroupAndCombinedOutput(t *testing.T) {
 func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
 	m.help, m.helpAll = true, true
-	view := m.View()
+	view := m.View().Content
 	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("help is missing the legend %q", want)
@@ -323,7 +340,7 @@ func TestScrollDownResumesFollowingAtTheBottom(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		m.applyEvent(event{kind: evOutput, target: "web", line: "line"})
 	}
-	m.View()
+	m.frame()
 
 	m.scrollUp(5)
 	if m.follow {
@@ -377,15 +394,15 @@ func TestNoTitleOnSchemaRowAndPaneUsesFullHeight(t *testing.T) {
 	m.applyEvent(event{kind: evOutput, target: "frontend", line: "hello"})
 
 	m.cursor = 1
-	m.View()
-	if m.vp.Height != m.height {
-		t.Fatalf("setup: viewport height = %d, want %d", m.vp.Height, m.height)
+	m.frame()
+	if m.vp.Height() != m.height {
+		t.Fatalf("setup: viewport height = %d, want %d", m.vp.Height(), m.height)
 	}
 
 	m.cursor = 0
 	lines := paneOf(m)
-	if m.vp.Height != m.height {
-		t.Fatalf("schema row viewport height = %d, want the full %d", m.vp.Height, m.height)
+	if m.vp.Height() != m.height {
+		t.Fatalf("schema row viewport height = %d, want the full %d", m.vp.Height(), m.height)
 	}
 	if strings.Contains(lines[0], "$ vite dev") {
 		t.Fatalf("schema row still shows a title: %q", lines[0])
@@ -397,7 +414,7 @@ func TestNoTitleOnSchemaRowAndPaneUsesFullHeight(t *testing.T) {
 func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	m.height = 4
-	m.View()
+	m.frame()
 
 	if row := m.rowAt(2, m.height-2); row != 2 {
 		t.Fatalf("rowAt at the bottom = %d, want 2", row)
@@ -467,7 +484,7 @@ func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
 	m.follow = false
 	m.pending = 2
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "↓ 2 new") {
 		t.Fatalf("the new-lines marker is not in the view:\n%s", view)
 	}
@@ -564,11 +581,11 @@ func TestHelpOverlayToggles(t *testing.T) {
 	if !m.help || m.helpAll {
 		t.Fatal("? did not open the short help overlay")
 	}
-	if view := m.View(); !strings.Contains(view, "move between rows") || strings.Contains(view, "shift-drag") {
+	if view := m.View().Content; !strings.Contains(view, "move between rows") || strings.Contains(view, "shift-drag") {
 		t.Errorf("short help should list the core keys only:\n%s", view)
 	}
 	press(m, "?")
-	view := m.View()
+	view := m.View().Content
 	for _, want := range []string{"mute", "scope", "shift-drag", "open the target's url"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("full help overlay is missing %q", want)
@@ -615,7 +632,7 @@ func TestQClosesHelpWithoutQuitting(t *testing.T) {
 func TestFrozenChipShowsWithoutPending(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
-	m.View()
+	m.frame()
 	m.pauseTail()
 	if got := bottomPaneLine(m); !strings.Contains(got, "scrollback · esc live") {
 		t.Fatalf("bottom line = %q, want the paused chip", got)
@@ -637,7 +654,7 @@ func TestScopeAddsNoBottomLineChip(t *testing.T) {
 func TestChipHiddenWhileInputOpen(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
-	m.View()
+	m.frame()
 	m.pauseTail()
 	press(m, "/")
 	if got := bottomPaneLine(m); strings.Contains(got, "scrollback") || strings.Contains(got, "solo") {
@@ -653,7 +670,7 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 	m.targets[1].exitLabel = "exit 0"
 	m.toggleMute(0)
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 	if len(lines) != m.height {
 		t.Fatalf("view has %d lines, want %d", len(lines), m.height)
 	}
@@ -679,7 +696,7 @@ func TestViewFitsNarrowTerminals(t *testing.T) {
 	for _, width := range []int{20, 40} {
 		m := newTestModel(t, target("a-very-long-target-name"), target("api"))
 		m.width, m.height = width, 8
-		for _, line := range strings.Split(m.View(), "\n") {
+		for _, line := range strings.Split(m.View().Content, "\n") {
 			if got := lipgloss.Width(line); got != width {
 				t.Fatalf("width %d: line width = %d: %q", width, got, line)
 			}
@@ -692,7 +709,7 @@ func TestScrollFreezesTailAndMarkerResumesIt(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		m.applyEvent(event{kind: evOutput, target: "web", line: "line"})
 	}
-	m.View()
+	m.frame()
 
 	m.scrollUp(10)
 	if m.follow {
@@ -703,7 +720,7 @@ func TestScrollFreezesTailAndMarkerResumesIt(t *testing.T) {
 	if m.pending != 1 {
 		t.Fatalf("pending = %d, want 1", m.pending)
 	}
-	if view := m.View(); !strings.Contains(view, "↓ 1 new") {
+	if view := m.View().Content; !strings.Contains(view, "↓ 1 new") {
 		t.Fatalf("the marker is not in the view:\n%s", view)
 	}
 
@@ -719,7 +736,7 @@ func TestScrollFreezesTailAndMarkerResumesIt(t *testing.T) {
 
 func TestMouseClicksMuteAndSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.View()
+	m.frame()
 
 	// The right edge is the status column now; a click there never mutes.
 	m.toggleMute(0)
@@ -764,7 +781,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 
 func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.View()
+	m.frame()
 
 	// The pair's first click solos the row; the second stops it.
 	m.handleMouse(mouse(2, 0, false))
@@ -791,7 +808,7 @@ func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
 	web := target("web")
 	web.Selected = false
 	m := newTestModel(t, web, target("api"))
-	m.View()
+	m.frame()
 
 	if m.targets[0].state != stateOff {
 		t.Fatalf("setup: state = %v, want off", m.targets[0].state)
@@ -813,7 +830,7 @@ func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
 
 func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.View()
+	m.frame()
 
 	// Two quick clicks stop the running row and leave it soloed.
 	m.handleMouse(mouse(2, 0, false))
@@ -836,7 +853,7 @@ func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 
 func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
-	m.View()
+	m.frame()
 
 	m.handleMouse(motion(2, 0))
 	if m.hover != 0 {
@@ -844,7 +861,7 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	}
 
 	// A wiggle inside the same row must not alter the frame.
-	before := m.View()
+	before := m.View().Content
 	m.handleMouse(motion(1, 0))
 	if m.hover != 0 {
 		t.Fatalf("hover = %d, want 1 still", m.hover)
@@ -852,7 +869,7 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0 still", m.cursor)
 	}
-	if after := m.View(); after != before {
+	if after := m.View().Content; after != before {
 		t.Fatalf("the view changed on a same-row motion:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 
@@ -867,8 +884,12 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	}
 }
 
-func wheel(x, y int, button tea.MouseButton) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionPress, Button: button}
+func wheelUp(x, y int) tea.MouseMsg {
+	return tea.MouseWheelMsg{X: x, Y: y, Button: tea.MouseWheelUp}
+}
+
+func wheelDown(x, y int) tea.MouseMsg {
+	return tea.MouseWheelMsg{X: x, Y: y, Button: tea.MouseWheelDown}
 }
 
 // longListModel is nine targets in a six-row terminal: the list is taller than its window.
@@ -880,7 +901,7 @@ func longListModel(t *testing.T) *tuiModel {
 	}
 	m := newTestModel(t, defs...)
 	m.height = 6
-	m.View()
+	m.frame()
 	return m
 }
 
@@ -888,8 +909,8 @@ func TestWheelOverListScrollsWindowNotCursor(t *testing.T) {
 	m := longListModel(t)
 	cursor, scope := m.cursor, m.scopeState()
 
-	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
-	m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+	m.handleMouse(wheelDown(2, 1))
+	m.handleMouse(wheelDown(2, 1))
 	if m.layout.offset != 2 {
 		t.Fatalf("offset = %d after two wheel-down notches, want 2", m.layout.offset)
 	}
@@ -897,7 +918,7 @@ func TestWheelOverListScrollsWindowNotCursor(t *testing.T) {
 		t.Fatalf("cursor = %d, scope = %v after the wheel, want %d, %v", m.cursor, m.scopeState(), cursor, scope)
 	}
 
-	m.View()
+	m.frame()
 	if m.layout.offset != 2 {
 		t.Fatalf("a render moved the window back to offset %d, want 2", m.layout.offset)
 	}
@@ -909,14 +930,14 @@ func TestWheelOverListClampsAtBothEnds(t *testing.T) {
 	last := m.listLen() + len(m.missing) - visible
 
 	for range 20 {
-		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelUp))
+		m.handleMouse(wheelUp(2, 1))
 	}
 	if m.layout.offset != 0 {
 		t.Fatalf("offset = %d after wheeling above the top, want 0", m.layout.offset)
 	}
 
 	for range 20 {
-		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+		m.handleMouse(wheelDown(2, 1))
 	}
 	if m.layout.offset != last {
 		t.Fatalf("offset = %d after wheeling past the end, want %d", m.layout.offset, last)
@@ -929,7 +950,7 @@ func TestWheelOverListClampsAtBothEnds(t *testing.T) {
 func TestClickAfterWheelSelectsRowUnderMouse(t *testing.T) {
 	m := longListModel(t)
 	for range 3 {
-		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+		m.handleMouse(wheelDown(2, 1))
 	}
 
 	m.handleMouse(mouse(2, 1, false))
@@ -941,11 +962,11 @@ func TestClickAfterWheelSelectsRowUnderMouse(t *testing.T) {
 func TestKeyMoveAfterWheelFollowsCursor(t *testing.T) {
 	m := longListModel(t)
 	for range 20 {
-		m.handleMouse(wheel(2, 1, tea.MouseButtonWheelDown))
+		m.handleMouse(wheelDown(2, 1))
 	}
 
 	press(m, "down")
-	m.View()
+	m.frame()
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d after a down key, want 1", m.cursor)
 	}
@@ -957,14 +978,14 @@ func TestKeyMoveAfterWheelFollowsCursor(t *testing.T) {
 func TestWheelOverLogPaneLeavesCursorAlone(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
-	before := m.vp.YOffset
+	m.frame()
+	before := m.vp.YOffset()
 
-	m.handleMouse(wheel(m.layout.leftW+1, 1, tea.MouseButtonWheelUp))
+	m.handleMouse(wheelUp(m.layout.leftW+1, 1))
 	if m.cursor != 0 {
 		t.Fatalf("cursor = %d after a wheel over the log pane, want 0", m.cursor)
 	}
-	if m.vp.YOffset == before {
+	if m.vp.YOffset() == before {
 		t.Fatalf("the log pane did not scroll on a wheel over it")
 	}
 }
@@ -1052,7 +1073,7 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 	if got := m.targets[0].glyph(); got != "·" {
 		t.Errorf("glyph = %q, want ·", got)
 	}
-	frame := strings.Split(m.View(), "\n")
+	frame := strings.Split(m.View().Content, "\n")
 	if got := frame[0]; !strings.Contains(got, "waiting") {
 		t.Errorf("row 1 = %q, want the waiting status", got)
 	}

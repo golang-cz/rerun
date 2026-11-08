@@ -32,7 +32,7 @@ func TestCellsStayPutAfterTheSampleFreezes(t *testing.T) {
 		lines[i] = jsonGet
 	}
 	addLines(m, "web", lines...)
-	m.View()
+	m.frame()
 	col := strings.Index(tableRows(m)[0], "200")
 
 	addLines(m, "web", `{"request":{"method":"A-VERY-LONG-METHOD-NAME-THAT-KEEPS-GOING"},"response":{"status":500}}`)
@@ -44,7 +44,7 @@ func TestCellsStayPutAfterTheSampleFreezes(t *testing.T) {
 func TestNonJSONLineSharesTheBodyColumn(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, "plain text here")
-	m.View()
+	m.frame()
 
 	rows := tableRows(m)
 	if got, want := strings.Index(rows[1], "plain"), strings.Index(rows[0], "GET"); got != want {
@@ -55,7 +55,7 @@ func TestNonJSONLineSharesTheBodyColumn(t *testing.T) {
 func TestFixedWidthsByName(t *testing.T) {
 	m := newTestModel(t, namedColumns("web", "level", "time", "msg"))
 	addLines(m, "web", `{"level":"info","time":"12:00:00","msg":"ok"}`)
-	m.View()
+	m.frame()
 
 	budget := m.tableBudget()
 	want := []int{5, 8, budget - (5 + 2 + 8 + 2)}
@@ -67,7 +67,7 @@ func TestFixedWidthsByName(t *testing.T) {
 func TestLongValueEndsInEllipsis(t *testing.T) {
 	m := newTestModel(t, namedColumns("web", "msg", "status"))
 	addLines(m, "web", fmt.Sprintf(`{"msg":%q,"status":200}`, strings.Repeat("x", 40)))
-	m.View()
+	m.frame()
 
 	row := tableRows(m)[0]
 	if !strings.Contains(row, strings.Repeat("x", 23)+"…  200") {
@@ -78,7 +78,7 @@ func TestLongValueEndsInEllipsis(t *testing.T) {
 func TestTabAndNewlineStayOnOneRow(t *testing.T) {
 	m := newTestModel(t, namedColumns("web", "msg", "status"))
 	addLines(m, "web", `{"msg":"a\tb\nc","status":200}`)
-	m.View()
+	m.frame()
 
 	if got := len(m.paneLines()); got != 1 {
 		t.Fatalf("pane lines = %d, want the row on one line", got)
@@ -95,7 +95,7 @@ func TestColumnWidthFreezesAfterTheSample(t *testing.T) {
 		short[i] = fmt.Sprintf(`{"msg":"ab","status":%d}`, i)
 	}
 	addLines(m, "web", short...)
-	m.View()
+	m.frame()
 	frozen := m.tableWidths()[0]
 	if want := displayWidth("msg") + columnMarkW; frozen != want {
 		t.Fatalf("width = %d, want the name and its mark, %d", frozen, want)
@@ -110,7 +110,7 @@ func TestColumnWidthFreezesAfterTheSample(t *testing.T) {
 func TestColumnWidthGrowsDuringTheSample(t *testing.T) {
 	m := newTestModel(t, namedColumns("web", "msg", "status"))
 	addLines(m, "web", fmt.Sprintf(`{"msg":%q,"status":1}`, strings.Repeat("y", 12)))
-	m.View()
+	m.frame()
 	if got := m.tableWidths()[0]; got != 12 {
 		t.Fatalf("width = %d, want 12 while still sampling", got)
 	}
@@ -125,7 +125,7 @@ func TestTimeColumnShowsTheLocalClock(t *testing.T) {
 		`{"time":1762257662,"msg":"c"}`,
 		`{"time":1762257662123,"msg":"d"}`,
 	)
-	m.View()
+	m.frame()
 	rows := tableRows(m)
 
 	want := time.Date(2026, 11, 4, 12, 1, 2, 0, time.UTC).In(time.Local).Format("15:04:05")
@@ -148,12 +148,12 @@ func TestRepickedColumnsStartAFreshSample(t *testing.T) {
 		short[i] = fmt.Sprintf(`{"msg":"ab","status":%d}`, i)
 	}
 	addLines(m, "web", short...)
-	m.View()
+	m.frame()
 
 	m.targets[0].spec.Columns = []Column{{Name: "text", Expr: ".msg"}, {Name: "status", Expr: ".status"}}
 	m.targets[0].colSpec = nil
 	m.vpDirty = true
-	m.View()
+	m.frame()
 	if got, want := m.tableWidths()[0], displayWidth("text")+columnMarkW; got != want {
 		t.Fatalf("width = %d after re-picking, want the new name and its mark, %d", got, want)
 	}

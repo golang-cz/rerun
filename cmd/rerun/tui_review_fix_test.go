@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 )
 
 // Stopping, starting, or rebooting ends the build in flight, so its ⚙ stops counting.
@@ -41,7 +42,7 @@ func TestFailedFirstBuildShowsExitedNotRunning(t *testing.T) {
 	if tg.state != stateExited || m.status(tg) != "✗ build" || tg.glyph() != "✗" {
 		t.Fatalf("state=%v status=%q glyph=%q, want exited build failed ✗", tg.state, m.status(tg), tg.glyph())
 	}
-	m.View()
+	m.frame()
 	if rows := m.paneLines(); len(rows) == 0 || !strings.Contains(strings.Join(rows, "\n"), "nothing running") {
 		t.Fatalf("pane = %q, want the rule's nothing running row", rows)
 	}
@@ -104,7 +105,7 @@ func TestHealthyAppendRefreshesRawText(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{restartEvent("api", nil, 0, 0)})
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(time.Second), runAt: restartAt, dur: 1800 * time.Millisecond}})
-	m.View()
+	m.frame()
 	found := false
 	for i, s := range m.visibleSep {
 		if s.restart != nil {
@@ -221,7 +222,7 @@ func TestEmptyStateHints(t *testing.T) {
 func TestCursorAndFocusUseAdaptiveColors(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	for name, st := range map[string]lipgloss.Style{"cursor": m.styles.cursor, "hover": m.styles.hover, "solo": m.styles.solo} {
-		if _, ok := st.GetBackground().(lipgloss.AdaptiveColor); !ok {
+		if _, ok := st.GetBackground().(compat.AdaptiveColor); !ok {
 			t.Errorf("%s background is not adaptive", name)
 		}
 	}
@@ -246,7 +247,7 @@ func TestNarrowBarFoldsOldestChips(t *testing.T) {
 func TestPinnedRuleShowsCue(t *testing.T) {
 	m := newTestModel(t, target("api"), target("web"))
 	addLines(m, "api", streamLines("api", 30)...)
-	m.View()
+	m.frame()
 	m.cursor = 0
 	m.liveSelect()
 	m.applyEvents([]event{restartEvent("api", nil, 0, 0)})

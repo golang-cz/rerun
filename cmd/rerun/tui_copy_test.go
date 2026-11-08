@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func release(x, y int) tea.MouseMsg {
-	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft}
+	return tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft}
 }
 
 // decodeCopy unwraps an OSC 52 sequence back to its payload.
@@ -32,7 +32,7 @@ func frozenPane(t *testing.T) *tuiModel {
 	t.Helper()
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
+	m.frame()
 	m.pauseTail()
 	if m.follow {
 		t.Fatal("f did not freeze the pane")
@@ -48,7 +48,7 @@ func TestFreezeKeyTogglesFollowAndHoldsTheFrame(t *testing.T) {
 	if m.pending != 0 {
 		t.Fatalf("pending = %d, want 0 on a fresh freeze", m.pending)
 	}
-	yOff := m.vp.YOffset
+	yOff := m.vp.YOffset()
 	first := paneOf(m)[m.titleHeight()]
 
 	m.applyEvents(streamEvents("web", "new", 4).events)
@@ -57,8 +57,8 @@ func TestFreezeKeyTogglesFollowAndHoldsTheFrame(t *testing.T) {
 	if lines[0] != first {
 		t.Fatalf("the frozen frame moved: %q -> %q", first, lines[0])
 	}
-	if m.vp.YOffset != yOff {
-		t.Fatalf("YOffset moved from %d to %d while frozen", yOff, m.vp.YOffset)
+	if m.vp.YOffset() != yOff {
+		t.Fatalf("YOffset moved from %d to %d while frozen", yOff, m.vp.YOffset())
 	}
 	if m.pending != 4 {
 		t.Fatalf("pending = %d, want 4", m.pending)
@@ -82,7 +82,7 @@ func TestFreezeKeyTogglesFollowAndHoldsTheFrame(t *testing.T) {
 func TestFrozenClickCopiesOneRawLine(t *testing.T) {
 	m := frozenPane(t)
 	x, y := paneX(m), 2+m.titleHeight()
-	idx := m.vp.YOffset + y - m.titleHeight()
+	idx := m.vp.YOffset() + y - m.titleHeight()
 	want := m.visibleRaw[idx]
 
 	m.handleMouse(mouse(x, y, false))
@@ -123,8 +123,8 @@ func TestFrozenDragCopiesTheRange(t *testing.T) {
 	m.handleMouse(motion(x, 5))
 	m.handleMouse(release(x, 5))
 
-	lo := m.vp.YOffset + 2
-	hi := m.vp.YOffset + 5
+	lo := m.vp.YOffset() + 2
+	hi := m.vp.YOffset() + 5
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
 	if got := decodeCopy(t, m.copySeq); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
@@ -146,8 +146,8 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 	m.handleMouse(motion(x, 2))
 	m.handleMouse(release(x, 2))
 
-	lo := m.vp.YOffset + 2
-	hi := m.vp.YOffset + 5
+	lo := m.vp.YOffset() + 2
+	hi := m.vp.YOffset() + 5
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
 	if got := decodeCopy(t, m.copySeq); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
@@ -159,13 +159,13 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 40).events)
-	m.View()
+	m.frame()
 	if !m.follow {
 		t.Fatal("setup: the pane is not following")
 	}
 
 	x := paneX(m)
-	want := m.visibleRaw[m.vp.YOffset+2] + "\n"
+	want := m.visibleRaw[m.vp.YOffset()+2] + "\n"
 	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(release(x, 2))
 
@@ -184,7 +184,7 @@ func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 func TestFrozenClickPastContentCopiesNothing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 3).events)
-	m.View()
+	m.frame()
 	m.pauseTail()
 
 	x := paneX(m)
@@ -211,7 +211,7 @@ func TestBareMotionStartsNoSelection(t *testing.T) {
 func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 	m := frozenPane(t)
 	m.applyEvents(streamEvents("web", "new", 3).events)
-	m.View()
+	m.frame()
 
 	marker := m.layout.marker
 	if marker.w == 0 {
@@ -221,7 +221,7 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(release(x, 2))
-	m.View()
+	m.frame()
 
 	if m.copySeq == "" {
 		t.Fatal("the click did not copy")
@@ -229,7 +229,7 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 	if !m.layout.marker.contains(marker.x, marker.y) {
 		t.Fatal("the marker rect was lost while the copy hint showed")
 	}
-	if view := m.View(); !strings.Contains(view, "copied 1 line") {
+	if view := m.View().Content; !strings.Contains(view, "copied 1 line") {
 		t.Fatal("the copy hint is not on screen")
 	}
 
@@ -243,7 +243,7 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 	m := frozenPane(t)
 	m.applyEvents(streamEvents("web", "new", 3).events)
-	m.View()
+	m.frame()
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
@@ -261,7 +261,7 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 		t.Fatal("the copy sequence is not on the hint line")
 	}
 	// The OSC 52 sequence must not widen the frame.
-	for i, line := range strings.Split(m.View(), "\n") {
+	for i, line := range strings.Split(m.View().Content, "\n") {
 		if got := displayWidth(line); got != m.width {
 			t.Fatalf("line %d width = %d, want %d while the copy hint shows", i, got, m.width)
 		}
@@ -313,7 +313,7 @@ func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 func TestFrozenDragOntoMarkerRowStopsAtVisibleContent(t *testing.T) {
 	m := frozenPane(t)
 	m.applyEvents(streamEvents("web", "new", 3).events)
-	m.View()
+	m.frame()
 
 	marker := m.layout.marker
 	if marker.w == 0 {
@@ -325,8 +325,8 @@ func TestFrozenDragOntoMarkerRowStopsAtVisibleContent(t *testing.T) {
 	m.handleMouse(motion(x, marker.y))
 	m.handleMouse(release(x, marker.y))
 
-	lo := m.vp.YOffset + 2
-	hi := m.vp.YOffset + m.vp.Height - 2 // the marker row is not content
+	lo := m.vp.YOffset() + 2
+	hi := m.vp.YOffset() + m.vp.Height() - 2 // the marker row is not content
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
 	if got := decodeCopy(t, m.copySeq); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
@@ -338,7 +338,7 @@ func TestFrozenDragOntoMarkerRowStopsAtVisibleContent(t *testing.T) {
 func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "web", line: strings.Repeat("a", copyCap+1)}})
-	m.View()
+	m.frame()
 	m.pauseTail()
 
 	m.copySeq = "stale"
@@ -355,7 +355,7 @@ func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 	if wantUntil := m.now.Add(hintDuration); m.copyUntil != wantUntil {
 		t.Fatalf("copyUntil = %v, want %v", m.copyUntil, wantUntil)
 	}
-	if view := m.View(); !strings.Contains(view, "line too long") {
+	if view := m.View().Content; !strings.Contains(view, "line too long") {
 		t.Fatal("the too-long hint is not on screen")
 	}
 }
@@ -369,7 +369,7 @@ func TestNonLeftReleaseClearsTheSelection(t *testing.T) {
 		t.Fatal("the press did not anchor a selection")
 	}
 
-	m.handleMouse(tea.MouseMsg{X: x, Y: 2, Action: tea.MouseActionRelease, Button: tea.MouseButtonRight})
+	m.handleMouse(tea.MouseReleaseMsg{X: x, Y: 2, Button: tea.MouseRight})
 	if m.selAnchor != nil {
 		t.Fatal("the right-button release kept the selection")
 	}
@@ -407,7 +407,7 @@ func TestCopyTruncatesAtTheCap(t *testing.T) {
 		evs = append(evs, event{kind: evOutput, target: "web", line: long})
 	}
 	m.applyEvents(evs)
-	m.View()
+	m.frame()
 	m.pauseTail()
 
 	x := paneX(m)
@@ -438,7 +438,7 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 		{kind: evOutput, target: "web", line: ""},
 		{kind: evOutput, target: "web", line: "three"},
 	})
-	m.View()
+	m.frame()
 	m.pauseTail()
 
 	x := paneX(m)
@@ -457,7 +457,7 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 func TestCopyStripsANSIFromThePayload(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "web", line: "\x1b[36mcyan text\x1b[0m"}})
-	m.View()
+	m.frame()
 	m.pauseTail()
 
 	x := paneX(m)
@@ -478,12 +478,12 @@ func TestCopyStripsANSIFromThePayload(t *testing.T) {
 func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
+	m.frame()
 	if !m.follow {
 		t.Fatal("setup: the pane is not following")
 	}
 	x := paneX(m)
-	yOff := m.vp.YOffset
+	yOff := m.vp.YOffset()
 
 	m.handleMouse(mouse(x, 2, false))
 	if !m.follow {
@@ -500,8 +500,8 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 	if m.pending != 0 {
 		t.Fatalf("pending = %d, want 0 after a drag freeze", m.pending)
 	}
-	if m.vp.YOffset != yOff {
-		t.Fatalf("the frame moved on freeze: %d -> %d", yOff, m.vp.YOffset)
+	if m.vp.YOffset() != yOff {
+		t.Fatalf("the frame moved on freeze: %d -> %d", yOff, m.vp.YOffset())
 	}
 
 	m.handleMouse(release(x, 5))

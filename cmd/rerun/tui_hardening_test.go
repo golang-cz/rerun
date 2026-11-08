@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"gopkg.in/yaml.v3"
 )
@@ -33,7 +33,7 @@ func TestControlPayloadsDoNotReachTheTerminal(t *testing.T) {
 		m := newTestModel(t, target("web"))
 		m.applyEvent(configErrEvent(&configErr{path: "rerun.yml", msg: "bad " + p}))
 		m.applyEvent(event{kind: evExited, target: "web", code: -1, err: errors.New("boom " + p)})
-		view := m.View()
+		view := m.View().Content
 		for _, raw := range []string{"\x1b]52", "\x1b[2J", "\u009b2J", "\x07"} {
 			if strings.Contains(view, raw) {
 				t.Fatalf("payload %q reached the view as raw %q", p, raw)

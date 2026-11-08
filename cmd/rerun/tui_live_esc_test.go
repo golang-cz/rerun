@@ -15,7 +15,7 @@ func escToLive(m *tuiModel) {
 func TestEscInScrollbackGoesLiveAndKeepsScope(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 	m.applyEvents(streamEvents("api", "old", 60).events)
-	m.View()
+	m.frame()
 	m.applyScope(-1, "backend")
 	m.scrollUp(5)
 	if m.follow {
@@ -63,7 +63,7 @@ func TestPAndGDoNothing(t *testing.T) {
 	for _, live := range []bool{true, false} {
 		m := newTestModel(t, target("web"))
 		m.applyEvents(streamEvents("web", "old", 60).events)
-		m.View()
+		m.frame()
 		if !live {
 			m.pauseTail()
 		}

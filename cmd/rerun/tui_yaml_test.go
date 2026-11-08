@@ -93,7 +93,7 @@ func TestNestedArrayOfMapsIndentsUnderItsDash(t *testing.T) {
 func TestNestedKeyClickKeepsItsPath(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	m.toggleExpand(0)
 

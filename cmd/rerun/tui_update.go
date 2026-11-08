@@ -2,8 +2,9 @@ package main
 
 import (
 	"time"
+	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // hintDuration is how long a transient hint stays in the bottom line.
@@ -70,8 +71,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyEvents(msg.events)
 		return m, waitForEvents(m.events, m.stop)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+
+	case tea.PasteMsg:
+		return m.handlePaste(msg)
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
@@ -82,7 +86,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Any key ends a frozen selection; copy feedback survives its 3s window.
 	m.clearSelection()
 
@@ -135,7 +139,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.helpAll = true
 		case "m":
 			m.helpAll = true
-		case "esc", "enter", " ":
+		case "esc", "enter", "space":
 			m.help = false
 		}
 		return m, nil
@@ -319,7 +323,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+s":
 		m.saveColumns()
 
-	case " ":
+	case "space":
 		if r, ok := m.cursorRow(); ok {
 			m.toggleRow(r)
 		}
@@ -343,16 +347,33 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "pgup", "ctrl+u":
-		m.scrollUp(max(1, m.vp.Height/2))
+		m.scrollUp(max(1, m.vp.Height()/2))
 
 	case "pgdown", "ctrl+d":
-		m.scrollDown(max(1, m.vp.Height/2))
+		m.scrollDown(max(1, m.vp.Height()/2))
+	}
+	return m, nil
+}
+
+// handlePaste routes a paste where a keystroke would go; a closed input ignores it.
+func (m *tuiModel) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	m.clearSelection()
+
+	if m.cfgErr != "" && !m.confirmQuit {
+		return m, nil
+	}
+
+	switch {
+	case m.finder.open:
+		m.finderPaste(msg.Content)
+	case m.inputMode != inputNone:
+		m.inputPaste(msg.Content)
 	}
 	return m, nil
 }
 
 // handleInputKey routes keys into the bar's open input; only Ctrl-C escapes it.
-func (m *tuiModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -380,16 +401,25 @@ func (m *tuiModel) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.removeBarChip(chips[len(chips)-1])
 		}
 	default:
-		switch msg.Type {
-		case tea.KeyRunes:
-			m.input += string(msg.Runes)
-			m.inputChanged()
-		case tea.KeySpace:
-			m.input += " "
-			m.inputChanged()
+		if msg.Text != "" {
+			m.inputPaste(msg.Text)
+			break
+		}
+		// v1 handed an alt combo over as key runes, so a printable one typed its letter.
+		if msg.Mod.Contains(tea.ModAlt) && unicode.IsPrint(msg.Code) {
+			m.inputPaste(string(msg.Code))
 		}
 	}
 	return m, nil
+}
+
+// inputPaste types pasted text into the bar, exactly as the keys would.
+func (m *tuiModel) inputPaste(s string) {
+	if s == "" {
+		return
+	}
+	m.input += s
+	m.inputChanged()
 }
 
 // openInput shows the bar's input; find starts from its query, a text filter empty.
@@ -482,9 +512,9 @@ func (m *tuiModel) goLive() {
 // A gesture that cannot move the window (nothing above it) leaves the tail live.
 func (m *tuiModel) scrollUp(n int) {
 	m.clearSelection()
-	before := m.vp.YOffset
+	before := m.vp.YOffset()
 	m.vp.SetYOffset(before - n)
-	if m.vp.YOffset == before {
+	if m.vp.YOffset() == before {
 		return
 	}
 	if m.follow {
@@ -504,7 +534,7 @@ func (m *tuiModel) pauseTail() {
 // scrollDown resumes following once the pane is back at the bottom.
 func (m *tuiModel) scrollDown(n int) {
 	m.clearSelection()
-	m.vp.SetYOffset(m.vp.YOffset + n)
+	m.vp.SetYOffset(m.vp.YOffset() + n)
 	if m.vp.AtBottom() {
 		m.follow = true
 		m.pending = 0
@@ -515,47 +545,46 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open {
 		return m, nil
 	}
+	e := msg.Mouse()
 
-	if msg.Action == tea.MouseActionPress || msg.Action == tea.MouseActionMotion {
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
 		// The left column scrolls the target window and keeps the selection: clicks pick rows.
 		// The divider and the log pane keep scrolling the stream.
-		onList := msg.X < m.layout.leftW
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		onList := e.X < m.layout.leftW
+		switch e.Button {
+		case tea.MouseWheelUp:
 			if onList {
 				m.scrollList(-1)
 			} else {
 				m.scrollUp(3)
 			}
-			return m, nil
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			if onList {
 				m.scrollList(1)
 			} else {
 				m.scrollDown(3)
 			}
-			return m, nil
 		}
-	}
+		return m, nil
 
-	if msg.Action == tea.MouseActionRelease {
+	case tea.MouseReleaseMsg:
 		// Any release ends the drag; only a left one copies it. Otherwise a
 		// right-button release would leave the anchor armed for a stray copy.
-		if msg.Button == tea.MouseButtonLeft {
+		if e.Button == tea.MouseLeft {
 			m.copySelection()
 		} else {
 			m.clearSelection()
 		}
 		return m, nil
-	}
 
-	if msg.Action == tea.MouseActionMotion {
+	case tea.MouseMotionMsg:
 		// Motion only drags an existing selection: a bare hover never starts one.
 		if m.selAnchor != nil {
-			m.dragSelection(msg.Y)
+			m.dragSelection(e.Y)
 			return m, nil
 		}
-		row := m.rowAt(msg.X, msg.Y)
+		row := m.rowAt(e.X, e.Y)
 		// Only a row change alters the frame; wiggles inside one row must not.
 		if row != m.hover {
 			m.hover = row
@@ -563,11 +592,11 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+	if _, ok := msg.(tea.MouseClickMsg); !ok || e.Button != tea.MouseLeft {
 		return m, nil
 	}
 
-	if m.layout.marker.contains(msg.X, msg.Y) {
+	if m.layout.marker.contains(e.X, e.Y) {
 		m.clearSelection()
 		m.follow = true
 		m.pending = 0
@@ -578,33 +607,33 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// A press in the log pane anchors a selection instead of acting on rows.
 	// The tail freezes on the first drag motion, so a plain click copies the
 	// line and keeps the stream live. Past the content, the press does nothing.
-	if m.inPaneHeader(msg.X, msg.Y) {
-		m.clickHeader(msg.X-m.layout.leftW-1, msg.Y)
+	if m.inPaneHeader(e.X, e.Y) {
+		m.clickHeader(e.X-m.layout.leftW-1, e.Y)
 		return m, nil
 	}
-	if m.inPane(msg.X, msg.Y) {
-		m.clickPane(msg.X, msg.Y)
+	if m.inPane(e.X, e.Y) {
+		m.clickPane(e.X, e.Y)
 		return m, nil
 	}
 
 	m.clearSelection()
 
 	// The drawer never solos a target: a click focuses it and opens a batch's files.
-	if msg.X < m.layout.leftW {
-		if drow, inDrawer := m.inDrawer(msg.Y); inDrawer {
+	if e.X < m.layout.leftW {
+		if drow, inDrawer := m.inDrawer(e.Y); inDrawer {
 			m.clickDrawer(drow)
 			return m, nil
 		}
 	}
 	m.drawerFocus = false
 
-	row := m.rowAt(msg.X, msg.Y)
+	row := m.rowAt(e.X, e.Y)
 	if row < 0 {
 		return m, nil
 	}
 	r, _ := m.listRowAt(row)
 	// The arrow cell folds a header; its name cell selects it as before.
-	if r.header && msg.X == r.indent() {
+	if r.header && e.X == r.indent() {
 		m.toggleCollapse(row)
 		return m, nil
 	}
@@ -635,7 +664,7 @@ func (m *tuiModel) inPane(x, y int) bool {
 	if x <= m.layout.leftW || x >= m.width {
 		return false
 	}
-	return y >= m.titleHeight() && y < m.titleHeight()+m.vp.Height
+	return y >= m.titleHeight() && y < m.titleHeight()+m.vp.Height()
 }
 
 // paneRow resolves a screen cell to a content index in the pane's raw lines,
@@ -644,7 +673,7 @@ func (m *tuiModel) paneRow(x, y int) int {
 	if !m.inPane(x, y) {
 		return -1
 	}
-	idx := m.vp.YOffset + y - m.titleHeight()
+	idx := m.vp.YOffset() + y - m.titleHeight()
 	if idx < 0 || idx >= m.paneLen() {
 		return -1
 	}
@@ -659,13 +688,13 @@ func (m *tuiModel) paneRowAt(y int) int {
 	if n == 0 {
 		return -1
 	}
-	last := m.vp.Height - 1
+	last := m.vp.Height() - 1
 	if !m.follow && m.pending > 0 {
 		last-- // the `↓ N new` marker owns this row
 	}
 	last = max(last, 0)
 	row := min(max(y-m.titleHeight(), 0), last)
-	idx := m.vp.YOffset + row
+	idx := m.vp.YOffset() + row
 	return min(max(idx, 0), n-1)
 }
 

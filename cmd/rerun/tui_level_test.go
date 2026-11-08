@@ -5,15 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 )
 
 var (
-	blueAdaptive   = lipgloss.AdaptiveColor{Light: "25", Dark: "39"}
-	greenAdaptive  = lipgloss.AdaptiveColor{Light: "28", Dark: "46"}
-	yellowAdaptive = lipgloss.AdaptiveColor{Light: "136", Dark: "220"}
-	redAdaptive    = lipgloss.AdaptiveColor{Light: "160", Dark: "196"}
+	blueAdaptive   = compat.AdaptiveColor{Light: lipgloss.Color("25"), Dark: lipgloss.Color("39")}
+	greenAdaptive  = compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("46")}
+	yellowAdaptive = compat.AdaptiveColor{Light: lipgloss.Color("136"), Dark: lipgloss.Color("220")}
+	redAdaptive    = compat.AdaptiveColor{Light: lipgloss.Color("160"), Dark: lipgloss.Color("196")}
 )
 
 func levelTableTarget(name string) Target {
@@ -154,7 +155,7 @@ func TestLevelPaintKeepsWidths(t *testing.T) {
 func TestTableLevelColumnIsPainted(t *testing.T) {
 	m := newTestModel(t, levelTableTarget("web"))
 	addLines(m, "web", `{"request":{"method":"GET"},"level":"WARN"}`)
-	m.View()
+	m.frame()
 	if !m.tableOn() {
 		t.Fatal("expected table mode")
 	}

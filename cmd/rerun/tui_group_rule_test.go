@@ -31,7 +31,7 @@ func TestRulesNameTheCommandOnlyInGroupView(t *testing.T) {
 	})
 
 	m.applyScope(-1, "")
-	m.View()
+	m.frame()
 	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
 		t.Errorf("group start rule = %q, want the command named", got)
 	}
@@ -40,7 +40,7 @@ func TestRulesNameTheCommandOnlyInGroupView(t *testing.T) {
 	}
 
 	m.applyScope(0, "")
-	m.View()
+	m.frame()
 	if got := ruleLine(m, "▶ api started"); got == "" || strings.Contains(got, "$ go run") {
 		t.Errorf("single-target start rule = %q, want no command", got)
 	}
@@ -74,7 +74,7 @@ func TestMultiLineCommandStaysOnOneRuleLine(t *testing.T) {
 	m := newTestModel(t, cmdTarget("api", "go run\n  ./api"), cmdTarget("web", "npm start"))
 	m.applyEvents([]event{restartEvent("api", nil, 0, time.Minute)})
 	m.applyScope(-1, "")
-	m.View()
+	m.frame()
 	if got := ruleLine(m, "↻ api restarted"); !strings.Contains(got, "· $ go run ./api") {
 		t.Errorf("rule = %q, want the command flattened to one line", got)
 	}

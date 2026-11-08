@@ -11,7 +11,7 @@ import (
 func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.setEdit(colNode{name: "api"}, []Column{{Name: "level", Expr: ".level"}})
-	m.View()
+	m.frame()
 
 	leftW, _ := m.layoutWidths()
 	nameW := nameWidth(leftW)
@@ -67,14 +67,14 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 	m.width, m.height = 90, 30
 
 	press(m, "?")
-	short := ansi.Strip(m.View())
+	short := ansi.Strip(m.View().Content)
 	if !strings.Contains(short, "ctrl+s") || strings.Contains(short, "backspace") {
 		t.Errorf("short help should list the core keys only:\n%s", short)
 	}
 	assertBoxRows(t, short, 30, "short help")
 
 	press(m, "?")
-	full := ansi.Strip(m.View())
+	full := ansi.Strip(m.View().Content)
 	for _, want := range []string{"ctrl+s", "backspace", "enter a f", "×", "rerun keys"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full help is missing %q", want)
@@ -107,7 +107,7 @@ func assertBoxRows(t *testing.T, view string, max int, what string) {
 func TestFooterCueReadsHelp(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 90, 30
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
 	leftW, _ := m.layoutWidths()
 	cue := strings.TrimRight(ansi.Cut(lines[len(lines)-1], 0, leftW), " ")
 	if !strings.HasSuffix(cue, "· ? help") || strings.Contains(cue, "  ") {

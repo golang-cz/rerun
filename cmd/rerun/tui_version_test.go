@@ -50,7 +50,7 @@ func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	m.version = "v9.9.9"
 	m.width, m.height = 120, 6
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 	if len(lines) != m.height {
 		t.Fatalf("view has %d lines, want %d", len(lines), m.height)
 	}
@@ -107,7 +107,7 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 	m.height = 4 // three list rows plus the version row
 	m.cursor = 5 // the last target
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 	if m.layout.offset == 0 {
 		t.Fatal("the list did not scroll to keep the cursor row visible")
 	}

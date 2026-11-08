@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
@@ -55,10 +57,10 @@ func newTUIStyles() tuiStyles {
 		base:         lipgloss.NewStyle(),
 		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		cursor:       lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "252", Dark: "237"}),
-		hover:        lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "254", Dark: "235"}),
+		cursor:       lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("252"), Dark: lipgloss.Color("237")}),
+		hover:        lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("254"), Dark: lipgloss.Color("235")}),
 		muted:        lipgloss.NewStyle().Faint(true),
-		solo:         lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Light: "253", Dark: "234"}),
+		solo:         lipgloss.NewStyle().Background(compat.AdaptiveColor{Light: lipgloss.Color("253"), Dark: lipgloss.Color("234")}),
 		all:          lipgloss.NewStyle().Bold(true),
 		title:        lipgloss.NewStyle().Bold(true),
 		marker:       lipgloss.NewStyle().Reverse(true),
@@ -100,8 +102,16 @@ type tuiLayout struct {
 
 func displayWidth(s string) int { return lipgloss.Width(s) }
 
-// View draws the frame: the target list, a divider, and the stream.
-func (m *tuiModel) View() string {
+// View draws the frame; alt screen and mouse reporting are declared here.
+func (m *tuiModel) View() tea.View {
+	v := tea.NewView(m.frame())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// frame is the drawn screen as one styled string.
+func (m *tuiModel) frame() string {
 	if m.width <= 0 {
 		m.width = 80
 	}
@@ -158,7 +168,8 @@ func (m *tuiModel) confirmQuitView() string {
 	body += "\n" + quit + "  " + cancel + "\n\n" +
 		m.styles.hint.Render("enter quits · esc cancels · ctrl+c again quits")
 	// Width fits the body line on one row; 44 would wrap and split the sentence.
-	return m.styles.box.Padding(1, 2).Width(56).Render(body)
+	// v2 counts the border in Width, so the content gets the same cells as v1.
+	return m.styles.box.Padding(1, 2).Width(56 + m.styles.box.GetHorizontalBorderSize()).Render(body)
 }
 
 // Only the body is cut, so the border and the close hint survive a small screen.
@@ -167,7 +178,7 @@ func (m *tuiModel) configErrView() string {
 	body := strings.Split(lipgloss.NewStyle().Width(w-6).Render(m.cfgErr), "\n")
 	maxH := max(8, m.height-2)
 	box := func(lines []string) string {
-		return m.styles.box.Padding(1, 2).Width(w).Render(
+		return m.styles.box.Padding(1, 2).Width(w + m.styles.box.GetHorizontalBorderSize()).Render(
 			m.styles.title.Render("rerun.yml not reloaded") + "\n\n" + strings.Join(lines, "\n") + "\n\n" +
 				m.styles.hint.Render("old config still running · esc close"))
 	}
@@ -639,8 +650,8 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 // bottom line carries the new-lines marker, else a hint.
 func (m *tuiModel) rightLines(w int) []string {
 	headH := m.headerRows()
-	m.vp.Width = w
-	m.vp.Height = max(1, m.height-headH)
+	m.vp.SetWidth(w)
+	m.vp.SetHeight(max(1, m.height-headH))
 	m.syncContent()
 
 	var header []string
@@ -653,7 +664,7 @@ func (m *tuiModel) rightLines(w int) []string {
 
 	out := strings.Split(m.vp.View(), "\n")
 
-	if idx := m.paneCursorRow() - m.vp.YOffset; m.paneFocus && m.paneLen() > 0 && idx >= 0 && idx < len(out) {
+	if idx := m.paneCursorRow() - m.vp.YOffset(); m.paneFocus && m.paneLen() > 0 && idx >= 0 && idx < len(out) {
 		out[idx] = m.styles.paneCursor.Render(padRight(out[idx], w))
 	}
 
@@ -661,7 +672,7 @@ func (m *tuiModel) rightLines(w int) []string {
 	// replacement, so the marker and hint never read as selected.
 	if lo, hi, ok := m.selectionRange(); ok {
 		for idx := lo; idx <= hi; idx++ {
-			row := idx - m.vp.YOffset
+			row := idx - m.vp.YOffset()
 			if row < 0 || row >= len(out) {
 				continue
 			}
@@ -679,7 +690,7 @@ func (m *tuiModel) rightLines(w int) []string {
 		markerShown := !m.follow && m.pending > 0
 		if markerShown {
 			// Keep the click target live even when an overlaid line hides the marker.
-			m.layout.marker = rect{x: m.layout.leftW + 1, y: headH + m.vp.Height - 1, w: w, h: 1}
+			m.layout.marker = rect{x: m.layout.leftW + 1, y: headH + m.vp.Height() - 1, w: w, h: 1}
 		}
 		again := m.runAgainHint()
 		// The bottom row is one line, so this switch is its precedence order.
@@ -818,7 +829,7 @@ func (m *tuiModel) syncContent() {
 		// SetContent only pulls YOffset back from past-the-end; a shrink that still
 		// leaves it below the last row needs an explicit clamp, or the frozen pane
 		// renders blank rows under the content.
-		m.vp.SetYOffset(m.vp.YOffset)
+		m.vp.SetYOffset(m.vp.YOffset())
 		m.vpDirty = false
 	}
 	if m.follow {
@@ -834,7 +845,7 @@ func (m *tuiModel) clampPaneCol(lines []string) int {
 	}
 	reach := 0
 	for row, line := range lines {
-		avail := m.vp.Width
+		avail := m.vp.Width()
 		if r := m.rowInfo(row); r.sub < 0 && r.obj && avail >= markW {
 			avail -= markW
 		}
@@ -850,7 +861,7 @@ func (m *tuiModel) panLines(lines []string) []string {
 	}
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = sliceCells(line, m.paneCol, m.paneCol+m.vp.Width)
+		out[i] = sliceCells(line, m.paneCol, m.paneCol+m.vp.Width())
 	}
 	return out
 }

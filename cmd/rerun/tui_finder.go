@@ -8,8 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
 )
@@ -182,7 +182,7 @@ func (m *tuiModel) finderListRows() int {
 }
 
 // handleFinderKey routes keys while the finder is open; enter jumps, esc and ctrl+k close.
-func (m *tuiModel) handleFinderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	res := m.finderResults(m.finder.query)
 	n := min(len(res), m.finderListRows())
 	m.finder.sel = min(m.finder.sel, max(0, n-1))
@@ -208,21 +208,20 @@ func (m *tuiModel) handleFinderKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.finder.sel = 0
 		}
 	default:
-		switch msg.Type {
-		case tea.KeyRunes:
-			if msg.Alt {
-				break
-			}
-			if q := strings.Map(dropControl, string(msg.Runes)); q != "" {
-				m.finder.query += q
-				m.finder.sel = 0
-			}
-		case tea.KeySpace:
-			m.finder.query += " "
-			m.finder.sel = 0
+		if msg.Mod.Contains(tea.ModAlt) {
+			break
 		}
+		m.finderPaste(msg.Text)
 	}
 	return m, nil
+}
+
+// finderPaste drops control characters, so a pasted newline cannot split the query.
+func (m *tuiModel) finderPaste(s string) {
+	if q := strings.Map(dropControl, s); q != "" {
+		m.finder.query += q
+		m.finder.sel = 0
+	}
 }
 
 // dropControl removes control characters, so a pasted newline cannot split the query.
@@ -336,8 +335,9 @@ func (m *tuiModel) finderView() string {
 	}
 	lines = lines[:min(len(lines), innerH)]
 
-	return box.Width(outerW - box.GetHorizontalBorderSize()).
-		Height(outerH - box.GetVerticalBorderSize()).
+	// v2's Width and Height are the whole block, border included.
+	return box.Width(outerW).
+		Height(outerH).
 		Render(strings.Join(lines, "\n"))
 }
 

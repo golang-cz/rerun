@@ -92,7 +92,7 @@ func TestBadTemplateExpressionShowsRawLine(t *testing.T) {
 	tgt.Columns = []Column{{Name: "msg", Template: "{.message} {.a |||}"}}
 	m := newTestModel(t, tgt)
 	addLines(m, "web", `{"message":"hi"}`)
-	m.View()
+	m.frame()
 
 	if rows := tableRows(m); len(rows) == 0 || !strings.Contains(rows[0], `{"message":"hi"}`) {
 		t.Errorf("rows = %q, want the raw line when a column does not compile", rows)

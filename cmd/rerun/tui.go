@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/golang-cz/rerun"
 )
@@ -41,8 +41,6 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	model.group.start()
 
 	program := tea.NewProgram(model,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 		tea.WithFPS(30), // one frame per uptime tick is plenty; 60fps just redraws
 		tea.WithoutSignalHandler(),
 	)
@@ -397,7 +395,7 @@ func newTUI(targets []Target) *tuiModel {
 		blockCache:   map[blockKey][]dispRow{},
 		expanded:     map[int]bool{},
 	}
-	m.vp = viewport.New(80, 20)
+	m.vp = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 
 	for i, target := range targets {
 		row := &tuiTarget{
@@ -1148,7 +1146,7 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 	}
 	m.searchRow = -1
 	for _, r := range m.searchMatches {
-		if r >= m.vp.YOffset {
+		if r >= m.vp.YOffset() {
 			m.searchRow = r
 			break
 		}
@@ -1197,8 +1195,8 @@ func (m *tuiModel) centerOn(row int) {
 	m.follow = false
 	m.pending = 0
 	lines := m.paneLines()
-	maxOff := max(0, len(lines)-m.vp.Height)
-	m.vp.SetYOffset(min(max(row-m.vp.Height/2, 0), maxOff))
+	maxOff := max(0, len(lines)-m.vp.Height())
+	m.vp.SetYOffset(min(max(row-m.vp.Height()/2, 0), maxOff))
 }
 
 // searchStatus is the `12/47` counter.

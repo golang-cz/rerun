@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -50,7 +50,7 @@ func listLabels(m *tuiModel) []string {
 
 // leftLineRaw is one left-column line, unstripped of its trailing blanks.
 func leftLineRaw(m *tuiModel, y int) string {
-	m.View()
+	m.frame()
 	leftW, _ := m.layoutWidths()
 	return ansi.Strip(m.leftLine(y, leftW))
 }
@@ -335,7 +335,7 @@ func TestBuildRuleUpdatesInPlace(t *testing.T) {
 func TestBuildRuleCollapsedWhileBuilding(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	m.View()
+	m.frame()
 	if seq := buildRuleSeq(m); m.expanded[seq] || m.paneLen() != 1 {
 		t.Fatalf("building rule expanded=%v with %d rows, want collapsed to one row", m.expanded[seq], m.paneLen())
 	}
@@ -348,7 +348,7 @@ func TestBuildFailureAutoExpandsItsRule(t *testing.T) {
 		buildOut("api", buildAt, "boom"),
 		{kind: evBuildFailed, target: "api", dur: 6 * time.Second, code: 2, files: []string{"/x/a.go"}},
 	})
-	m.View()
+	m.frame()
 	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "✗ api build failed · exit 2 · a.go" {
 		t.Fatalf("failed rule = %q", got)
 	}
@@ -377,9 +377,9 @@ func TestEnterTogglesBuildRule(t *testing.T) {
 func TestClickOnBuildIconTogglesRule(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	m.View()
+	m.frame()
 	row := m.paneCursorRow()
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon did not open the rule")
 	}
@@ -388,14 +388,14 @@ func TestClickOnBuildIconTogglesRule(t *testing.T) {
 func TestClickOnMoreOpensFileList(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go")})
-	m.View()
+	m.frame()
 	s := m.visibleSep[0]
 	end := displayWidth("── " + s.label)
-	if s.more != "+2 more" || !s.hit(end-2, m.vp.Width) || s.hit(end-10, m.vp.Width) {
+	if s.more != "+2 more" || !s.hit(end-2, m.vp.Width()) || s.hit(end-10, m.vp.Width()) {
 		t.Fatalf("hit spans wrong for %q", s.label)
 	}
 	row := m.paneCursorRow()
-	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
 	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "/x/c.go") {
 		t.Fatalf("file list not shown after +2 more: %q", rows)
 	}
@@ -407,7 +407,7 @@ func TestLongStartedCommandExpandsToFullText(t *testing.T) {
 	tg.Cmd = long
 	m := newTestModel(t, tg)
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.View()
+	m.frame()
 	row := m.paneCursorRow()
 	if !m.expandable(row) {
 		t.Fatal("a cut-short command is not expandable")
@@ -423,7 +423,7 @@ func TestShortStartedCommandIsNotExpandable(t *testing.T) {
 	tg.Cmd = "echo hi"
 	m := newTestModel(t, tg)
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.View()
+	m.frame()
 	row := m.paneCursorRow()
 	if m.expandable(row) {
 		t.Fatal("an uncut command shows an expand affordance")
@@ -454,7 +454,7 @@ func TestCancelledBuildRuleSaysCancelled(t *testing.T) {
 func TestBKeyNoLongerDoesAnything(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
-	m.View()
+	m.frame()
 	before := len(m.merged)
 	press(m, "b")
 	if m.solo != -1 || m.paneFocus || len(m.expanded) != 0 || len(m.merged) != before {
@@ -496,7 +496,7 @@ func TestResizeRedrawsCutRule(t *testing.T) {
 	tg.Cmd = "go run " + strings.Repeat("x", 200)
 	m := newTestModel(t, tg)
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.View()
+	m.frame()
 	raw := m.rowInfo(m.paneLen() - 1).raw
 	if !m.expandable(raw) {
 		t.Fatal("a cut command is not expandable")
@@ -506,7 +506,7 @@ func TestResizeRedrawsCutRule(t *testing.T) {
 		t.Fatal("expansion did not open")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
-	m.View()
+	m.frame()
 	if m.paneLen() != 1 {
 		t.Fatalf("widening left %d rows, want the expansion gone", m.paneLen())
 	}
@@ -518,13 +518,13 @@ func TestResizeNarrowingMakesRuleExpandable(t *testing.T) {
 	m := newTestModel(t, tg)
 	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.View()
+	m.frame()
 	raw := m.rowInfo(m.paneLen() - 1).raw
 	if m.expandable(raw) {
 		t.Fatal("a short command is expandable on a wide pane")
 	}
 	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
-	m.View()
+	m.frame()
 	if !m.expandable(raw) {
 		t.Fatal("narrowing did not make the cut command expandable")
 	}
@@ -576,10 +576,10 @@ func TestRuleHitHonorsPaneOffset(t *testing.T) {
 		{kind: evOutput, target: "api", line: strings.Repeat("y", 160)},
 		buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go"),
 	})
-	m.View()
+	m.frame()
 	m.paneCol = 10
 	m.vpDirty = true
-	m.View()
+	m.frame()
 	if m.paneCol != 10 {
 		t.Fatalf("paneCol = %d, want the pan kept at 10", m.paneCol)
 	}
@@ -587,11 +587,11 @@ func TestRuleHitHonorsPaneOffset(t *testing.T) {
 	s := m.visibleSep[m.rowInfo(row).raw]
 	end := displayWidth("── " + s.label)
 	// The more text sits at end-2 in the rule, so a press there is end-2-paneCol on screen.
-	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
 	if len(m.expanded) != 0 {
 		t.Fatal("a press at the unpanned more column opened the rule")
 	}
-	m.clickPane(m.layout.leftW+1+end-2-m.paneCol, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+end-2-m.paneCol, m.titleHeight()+row-m.vp.YOffset())
 	if len(m.expanded) != 1 {
 		t.Fatal("a press on the panned more text did not open the rule")
 	}
@@ -618,7 +618,7 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 	})
 	m.filters = []textFilter{{query: "building", keep: func(s string) bool { return strings.Contains(s, "building") }}}
 	m.paneSelDirty = true
-	m.View()
+	m.frame()
 	if !m.filterActive() {
 		t.Fatal("the filter is not active")
 	}
@@ -631,7 +631,7 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the filtered pane: %q", rawPane(m))
 	}
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the rule's icon while filtered did not open it")
 	}
@@ -642,7 +642,7 @@ func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.applyScope(0, "")
-	m.View()
+	m.frame()
 	row := -1
 	for i := 0; i < m.paneLen(); i++ {
 		if r := m.rowInfo(i); r.sub < 0 && m.visibleSep[r.raw].build != nil {
@@ -652,7 +652,7 @@ func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the single view: %q", rawPane(m))
 	}
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset)
+	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon in single view did not open the rule")
 	}

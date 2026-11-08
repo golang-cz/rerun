@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/fsnotify/fsnotify"
 )
@@ -28,7 +27,7 @@ func changeAt(m *tuiModel, name string, at time.Time, ops map[string]fsnotify.Op
 // leftPane renders one frame and returns the left column as drawn, styling
 // stripped and trailing blanks trimmed, so a test reads text.
 func leftPane(m *tuiModel) []string {
-	m.View()
+	m.frame()
 	leftW, _ := m.layoutWidths()
 	out := make([]string, 0, m.height)
 	for y := 0; y < m.height; y++ {
@@ -40,7 +39,7 @@ func leftPane(m *tuiModel) []string {
 // drawerAt is the fs drawer as drawn at width: the header line, then the body.
 // The blank divider and the version line sit below it.
 func drawerAt(m *tuiModel, width int) []string {
-	m.View()
+	m.frame()
 	n := len(m.layout.drawer)
 	out := make([]string, 0, n)
 	for y := m.height - 2 - n; y < m.height-2; y++ {
@@ -53,7 +52,7 @@ func drawerOf(m *tuiModel) []string { return drawerAt(m, feedWidth) }
 
 // feedBatchY is the screen row of the drawer's body line n, counting from 0.
 func feedBatchY(m *tuiModel, n int) int {
-	m.View()
+	m.frame()
 	return m.height - 2 - len(m.layout.drawer) + 1 + n
 }
 
@@ -293,7 +292,7 @@ func TestFeedDrawerTogglesWithT(t *testing.T) {
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	press(m, "tab", "enter", "t")
 
-	m.View()
+	m.frame()
 	if got := len(m.layout.drawer); got != 0 {
 		t.Fatalf("drawer rows after t = %d, want 0", got)
 	}
@@ -301,7 +300,7 @@ func TestFeedDrawerTogglesWithT(t *testing.T) {
 		t.Fatalf("hiding left the list open (%d) or the drawer focused (%v)", m.feedOpen, m.drawerFocus)
 	}
 	press(m, "t")
-	m.View()
+	m.frame()
 	if got := len(m.layout.drawer); got == 0 {
 		t.Fatalf("drawer rows after the second t = 0, want the feed back")
 	}
@@ -310,7 +309,7 @@ func TestFeedDrawerTogglesWithT(t *testing.T) {
 // The drawer stays hidden until a change arrives.
 func TestFeedDrawerStaysHiddenUntilSomethingChanged(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.View()
+	m.frame()
 	if got := len(m.layout.drawer); got != 0 {
 		t.Fatalf("drawer rows before any change = %d, want 0", got)
 	}
@@ -358,7 +357,7 @@ func TestListScrollKeepsTheCursorVisibleUnderATallDrawer(t *testing.T) {
 	for i, d := range defs {
 		changeAt(m, d.Name, spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{fmt.Sprintf("root%d/a.go", i): fsnotify.Write})
 	}
-	m.View()
+	m.frame()
 
 	if got := len(m.layout.drawer); got > (m.height-1)/2 {
 		t.Fatalf("drawer rows = %d, want at most half of %d", got, m.height-1)
@@ -388,7 +387,7 @@ func TestEveryLeftLineIsExactlyLeftWide(t *testing.T) {
 			"apps/root.go":               fsnotify.Write,
 		})
 		press(m, "tab", "enter")
-		m.View()
+		m.frame()
 
 		leftW, _ := m.layoutWidths()
 		if got := len(m.layout.drawer); got == 0 {
@@ -466,24 +465,21 @@ func TestFeedCreatedDirectoryHeadsItsFiles(t *testing.T) {
 
 // Tab gives the drawer the cursor: its batch row lights up and the list cursor dims.
 func TestDrawerFocusHighlightsItsCursorAndDimsTheList(t *testing.T) {
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(0)
-	defer lipgloss.SetColorProfile(prev)
-
 	m := newTestModel(t, target("web"), target("api"))
 	m.now = spawnClock
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	m.now = spawnClock.Add(2 * restartFlash) // past the restart flash, which reverses the row
 	m.cursor = 0
-	m.View()
+	m.frame()
 	leftW, _ := m.layoutWidths()
-	const cursorBg = "\x1b[48;5;237m"
+	// The adaptive cursor background as v2 renders it: palette 237 in truecolor.
+	const cursorBg = "\x1b[48;2;58;58;58m"
 	if !strings.Contains(m.leftLine(0, leftW), cursorBg) {
 		t.Fatal("the list cursor is not highlighted before the drawer takes focus")
 	}
 
 	press(m, "tab")
-	m.View()
+	m.frame()
 	batchY := m.height - 2 - len(m.layout.drawer) + 1
 	if !strings.Contains(m.leftLine(batchY, leftW), cursorBg) {
 		t.Fatal("the drawer's cursor batch is not highlighted while the drawer has focus")
