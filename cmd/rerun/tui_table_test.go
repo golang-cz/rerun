@@ -24,7 +24,7 @@ const (
 func TestTableToggleAlignsColumnValues(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
-	m.View()
+	m.frame()
 
 	if !m.tableOn() {
 		t.Fatal("a target with columns did not start in table mode")
@@ -52,7 +52,7 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet)
-	m.View()
+	m.frame()
 	press(m, "c")
 
 	if got := m.visibleRaw[0]; got != jsonGet {
@@ -89,7 +89,7 @@ func TestTableMixesRawAndColumnRows(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"), target("api"))
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", "plain log line")
-	m.View()
+	m.frame()
 
 	press(m, "c")
 	lines := paneOf(m)[m.titleHeight():]
@@ -107,7 +107,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 	bad.Columns = []Column{{Name: "a", Expr: ".["}}
 	m := newTestModel(t, bad)
 	addLines(m, "bad", jsonGet, "not json at all")
-	m.View()
+	m.frame()
 
 	press(m, "c")
 	lines := paneOf(m)[m.titleHeight():]
@@ -123,7 +123,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 func TestTableHintsWithoutColumns(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "hi")
-	m.View()
+	m.frame()
 
 	press(m, "c")
 	if m.tableOn() {
@@ -139,14 +139,14 @@ func TestTableHintsWithoutColumns(t *testing.T) {
 func TestTableEvaluatesEachLineOnce(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
-	m.View()
+	m.frame()
 	first := m.cellEvals
 	if first != 2 {
 		t.Fatalf("cellEvals = %d, want the two rows evaluated once", first)
 	}
 
 	addLines(m, "web", jsonGet, jsonGet, jsonGet)
-	m.View()
+	m.frame()
 	if got := m.cellEvals; got != first+3 {
 		t.Fatalf("cellEvals = %d, want %d: old rows were re-evaluated", got, first+3)
 	}
@@ -157,7 +157,7 @@ func TestTableWidthsAreCappedByThePane(t *testing.T) {
 	huge := strings.Repeat("x", 500)
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", fmt.Sprintf(`{"request":{"method":%q},"response":{"status":1}}`, huge))
-	m.View()
+	m.frame()
 
 	out := m.tableLines(m.paneLines())
 	if got := m.tableWidths()[0]; got > m.tableBudget() {
@@ -172,14 +172,14 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"), tableTarget("api"))
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", jsonPost)
-	m.View()
+	m.frame()
 	press(m, "c")
-	m.View()
+	m.frame()
 	before := m.cellEvals
 
 	m.cursor = 1 // web
 	m.liveSelect()
-	m.View()
+	m.frame()
 	if got := m.cellEvals; got != before {
 		t.Fatalf("cellEvals = %d after a solo flip, want %d: cached cells were re-decoded", got, before)
 	}
@@ -188,7 +188,7 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 // The hint is transient, like the m/s one.
 func TestTableHintExpires(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	m.View()
+	m.frame()
 	press(m, "c")
 	m.now = m.hintUntil
 	if got := bottomPaneLine(m); strings.Contains(got, tableHint) {

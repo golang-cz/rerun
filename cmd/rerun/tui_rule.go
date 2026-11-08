@@ -10,7 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 )
 
 // Color is extra: the text already says what happened.
@@ -211,7 +212,7 @@ func startedRule(name string, at time.Time, cmd string) sepLine {
 // followTail pins the pane to the tail, or holds a restart rule at the top until output fills below it.
 func (m *tuiModel) followTail() {
 	if m.pinSeq != 0 {
-		if row, ok := m.ruleRow(m.pinSeq); ok && m.paneLen()-row <= m.vp.Height {
+		if row, ok := m.ruleRow(m.pinSeq); ok && m.paneLen()-row <= m.vp.Height() {
 			m.vp.SetYOffset(row)
 			return
 		}
@@ -227,7 +228,7 @@ func (m *tuiModel) padForPin(out []string) []string {
 	}
 	if row, ok := m.ruleRow(m.pinSeq); ok {
 		cue := len(out)
-		for len(out) < row+m.vp.Height {
+		for len(out) < row+m.vp.Height() {
 			if len(out) == cue {
 				out = append(out, m.styles.hint.Render("pinned"))
 				continue
@@ -296,7 +297,7 @@ func (m *tuiModel) sepLines(lines []string) []string {
 		if out == nil {
 			out = slices.Clone(lines)
 		}
-		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width, m.interleaved())
+		out[row] = renderSep(m.visibleSep[r.raw], m.vp.Width(), m.interleaved())
 	}
 	if out == nil {
 		return lines
@@ -313,7 +314,7 @@ func sepStyle(t sepTone) lipgloss.Style {
 	switch t {
 	case toneOK:
 		// Muted: the ✓ already carries the good news.
-		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "28", Dark: "65"})
+		return lipgloss.NewStyle().Foreground(compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("65")})
 	case toneFail:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed))
 	}

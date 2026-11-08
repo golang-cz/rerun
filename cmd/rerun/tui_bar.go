@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Chip kinds, in the order the bar draws them.
@@ -169,7 +169,7 @@ func (m *tuiModel) blurBar() {
 }
 
 // handleBarNav owns the arrows, backspace and esc; false means the caller blurs and runs the key.
-func (m *tuiModel) handleBarNav(msg tea.KeyMsg) bool {
+func (m *tuiModel) handleBarNav(msg tea.KeyPressMsg) bool {
 	chips := m.barChips()
 	switch msg.String() {
 	case "left":

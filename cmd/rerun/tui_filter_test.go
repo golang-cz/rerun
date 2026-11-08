@@ -5,24 +5,25 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // typeString feeds a string into the open bottom-line bar, one key at a time.
 func typeString(m *tuiModel, s string) {
 	for _, r := range s {
 		if r == ' ' {
-			m.Update(tea.KeyMsg{Type: tea.KeySpace})
+			m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 			continue
 		}
-		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 }
 
-// bottomPaneLine is the pane's drawn bottom line, trailing spaces trimmed.
+// bottomPaneLine is the pane's drawn bottom line with styling stripped.
 func bottomPaneLine(m *tuiModel) string {
 	lines := paneOf(m)
-	return strings.TrimRight(lines[len(lines)-1], " ")
+	return strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " ")
 }
 
 // rawPane is the filtered pane's raw lines, in display order.
@@ -47,7 +48,7 @@ func addLines(m *tuiModel, name string, lines ...string) {
 func TestSearchCounterIsIncremental(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
-	m.View()
+	m.frame()
 
 	press(m, "ctrl+f")
 	if m.inputMode != inputSearch {
@@ -74,7 +75,7 @@ func TestSearchCounterIsIncremental(t *testing.T) {
 func TestSearchRecomputesOnNewLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
-	m.View()
+	m.frame()
 	press(m, "ctrl+f")
 	typeString(m, "fresh")
 	press(m, "enter")
@@ -83,7 +84,7 @@ func TestSearchRecomputesOnNewLines(t *testing.T) {
 	}
 
 	m.applyEvents(streamEvents("web", "fresh", 3).events)
-	m.View()
+	m.frame()
 	if got := bottomPaneLine(m); !strings.Contains(got, "1/3") {
 		t.Fatalf("bottom line = %q, want 1/3 after new matching lines", got)
 	}
@@ -94,7 +95,7 @@ func TestSearchRecomputesOnNewLines(t *testing.T) {
 func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
+	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "line")
@@ -113,8 +114,8 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	if m.searchRow != 41 {
 		t.Fatalf("searchRow = %d, want 41", m.searchRow)
 	}
-	if want := 41 - m.vp.Height/2; m.vp.YOffset != want {
-		t.Fatalf("YOffset = %d, want the match centered at %d", m.vp.YOffset, want)
+	if want := 41 - m.vp.Height()/2; m.vp.YOffset() != want {
+		t.Fatalf("YOffset = %d, want the match centered at %d", m.vp.YOffset(), want)
 	}
 	if got := bottomPaneLine(m); !strings.Contains(got, "42/60") {
 		t.Fatalf("bottom line after n = %q, want 42/60", got)
@@ -148,15 +149,15 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 func TestSearchKeysInertWithoutQuery(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
-	yOff := m.vp.YOffset
+	m.frame()
+	yOff := m.vp.YOffset()
 
 	press(m, "n", "N")
 	if !m.follow || m.pending != 0 {
 		t.Fatalf("n/N without a search changed follow: follow=%v pending=%d", m.follow, m.pending)
 	}
-	if m.vp.YOffset != yOff {
-		t.Fatalf("n/N without a search moved the pane: %d -> %d", yOff, m.vp.YOffset)
+	if m.vp.YOffset() != yOff {
+		t.Fatalf("n/N without a search moved the pane: %d -> %d", yOff, m.vp.YOffset())
 	}
 	if m.search != "" || m.searchRow != -1 {
 		t.Fatalf("n/N without a search armed something: search=%q row=%d", m.search, m.searchRow)
@@ -167,7 +168,7 @@ func TestSearchKeysInertWithoutQuery(t *testing.T) {
 func TestSearchEscKeepsTheChip(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
-	m.View()
+	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "line")
@@ -197,7 +198,7 @@ func TestSearchEscKeepsTheChip(t *testing.T) {
 func TestBottomLinePrecedence(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
+	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "line")
@@ -236,7 +237,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
-	m.View()
+	m.frame()
 
 	press(m, "v")
 	if m.inputMode != inputFilter {
@@ -244,7 +245,7 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	}
 	typeString(m, "keep")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	want := []string{"keep-0", "keep-1", "keep-2"}
 	if got := rawPane(m); !equalStrings(got, want) {
@@ -271,11 +272,11 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 func TestFilterZeroMatchHint(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-1")
-	m.View()
+	m.frame()
 	press(m, "v")
 	typeString(m, "nomatch")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	if view := renderedBody(m); !strings.Contains(view, "no lines match the filters") {
 		t.Fatalf("pane hint = %q, want the filter hint", view)
@@ -296,12 +297,12 @@ func TestYQFilterKeepsTruthyJSONOnly(t *testing.T) {
 		`not json`,
 		`{"other":1}`,
 	)
-	m.View()
+	m.frame()
 
 	press(m, "v")
 	typeString(m, ".response.status >= 400")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	want := []string{
 		`{"response":{"status":500}}`,
@@ -320,11 +321,11 @@ func TestYQFilterKeepsTruthyJSONOnly(t *testing.T) {
 func TestCopyUnderFilterMapsToKeptRawLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
-	m.View()
+	m.frame()
 	press(m, "v")
 	typeString(m, "keep")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	anchor := 0
 	m.selAnchor = &anchor
@@ -345,25 +346,25 @@ func TestSoloMuteRebuildsTheFilteredSubset(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	addLines(m, "web", "keep-web", "drop-web")
 	addLines(m, "api", "keep-api", "drop-api")
-	m.View()
+	m.frame()
 	press(m, "v")
 	typeString(m, "keep")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	if got := rawPane(m); !equalStrings(got, []string{"keep-web", "keep-api"}) {
 		t.Fatalf("filtered pane = %q", got)
 	}
 
 	m.toggleMute(0)
-	m.View()
+	m.frame()
 	if got := rawPane(m); !equalStrings(got, []string{"keep-api"}) {
 		t.Fatalf("after muting web the filtered pane = %q, want [keep-api]", got)
 	}
 
 	m.toggleMute(0)
 	m.applyScope(0, "")
-	m.View()
+	m.frame()
 	if got := rawPane(m); !equalStrings(got, []string{"keep-web"}) {
 		t.Fatalf("after soloing web the filtered pane = %q, want [keep-web]", got)
 	}
@@ -374,11 +375,11 @@ func TestSoloMuteRebuildsTheFilteredSubset(t *testing.T) {
 func TestNewLinesCollectWhileFiltered(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
-	m.View()
+	m.frame()
 	press(m, "v")
 	typeString(m, "line")
 	press(m, "enter")
-	m.View()
+	m.frame()
 
 	m.scrollUp(5)
 	if len(m.paneLines()) != 60 {
@@ -386,7 +387,7 @@ func TestNewLinesCollectWhileFiltered(t *testing.T) {
 	}
 
 	addLines(m, "web", "other-0", "other-1", "other-2")
-	m.View()
+	m.frame()
 	if m.pending != 3 {
 		t.Fatalf("pending = %d, want 3", m.pending)
 	}
@@ -419,11 +420,11 @@ func renderedBody(m *tuiModel) string {
 func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
-	m.View()
+	m.frame()
 
 	press(m, "v")
 	typeString(m, "keep")
-	m.View()
+	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "drop-0") {
 		t.Fatalf("the live filter left stale rows on screen:\n%s", body)
 	} else if !strings.Contains(body, "keep-2") {
@@ -437,7 +438,7 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 		press(m, "backspace")
 	}
 	typeString(m, "drop")
-	m.View()
+	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {
 		t.Fatalf("the edited filter left stale rows on screen:\n%s", body)
 	} else if !strings.Contains(body, "drop-1") {
@@ -449,7 +450,7 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 func TestFilterEscKeepsTypedChip(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1")
-	m.View()
+	m.frame()
 
 	press(m, "v")
 	typeString(m, "keep")
@@ -457,7 +458,7 @@ func TestFilterEscKeepsTypedChip(t *testing.T) {
 
 	press(m, "v")
 	typeString(m, "junk")
-	m.View()
+	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {
 		t.Fatalf("the junk edit did not apply live:\n%s", body)
 	}
@@ -465,7 +466,7 @@ func TestFilterEscKeepsTypedChip(t *testing.T) {
 	if len(m.filters) != 2 || m.filters[0].query != "keep" || m.filters[1].query != "junk" {
 		t.Fatalf("esc left filters = %+v, want keep then junk", m.filters)
 	}
-	m.View()
+	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {
 		t.Fatalf("the ANDed junk chip did not hide the keep lines:\n%s", body)
 	}
@@ -480,21 +481,21 @@ func TestFilterShrinkClampsFrozenYOffset(t *testing.T) {
 	for i := 0; i < 35; i++ {
 		addLines(m, "web", fmt.Sprintf("bb-%d", i))
 	}
-	m.View()
+	m.frame()
 	m.pauseTail()
 	m.scrollUp(25)
-	if m.vp.YOffset != 15 {
-		t.Fatalf("YOffset = %d, want 15 before the shrink", m.vp.YOffset)
+	if m.vp.YOffset() != 15 {
+		t.Fatalf("YOffset = %d, want 15 before the shrink", m.vp.YOffset())
 	}
 
 	press(m, "v")
 	typeString(m, "aa")
-	m.View()
+	m.frame()
 
-	if want := len(rawPane(m)) - m.vp.Height; m.vp.YOffset != want {
-		t.Fatalf("YOffset = %d, want the clamped %d", m.vp.YOffset, want)
+	if want := len(rawPane(m)) - m.vp.Height(); m.vp.YOffset() != want {
+		t.Fatalf("YOffset = %d, want the clamped %d", m.vp.YOffset(), want)
 	}
-	if body := renderedBody(m); !strings.Contains(body, fmt.Sprintf("web  aa-%d", m.vp.YOffset)) {
+	if body := renderedBody(m); !strings.Contains(body, fmt.Sprintf("web  aa-%d", m.vp.YOffset())) {
 		t.Fatalf("the clamped body does not start at the first surviving row:\n%s", body)
 	}
 }
@@ -504,7 +505,7 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	addLines(m, "web", "alpha")
 	addLines(m, "api", "alpha")
-	m.View()
+	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "alpha")
@@ -515,7 +516,7 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 
 	m.toggleMute(0)
 	fadeNotice(m)
-	m.View()
+	m.frame()
 	if got := bottomPaneLine(m); !strings.Contains(got, "1/1") {
 		t.Fatalf("after muting web the counter = %q, want 1/1", got)
 	}
@@ -526,11 +527,11 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"a":1}`, `not json`, `{"a":2}`)
-	m.View()
+	m.frame()
 
 	press(m, "v")
 	typeString(m, ".a >")
-	m.View()
+	m.frame()
 	if m.inputMode != inputFilter {
 		t.Fatalf("inputMode = %d, want the bar still open on a parse error", m.inputMode)
 	}

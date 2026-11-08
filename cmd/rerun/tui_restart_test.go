@@ -92,7 +92,7 @@ func TestRestartDrawsOneRuleAndNoExitRule(t *testing.T) {
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt}})
 	m.applyEvents([]event{{kind: evExited, target: "api", restart: true, code: -1, status: "stopped for restart"}})
 	m.applyEvents([]event{restartEvent("api", []string{"a.go"}, 0, 2*time.Second)})
-	m.View()
+	m.frame()
 
 	rules := rawRules(m)
 	if len(rules) != 2 || !strings.HasPrefix(rules[0], "▶ api started") || !strings.HasPrefix(rules[1], "↻ api restarted") {
@@ -110,7 +110,7 @@ func TestNonRestartExitKeepsExitRule(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt}})
 	m.applyEvents([]event{{kind: evExited, target: "api", code: 0, status: "exited 0", at: restartAt.Add(time.Second)}})
-	m.View()
+	m.frame()
 	if rules := rawRules(m); len(rules) != 2 || !strings.HasPrefix(rules[1], "✓ api exit 0") {
 		t.Fatalf("rules = %q, want the ■ exit rule after the start", rules)
 	}
@@ -119,7 +119,7 @@ func TestNonRestartExitKeepsExitRule(t *testing.T) {
 func TestFirstStartRuleNamesItsBuild(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt, buildDur: 6 * time.Second}})
-	m.View()
+	m.frame()
 	if rules := rawRules(m); len(rules) != 1 || !strings.HasPrefix(rules[0], "▶ api started 15:04:05") || strings.Contains(rules[0], "built") {
 		t.Fatalf("rules = %q, want the first start without its build", rules)
 	}
@@ -141,7 +141,7 @@ func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 			m.targets[0].runStarted = c.state == stateRunning
 			m.applyEvents([]event{{kind: evBuildFailed, target: "api", files: []string{"/x/a.go", "/x/b.go"},
 				lines: []string{"boom \x1b[31mred", "second"}}})
-			m.View()
+			m.frame()
 
 			want := "✗ api build failed · a.go +1 more"
 			if got := buildRuleTexts(m); len(got) != 1 || got[0] != want {
@@ -223,53 +223,53 @@ func TestBuildLifecycleClearsBuilding(t *testing.T) {
 func TestRestartPinsRuleAtTopOnlyWhenSoloedAndFollowing(t *testing.T) {
 	m := newTestModel(t, target("api"), target("web"))
 	addLines(m, "api", streamLines("api", 30)...)
-	m.View()
+	m.frame()
 	m.cursor = 0
 	m.liveSelect()
 
 	m.applyEvents([]event{restartEvent("api", nil, 0, 0)})
-	m.View()
+	m.frame()
 	row, ok := m.ruleRow(m.pinSeq)
-	if !ok || m.vp.YOffset != row {
-		t.Fatalf("pinned=%v row=%d YOffset=%d, want the rule at the top", ok, row, m.vp.YOffset)
+	if !ok || m.vp.YOffset() != row {
+		t.Fatalf("pinned=%v row=%d YOffset=%d, want the rule at the top", ok, row, m.vp.YOffset())
 	}
 
 	addLines(m, "api", "after-1", "after-2", "after-3")
-	m.View()
-	if m.vp.YOffset != row {
-		t.Fatalf("YOffset = %d after 3 lines, want the rule still on top at %d", m.vp.YOffset, row)
+	m.frame()
+	if m.vp.YOffset() != row {
+		t.Fatalf("YOffset = %d after 3 lines, want the rule still on top at %d", m.vp.YOffset(), row)
 	}
 
 	addLines(m, "api", streamLines("more", 40)...)
-	m.View()
-	if m.pinSeq != 0 || m.vp.YOffset != m.paneLen()-m.vp.Height {
-		t.Fatalf("pin=%d YOffset=%d, want the tail again once output fills the pane", m.pinSeq, m.vp.YOffset)
+	m.frame()
+	if m.pinSeq != 0 || m.vp.YOffset() != m.paneLen()-m.vp.Height() {
+		t.Fatalf("pin=%d YOffset=%d, want the tail again once output fills the pane", m.pinSeq, m.vp.YOffset())
 	}
 }
 
 func TestRestartDoesNotJumpWhenScrolledUpOrGrouped(t *testing.T) {
 	m := newTestModel(t, target("api"), target("web"))
 	addLines(m, "api", streamLines("api", 30)...)
-	m.View()
+	m.frame()
 	m.cursor = 0
 	m.liveSelect()
 	m.pauseTail() // freezes the tail, as a scroll does
 	m.scrollUp(5)
-	m.View()
-	before := m.vp.YOffset
+	m.frame()
+	before := m.vp.YOffset()
 
 	m.applyEvents([]event{restartEvent("api", nil, 0, 0)})
-	m.View()
-	if m.pinSeq != 0 || m.vp.YOffset != before {
-		t.Fatalf("scrolled up: pin=%d YOffset=%d, want no jump from %d", m.pinSeq, m.vp.YOffset, before)
+	m.frame()
+	if m.pinSeq != 0 || m.vp.YOffset() != before {
+		t.Fatalf("scrolled up: pin=%d YOffset=%d, want no jump from %d", m.pinSeq, m.vp.YOffset(), before)
 	}
 
 	grouped := newTestModel(t, schemaTarget("api", "backend"), target("web"))
 	addLines(grouped, "api", streamLines("api", 30)...)
-	grouped.View()
+	grouped.frame()
 	grouped.applyScope(-1, "backend")
 	grouped.applyEvents([]event{restartEvent("api", nil, 0, 0)})
-	grouped.View()
+	grouped.frame()
 	if grouped.pinSeq != 0 {
 		t.Fatalf("group scope pinned the rule (pin=%d), want no jump", grouped.pinSeq)
 	}

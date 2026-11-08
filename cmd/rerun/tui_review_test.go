@@ -15,19 +15,19 @@ func TestScopeSwitchReusesDecodedCells(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"), tableTarget("api"))
 	addLines(m, "web", jsonGet, jsonGet, jsonGet)
 	addLines(m, "api", jsonPost, jsonPost)
-	m.View()
+	m.frame()
 	before := m.cellEvals
 
 	press(m, "j")
-	m.View()
+	m.frame()
 	press(m, "k")
-	m.View()
+	m.frame()
 	if got := m.cellEvals; got != before {
 		t.Fatalf("cellEvals = %d after two scope switches, want %d", got, before)
 	}
 
 	addLines(m, "web", jsonGet)
-	m.View()
+	m.frame()
 	if got := m.cellEvals; got != before+1 {
 		t.Fatalf("cellEvals = %d after one new line, want %d", got, before+1)
 	}
@@ -86,13 +86,13 @@ func TestUnsampledRowsFeedTheSampleAfterAScopeSwitch(t *testing.T) {
 	addLines(m, "web", jsonGet)
 	m.cursor = 1
 	m.applyScope(1, "")
-	m.View()
+	m.frame()
 	if got, want := m.tableWidths()[0], displayWidth("method")+columnMarkW; got != want {
 		t.Fatalf("width = %d on web alone, want %d", got, want)
 	}
 
 	press(m, "k")
-	m.View()
+	m.frame()
 	if got := m.tableWidths()[0]; got != 15 {
 		t.Fatalf("width = %d after switching to api, want 15 from its unsampled row", got)
 	}
@@ -108,13 +108,13 @@ func TestFrozenWidthHoldsAcrossAScopeSwitch(t *testing.T) {
 	addLines(m, "web", fmt.Sprintf(`{"request":{"method":%q},"response":{"status":200}}`, strings.Repeat("y", 40)))
 	m.cursor = 1
 	m.applyScope(1, "")
-	m.View()
+	m.frame()
 	press(m, "k")
-	m.View()
+	m.frame()
 	frozen := m.tableWidths()[0]
 
 	addLines(m, "api", fmt.Sprintf(`{"request":{"method":%q},"response":{"status":200}}`, strings.Repeat("z", 30)))
-	m.View()
+	m.frame()
 	if got := m.tableWidths()[0]; got != frozen {
 		t.Fatalf("width moved from %d to %d after the sample froze", frozen, got)
 	}
@@ -122,10 +122,10 @@ func TestFrozenWidthHoldsAcrossAScopeSwitch(t *testing.T) {
 
 func TestRowLeavesRoomForTheMarkCell(t *testing.T) {
 	m := newTestModel(t, namedColumns("web", "msg", "status"))
-	m.View()
+	m.frame()
 	last := m.tableWidths()[1]
 	addLines(m, "web", fmt.Sprintf(`{"msg":"a","status":%q}`, strings.Repeat("x", last)))
-	m.View()
+	m.frame()
 
 	row := strings.TrimRight(ansi.Strip(paneOf(m)[m.titleHeight()]), " ")
 	if !strings.Contains(row, strings.Repeat("x", last)) || strings.Contains(row, "…") || !strings.HasSuffix(row, "(+)") {

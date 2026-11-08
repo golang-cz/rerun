@@ -130,7 +130,7 @@ func TestCursorClampsWhenItPointsPastTheList(t *testing.T) {
 
 func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 	m := nestedFixture(t)
-	m.View()
+	m.frame()
 
 	m.handleMouse(mouse(0, 0, false)) // the import header's arrow cell
 	if !m.collapsed[importKeyPrefix+"omsx"] || m.schemaSel != "" {
@@ -138,7 +138,7 @@ func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 	}
 
 	m.collapsed = nil
-	m.View()
+	m.frame()
 	m.handleMouse(mouse(3, 0, false)) // the name cell
 	if m.collapsed[importKeyPrefix+"omsx"] || m.schemaSel != importKeyPrefix+"omsx" {
 		t.Fatalf("name click: collapsed=%v scope=%q, want selected and open", m.collapsed, m.schemaSel)
@@ -147,7 +147,7 @@ func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 
 func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 	m := nestedFixture(t)
-	m.View()
+	m.frame()
 	m.handleMouse(mouse(1, 1, false)) // the backend sub-header sits one indent in
 	if !m.collapsed["omsx/backend"] {
 		t.Fatalf("sub-header arrow click left backend open: %v", m.collapsed)

@@ -208,7 +208,7 @@ func spawnModel(t *testing.T) *tuiModel {
 // straight to a row; the drawer under it resolves to the target of its entry.
 func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	m := spawnModel(t)
-	m.View()
+	m.frame()
 	if m.layout.offset != 0 {
 		t.Fatalf("offset = %d, want the list from the top", m.layout.offset)
 	}
@@ -227,7 +227,7 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	}
 
 	m.applyScope(1, "")
-	m.View()
+	m.frame()
 	m.handleMouse(mouse(2, 1, false))
 	if m.solo != 1 {
 		t.Fatalf("solo after a click on the soloed row = %d, want 1", m.solo)
@@ -244,7 +244,7 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m := spawnModel(t)
 	m.cursor = 2 // worker, the last row
 	m.height = 4 // no room for a drawer at all
-	m.View()
+	m.frame()
 	if got := m.rowAt(2, m.height-2); got != 2 {
 		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
 	}
@@ -265,7 +265,7 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	}
 	many.cursor = len(many.targets) - 1
 	many.height = 8
-	many.View()
+	many.frame()
 
 	visible := many.listHeight()
 	if visible >= many.height-1 {

@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/compat"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -28,7 +30,7 @@ type levelHit struct {
 
 // levelPaint is how a level colors its line.
 type levelPaint struct {
-	fg, bg lipgloss.TerminalColor
+	fg, bg color.Color
 	bold   bool
 }
 
@@ -64,10 +66,10 @@ func tableLevel(t *tuiTarget, vals []string) (int, string) {
 
 // levelPaintOf maps a level word, case-insensitively, to its paint.
 func levelPaintOf(word string) (levelPaint, bool) {
-	blue := lipgloss.AdaptiveColor{Light: "25", Dark: "39"}
-	green := lipgloss.AdaptiveColor{Light: "28", Dark: "46"}
-	yellow := lipgloss.AdaptiveColor{Light: "136", Dark: "220"}
-	red := lipgloss.AdaptiveColor{Light: "160", Dark: "196"}
+	blue := compat.AdaptiveColor{Light: lipgloss.Color("25"), Dark: lipgloss.Color("39")}
+	green := compat.AdaptiveColor{Light: lipgloss.Color("28"), Dark: lipgloss.Color("46")}
+	yellow := compat.AdaptiveColor{Light: lipgloss.Color("136"), Dark: lipgloss.Color("220")}
+	red := compat.AdaptiveColor{Light: lipgloss.Color("160"), Dark: lipgloss.Color("196")}
 	switch strings.ToUpper(strings.TrimSpace(word)) {
 	case "DEBUG", "TRACE", "DEFAULT":
 		return levelPaint{fg: blue}, true

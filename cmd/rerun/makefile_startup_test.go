@@ -91,7 +91,7 @@ func TestMakeOnlyConfigOpensTheFinderOnFirstFrame(t *testing.T) {
 	if !m.finder.open {
 		t.Fatal("finder closed on the first frame")
 	}
-	if view := m.View(); !strings.Contains(view, "find…") {
+	if view := m.View().Content; !strings.Contains(view, "find…") {
 		t.Fatalf("first frame has no open finder:\n%s", view)
 	}
 }
@@ -170,7 +170,7 @@ func TestFinderEnterReRunsAfterExit(t *testing.T) {
 	if m.targets[i].state != stateExited || m.targets[i].exitLabel != "exit 0" {
 		t.Fatalf("state = %v, label %q, want exited with exit 0", m.targets[i].state, m.targets[i].exitLabel)
 	}
-	if view := m.View(); !strings.Contains(view, "exit 0") {
+	if view := m.View().Content; !strings.Contains(view, "exit 0") {
 		t.Fatalf("view does not show the exit label:\n%s", view)
 	}
 
@@ -188,13 +188,13 @@ func TestFinderFooterSaysRunOnAMakeRow(t *testing.T) {
 	m := newMakeTUI(t)
 	m.Update(ctrlK)
 	press(m, "t", "e", "s", "t")
-	if view := m.View(); !strings.Contains(view, "⏎ run") {
+	if view := m.View().Content; !strings.Contains(view, "⏎ run") {
 		t.Fatalf("footer on a make row lacks ⏎ run:\n%s", view)
 	}
 
 	m.finder.query = ""
 	press(m, "w", "e", "b")
-	if view := m.View(); !strings.Contains(view, "⏎ jump") || strings.Contains(view, "⏎ run") {
+	if view := m.View().Content; !strings.Contains(view, "⏎ jump") || strings.Contains(view, "⏎ run") {
 		t.Fatalf("footer on a rerun.yml row should say jump:\n%s", view)
 	}
 }

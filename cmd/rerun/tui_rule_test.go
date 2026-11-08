@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -72,7 +72,7 @@ func TestRunRuleIsNotATableRow(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet)
 	m.applyEvents([]event{{kind: evStarted, target: "web", at: time.Now()}})
-	m.View()
+	m.frame()
 
 	if !m.tableOn() {
 		t.Fatal("expected table mode")

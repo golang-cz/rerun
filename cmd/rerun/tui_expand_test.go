@@ -57,7 +57,7 @@ func TestJSONLinesGetMarkerAtRightEdge(t *testing.T) {
 func TestEnterExpandsAndCollapsesTheBottomLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 
 	press(m, "right", "enter")
 	if !strings.Contains(plainPane(m), `status: 403`) {
@@ -77,7 +77,7 @@ func TestEnterExpandsAndCollapsesTheBottomLine(t *testing.T) {
 func TestClickingTheMarkerExpandsAndCollapses(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	x, y := m.width-2, m.titleHeight()
 
 	m.handleMouse(mouse(x, y, false))
@@ -110,7 +110,7 @@ func TestExpansionSurvivesNewLines(t *testing.T) {
 func TestKeyClickAddsColumnToSelectedSchema(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 	addLines(m, "api", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	m.toggleExpand(0)
 
@@ -136,7 +136,7 @@ func TestKeyClickAddsColumnToSelectedSchema(t *testing.T) {
 func TestKeyClickAddsColumnToSoloedTarget(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	m.toggleExpand(0)
 
@@ -152,7 +152,7 @@ func TestKeyClickAddsColumnToSoloedTarget(t *testing.T) {
 func TestKeyClickWithoutSelectionHints(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, `status: `)
@@ -170,7 +170,7 @@ func TestKeyClickWithoutSelectionHints(t *testing.T) {
 func TestValueClickAddsChipFilter(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq, `{"status":200}`, "plain")
-	m.View()
+	m.frame()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, `status: 403`)
@@ -191,7 +191,7 @@ func TestValueClickAddsChipFilter(t *testing.T) {
 func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.toggleExpand(0)
 
 	x, y := findInPane(t, m, `status: 403`)
@@ -214,7 +214,7 @@ func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 func TestHeaderClickRemovesAColumn(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
-	m.View()
+	m.frame()
 	m.liveSelect()
 
 	x, y := findInPane(t, m, "method ×")
@@ -232,7 +232,7 @@ func TestHeaderClickRemovesAColumn(t *testing.T) {
 func TestErrorNoticeOutranksUnsavedFooter(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	m.toggleExpand(0)
 	x, y := findInPane(t, m, `level: `)
@@ -277,7 +277,7 @@ func TestSaveWritesSchemaAndSurvivesReload(t *testing.T) {
 
 	m.liveSelect()
 	addLines(m, "api", jsonReq)
-	m.View()
+	m.frame()
 	m.toggleExpand(0)
 	x, y := findInPane(t, m, `status: `)
 	m.handleMouse(mouse(x+1, y, false))

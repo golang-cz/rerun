@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -30,7 +31,7 @@ func TestBrokenReloadOpensTheModalWithTheParserText(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	err := brokenConfigErr(t)
 	m.applyEvent(configErrEvent(err))
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 
 	if !strings.Contains(view, "rerun.yml not reloaded") || !strings.Contains(view, "old config still running · esc close") {
 		t.Fatalf("modal missing its title or footer:\n%s", view)
@@ -65,6 +66,30 @@ func TestBrokenReloadLeavesTheTargetsRunning(t *testing.T) {
 		if tg.spec.Name != before[i] {
 			t.Fatalf("target %d = %q after a broken reload, want %q", i, tg.spec.Name, before[i])
 		}
+	}
+}
+
+func TestModalSwallowsPasteToTheFinderAndTheBar(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.Update(ctrlK)
+	if !m.finder.open {
+		t.Fatal("ctrl+k did not open the finder, so the test cannot tell")
+	}
+	m.applyEvent(configErrEvent(brokenConfigErr(t)))
+	m.Update(tea.PasteMsg{Content: "api"})
+	if m.finder.query != "" {
+		t.Fatalf("finder query = %q after a paste under the modal, want empty", m.finder.query)
+	}
+
+	bar := newTestModel(t, target("web"), target("api"))
+	press(bar, "/")
+	if bar.inputMode == inputNone {
+		t.Fatal("/ did not open the filter bar, so the test cannot tell")
+	}
+	bar.applyEvent(configErrEvent(brokenConfigErr(t)))
+	bar.Update(tea.PasteMsg{Content: "api"})
+	if bar.input != "" {
+		t.Fatalf("bar input = %q after a paste under the modal, want empty", bar.input)
 	}
 }
 
@@ -112,7 +137,7 @@ func TestFixedReloadClosesTheModal(t *testing.T) {
 	if m.cfgErr != "" {
 		t.Fatal("a successful reload left the modal open")
 	}
-	if strings.Contains(ansi.Strip(m.View()), "not reloaded") {
+	if strings.Contains(ansi.Strip(m.View().Content), "not reloaded") {
 		t.Fatal("the modal is still drawn after a successful reload")
 	}
 }
@@ -134,7 +159,7 @@ func TestLongErrorWrapsInsteadOfTruncating(t *testing.T) {
 	long := &configErr{path: "rerun.yml", msg: strings.Repeat("alpha ", 30) + "TAILMARK"}
 	m.applyEvent(configErrEvent(long))
 
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "TAILMARK") || strings.Contains(view, "…") {
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "TAILMARK") || strings.Contains(view, "…") {
 		t.Fatalf("long error was cut instead of wrapped:\n%s", view)
 	}
 }

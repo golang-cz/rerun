@@ -15,7 +15,7 @@ func groupedModel(t *testing.T) *tuiModel {
 	for _, n := range []string{"api", "worker", "db", "web"} {
 		addLines(m, n, n+" keep", n+" drop")
 	}
-	m.View()
+	m.frame()
 	return m
 }
 
@@ -24,7 +24,7 @@ func alphaModel(t *testing.T) *tuiModel {
 	t.Helper()
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "alpha beta", "alpha gamma", "delta beta", "delta gamma")
-	m.View()
+	m.frame()
 	return m
 }
 
@@ -38,7 +38,7 @@ func TestBarChipsRenderAndAndTogether(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
-	m.View()
+	m.frame()
 
 	if want := []string{"alpha beta"}; !equalStrings(rawPane(m), want) {
 		t.Fatalf("pane = %q, want %q", rawPane(m), want)
@@ -54,7 +54,7 @@ func TestBarChipClickRemovesIt(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
-	m.View()
+	m.frame()
 
 	cross := m.layout.chips[1]
 	m.handleMouse(mouse(m.layout.leftW+1+cross.x, 0, false))
@@ -68,7 +68,7 @@ func TestScopeHasNoBarChipAndBackspaceKeepsIt(t *testing.T) {
 	m := groupedModel(t)
 	m.cursor = 0
 	m.liveSelect()
-	m.View()
+	m.frame()
 
 	if m.schemaSel != "backend" {
 		t.Fatalf("schemaSel = %q, want backend from the header", m.schemaSel)

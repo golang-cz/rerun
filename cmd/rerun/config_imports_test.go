@@ -398,12 +398,12 @@ func TestSaveColumnsWritesTheDefiningFile(t *testing.T) {
 func TestMissingImportRowIsNotSelectable(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.missing = []missingImport{{Group: "bpn", Path: "/x/bpn/rerun.yml"}}
-	m.View()
+	m.frame()
 
 	if got := m.listLen(); got != 2 {
 		t.Fatalf("listLen = %d, want only the two target rows", got)
 	}
-	if view := m.View(); !strings.Contains(view, "bpn (not found)") {
+	if view := m.View().Content; !strings.Contains(view, "bpn (not found)") {
 		t.Errorf("view does not show the not-found row:\n%s", view)
 	}
 	press(m, "j", "j", "j")
@@ -482,7 +482,7 @@ func TestOnlyMissingOptionalImportsIsValid(t *testing.T) {
 	m.group.cancel()
 	m.missing = cfg.Missing
 	m.width, m.height = 60, 10
-	if view := m.View(); !strings.Contains(view, "bpn (not found)") {
+	if view := m.View().Content; !strings.Contains(view, "bpn (not found)") {
 		t.Errorf("TUI view has no not-found row:\n%s", view)
 	}
 }

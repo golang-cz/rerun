@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
-var ctrlK = tea.KeyMsg{Type: tea.KeyCtrlK}
+var ctrlK = tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}
 
 // targetIndex is the index of the named target in m.targets, or -1.
 func targetIndex(m *tuiModel, name string) int {
@@ -252,13 +252,13 @@ func TestFinderIgnoresCtrlKInInputHelpAndQuitConfirm(t *testing.T) {
 
 func TestFinderIgnoresMouseWhileOpen(t *testing.T) {
 	plain := newTestModel(t)
-	plain.View()
+	plain.frame()
 	plain.Update(mouse(2, 1, false))
 	if plain.solo == -1 {
 		t.Fatal("click on row 1 did not change the solo without the finder, so the test cannot tell")
 	}
 	m := newTestModel(t)
-	m.View()
+	m.frame()
 	m.Update(ctrlK)
 	m.Update(mouse(2, 1, false))
 	if m.solo != -1 {
@@ -269,8 +269,8 @@ func TestFinderIgnoresMouseWhileOpen(t *testing.T) {
 func TestFinderSanitizesQueryAndDesc(t *testing.T) {
 	m := newTestModel(t, describe(target("docs"), "frontend   \n  docs"))
 	m.Update(ctrlK)
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("do\ncs\r\x1b")})
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q"), Alt: true})
+	m.Update(tea.PasteMsg{Content: "do\ncs\r\x1b"})
+	m.Update(tea.KeyPressMsg{Code: 'q', Mod: tea.ModAlt})
 	if m.finder.query != "docs" {
 		t.Fatalf("query = %q, want control characters and alt runes dropped", m.finder.query)
 	}
@@ -347,7 +347,7 @@ func TestFinderTinyTerminalLinesFitWidth(t *testing.T) {
 	m.width, m.height = 20, 8
 	m.Update(ctrlK)
 	press(m, strings.Repeat("w", 40))
-	for i, line := range strings.Split(m.View(), "\n") {
+	for i, line := range strings.Split(m.View().Content, "\n") {
 		if w := lipgloss.Width(line); w > 20 {
 			t.Fatalf("line %d is %d cells wide on a 20-wide terminal: %q", i, w, line)
 		}

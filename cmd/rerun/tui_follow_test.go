@@ -5,20 +5,21 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // paneOf renders one frame and returns the right pane's lines as drawn.
 func paneOf(m *tuiModel) []string {
 	_, rightW := m.layoutWidths()
-	m.View()
+	m.frame()
 	return m.rightLines(rightW)
 }
 
-// newestPaneLine is the last pane line as it appears on screen.
+// newestPaneLine is the last pane line on screen, styling stripped.
 func newestPaneLine(m *tuiModel) string {
 	lines := paneOf(m)
-	return strings.TrimRight(lines[len(lines)-1], " ")
+	return strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " ")
 }
 
 // streamEvents builds one batch of output for a target.
@@ -44,14 +45,14 @@ func TestFollowPinsPaneToNewestLine(t *testing.T) {
 	for batch := 0; batch < 5; batch++ {
 		m.applyEvents(streamEvents("web", fmt.Sprintf("web%d", batch), 30).events)
 		m.applyEvents(streamEvents("api", fmt.Sprintf("api%d", batch), 30).events)
-		m.View()
+		m.frame()
 
 		if !m.vp.AtBottom() {
 			t.Fatalf("batch %d: viewport is not at the bottom: yOff=%d height=%d lines=%d",
-				batch, m.vp.YOffset, m.vp.Height, len(m.visible))
+				batch, m.vp.YOffset(), m.vp.Height(), len(m.visible))
 		}
-		if want := len(m.visible) - m.vp.Height; m.vp.YOffset != want {
-			t.Fatalf("batch %d: YOffset = %d, want maxYOffset %d", batch, m.vp.YOffset, want)
+		if want := len(m.visible) - m.vp.Height(); m.vp.YOffset() != want {
+			t.Fatalf("batch %d: YOffset = %d, want maxYOffset %d", batch, m.vp.YOffset(), want)
 		}
 		want := fmt.Sprintf("api  api%d-29", batch)
 		if got := newestPaneLine(m); got != want {
@@ -66,11 +67,11 @@ func TestFollowPinsSoloedPaneToNewestLine(t *testing.T) {
 	m.applyEvents(streamEvents("web", "web", 40).events)
 	m.applyScope(0, "")
 	fadeNotice(m)
-	m.View()
+	m.frame()
 
 	for batch := 0; batch < 3; batch++ {
 		m.applyEvents(streamEvents("web", fmt.Sprintf("solo%d", batch), 25).events)
-		m.View()
+		m.frame()
 
 		if !m.vp.AtBottom() {
 			t.Fatalf("batch %d: the soloed pane is not at the bottom", batch)
@@ -88,18 +89,18 @@ func TestFollowAdvancesThroughEventsMsgPath(t *testing.T) {
 
 	// Warm up past the pane's height, so the newest line is a scrolled-in row.
 	m.Update(streamEvents("web", "warmup", 40))
-	m.View()
+	m.frame()
 
 	for frame := 0; frame < 10; frame++ {
 		m.Update(streamEvents("web", fmt.Sprintf("f%d", frame), 12))
-		m.View()
+		m.frame()
 
 		want := fmt.Sprintf("web  f%d-11", frame)
 		if got := newestPaneLine(m); got != want {
 			t.Fatalf("frame %d: the pane's last line = %q, want %q", frame, got, want)
 		}
 		if !m.vp.AtBottom() {
-			t.Fatalf("frame %d: viewport yOff=%d is not at the bottom", frame, m.vp.YOffset)
+			t.Fatalf("frame %d: viewport yOff=%d is not at the bottom", frame, m.vp.YOffset())
 		}
 	}
 }
@@ -108,10 +109,10 @@ func TestFollowAdvancesThroughEventsMsgPath(t *testing.T) {
 func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
 	m.scrollUp(3)
-	yOff := m.vp.YOffset
+	yOff := m.vp.YOffset()
 	first := paneOf(m)[0]
 
 	m.applyEvents(streamEvents("web", "new", 10).events)
@@ -120,8 +121,8 @@ func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 	if m.follow {
 		t.Fatal("the tail resumed following after scrolling up")
 	}
-	if m.vp.YOffset != yOff {
-		t.Fatalf("YOffset moved from %d to %d while frozen", yOff, m.vp.YOffset)
+	if m.vp.YOffset() != yOff {
+		t.Fatalf("YOffset moved from %d to %d while frozen", yOff, m.vp.YOffset())
 	}
 	if lines[0] != first {
 		t.Fatalf("the frozen frame advanced: %q -> %q", first, lines[0])
@@ -129,7 +130,7 @@ func TestFreezeOnScrollUpDoesNotAdvanceTheFrame(t *testing.T) {
 	if m.pending != 10 {
 		t.Fatalf("pending = %d, want 10", m.pending)
 	}
-	if got := strings.TrimRight(lines[len(lines)-1], " "); got != "↓ 10 new · scrollback · esc live" {
+	if got := strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " "); got != "↓ 10 new · scrollback · esc live" {
 		t.Fatalf("the paused pane's last line = %q, want the marker and chip", got)
 	}
 }
@@ -142,16 +143,16 @@ func TestScrollUpWithNothingAboveKeepsTailing(t *testing.T) {
 		msg  func(m *tuiModel) tea.Msg
 	}{
 		{"wheel", func(m *tuiModel) tea.Msg {
-			return tea.MouseMsg{X: m.layout.leftW + 1, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp}
+			return tea.MouseWheelMsg{X: m.layout.leftW + 1, Button: tea.MouseWheelUp}
 		}},
-		{"pgup", func(m *tuiModel) tea.Msg { return tea.KeyMsg{Type: tea.KeyPgUp} }},
+		{"pgup", func(m *tuiModel) tea.Msg { return tea.KeyPressMsg{Code: tea.KeyPgUp} }},
 	}
 	for _, g := range gestures {
 		t.Run(g.name, func(t *testing.T) {
 			m := newTestModel(t, target("web"))
 			// Fewer lines than the pane is tall: YOffset is already 0.
 			m.applyEvents(streamEvents("web", "early", 5).events)
-			m.View()
+			m.frame()
 
 			m.Update(g.msg(m))
 			if !m.follow {
@@ -173,14 +174,14 @@ func TestScrollUpWithNothingAboveKeepsTailing(t *testing.T) {
 func TestScrollUpWithScrollbackStillFreezes(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
-	m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	if m.follow {
 		t.Fatal("scrolling up over real scrollback did not freeze the tail")
 	}
-	if m.vp.YOffset == 0 || m.vp.AtBottom() {
-		t.Fatalf("YOffset = %d, want a window above the tail", m.vp.YOffset)
+	if m.vp.YOffset() == 0 || m.vp.AtBottom() {
+		t.Fatalf("YOffset = %d, want a window above the tail", m.vp.YOffset())
 	}
 }
 
@@ -188,7 +189,7 @@ func TestScrollUpWithScrollbackStillFreezes(t *testing.T) {
 func TestEscResumesLiveTailAfterFreeze(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 	m.scrollUp(5)
 
 	press(m, "esc")

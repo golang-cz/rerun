@@ -73,7 +73,7 @@ func (m *tuiModel) expansionRows(raw int) []dispRow {
 // sepRows is a rule's expansion: its build rows, or the command a cut-short started rule hides.
 func (m *tuiModel) sepRows(raw int) []dispRow {
 	s := m.visibleSep[raw]
-	if !s.expandable(m.vp.Width) {
+	if !s.expandable(m.vp.Width()) {
 		return nil
 	}
 	lines := []string{s.full}
@@ -89,7 +89,7 @@ func (m *tuiModel) sepRows(raw int) []dispRow {
 
 // expandable reports whether a shown line opens: a JSON object, or a rule with something under it.
 func (m *tuiModel) expandable(raw int) bool {
-	return m.visibleObj[raw] || m.visibleSep[raw].expandable(m.vp.Width)
+	return m.visibleObj[raw] || m.visibleSep[raw].expandable(m.vp.Width())
 }
 
 func (m *tuiModel) addDisp(r dispRow) {
@@ -162,7 +162,7 @@ func (m *tuiModel) lineRow(raw int) int {
 
 // paneRows is the content rows the viewport shows, less the marker row.
 func (m *tuiModel) paneRows() int {
-	h := m.vp.Height
+	h := m.vp.Height()
 	if !m.follow && m.pending > 0 {
 		h--
 	}
@@ -202,18 +202,18 @@ func (m *tuiModel) placeCursor() {
 		switch {
 		case m.revealTop:
 			m.vp.SetYOffset(row)
-		case row < m.vp.YOffset:
+		case row < m.vp.YOffset():
 			m.vp.SetYOffset(row)
-		case row >= m.vp.YOffset+h:
+		case row >= m.vp.YOffset()+h:
 			m.vp.SetYOffset(row - h + 1)
 		}
 		m.revealCur, m.revealTop = false, false
 	}
 	switch {
-	case row < m.vp.YOffset:
-		m.setPaneCursor(min(m.vp.YOffset, n-1))
-	case row >= m.vp.YOffset+h:
-		m.setPaneCursor(min(m.vp.YOffset+h-1, n-1))
+	case row < m.vp.YOffset():
+		m.setPaneCursor(min(m.vp.YOffset(), n-1))
+	case row >= m.vp.YOffset()+h:
+		m.setPaneCursor(min(m.vp.YOffset()+h-1, n-1))
 	}
 }
 
@@ -255,7 +255,7 @@ func (m *tuiModel) pickCursorValue() {
 // markLines draws the (+) or (−) cell at the pane's right edge on each JSON line.
 // The line's content gives way to the cell with an ellipsis, never under it.
 func (m *tuiModel) markLines(lines []string) []string {
-	w := m.vp.Width
+	w := m.vp.Width()
 	if w < markW {
 		return lines
 	}
@@ -286,9 +286,9 @@ func (m *tuiModel) clickPane(x, y int) {
 	px := x - m.layout.leftW - 1
 	r := m.rowInfo(row)
 	switch {
-	case r.sub < 0 && r.obj && px >= m.vp.Width-markW:
+	case r.sub < 0 && r.obj && px >= m.vp.Width()-markW:
 		m.toggleExpand(r.raw)
-	case r.sub < 0 && !r.obj && m.visibleSep[r.raw].hit(px+m.paneCol, m.vp.Width):
+	case r.sub < 0 && !r.obj && m.visibleSep[r.raw].hit(px+m.paneCol, m.vp.Width()):
 		m.toggleExpand(r.raw)
 	case r.field != nil && inSpan(r.field.keyX, px+m.paneCol):
 		m.pickKey(r.field)

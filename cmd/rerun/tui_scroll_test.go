@@ -13,13 +13,13 @@ func manyTargets(t *testing.T, n int) *tuiModel {
 		specs = append(specs, target(fmt.Sprintf("t%02d", i)))
 	}
 	m := newTestModel(t, specs...)
-	m.View()
+	m.frame()
 	return m
 }
 
 // offsetAt is the list's stored top row after a frame.
 func offsetAt(m *tuiModel) int {
-	m.View()
+	m.frame()
 	return m.layout.offset
 }
 

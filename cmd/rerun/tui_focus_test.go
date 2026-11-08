@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // paneOut appends one target line and returns the model, so a focus test can
@@ -20,7 +20,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneFocus {
 		t.Fatal("pane starts focused")
 	}
-	before := paneOf(m)[m.titleHeight()]
+	before := ansi.Strip(paneOf(m)[m.titleHeight()])
 
 	press(m, "right")
 	if !m.paneFocus {
@@ -34,7 +34,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneCol != 1 {
 		t.Fatalf("paneCol = %d, want 1", m.paneCol)
 	}
-	after := paneOf(m)[m.titleHeight()]
+	after := ansi.Strip(paneOf(m)[m.titleHeight()])
 	if after == before {
 		t.Fatalf("pane line did not shift: %q", after)
 	}
@@ -81,7 +81,7 @@ func TestLeftArrowUnfocusesAfterColumnZero(t *testing.T) {
 func TestFocusedArrowsMoveThePaneCursor(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
 	press(m, "right")
 	newest := m.paneCursorRow()
@@ -136,12 +136,12 @@ func TestUnfocusedArrowsMoveCursor(t *testing.T) {
 func TestFocusedHomeAndEnd(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
 	press(m, "right", "right")
 	press(m, "home")
-	if m.vp.YOffset != 0 {
-		t.Fatalf("home: YOffset = %d, want 0", m.vp.YOffset)
+	if m.vp.YOffset() != 0 {
+		t.Fatalf("home: YOffset = %d, want 0", m.vp.YOffset())
 	}
 	if m.paneCol != 0 {
 		t.Fatalf("home: paneCol = %d, want 0", m.paneCol)
@@ -169,7 +169,7 @@ func TestUnfocusedHomeAndEndMoveCursor(t *testing.T) {
 func TestFocusedEscReturnsToListAndKeepsScroll(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
 	m.cursor = 0
 	m.liveSelect()
@@ -178,14 +178,14 @@ func TestFocusedEscReturnsToListAndKeepsScroll(t *testing.T) {
 	}
 
 	press(m, "right", "up")
-	off := m.vp.YOffset
+	off := m.vp.YOffset()
 
 	press(m, "esc")
 	if m.paneFocus {
 		t.Fatal("esc did not return focus to the list")
 	}
-	if m.vp.YOffset != off {
-		t.Fatalf("esc changed the scroll: YOffset = %d, want %d", m.vp.YOffset, off)
+	if m.vp.YOffset() != off {
+		t.Fatalf("esc changed the scroll: YOffset = %d, want %d", m.vp.YOffset(), off)
 	}
 	if m.solo != 0 {
 		t.Fatal("esc cleared solo while the pane was focused")
@@ -222,12 +222,6 @@ func TestPaneColClampsToWidestLine(t *testing.T) {
 // The focused divider switches to the heavy bar in cyan; the list keeps the
 // plain gray bar.
 func TestFocusedDividerIsHeavyCyan(t *testing.T) {
-	// TrueColor (termenv.Profile 0), named here so termenv stays an indirect
-	// dependency. Without it the renderer strips styling off a pipe.
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(0)
-	defer lipgloss.SetColorProfile(prev)
-
 	m := newTestModel(t, target("web"))
 	focused := m.styles.dividerFocus.Render("┃")
 	plain := m.styles.divider.Render("│")
@@ -235,7 +229,7 @@ func TestFocusedDividerIsHeavyCyan(t *testing.T) {
 		t.Fatalf("focused divider = %q, want the heavy bar in cyan", focused)
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, plain) {
 		t.Fatal("divider is not the plain bar while the list has focus")
 	}
@@ -244,7 +238,7 @@ func TestFocusedDividerIsHeavyCyan(t *testing.T) {
 	}
 
 	press(m, "right")
-	view = m.View()
+	view = m.View().Content
 	if !strings.Contains(view, focused) {
 		t.Fatal("divider is not the heavy cyan bar while the pane has focus")
 	}

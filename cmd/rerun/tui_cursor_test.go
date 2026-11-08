@@ -33,7 +33,7 @@ func cursorTo(t *testing.T, m *tuiModel, key string) {
 func TestEnterExpandsTheCursorLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "plain", jsonReq, "tail")
-	m.View()
+	m.frame()
 
 	press(m, "right", "up", "enter")
 	if !m.expanded[m.visibleSeq[1]] {
@@ -51,7 +51,7 @@ func TestEnterExpandsTheCursorLine(t *testing.T) {
 func TestEnterOnPlainCursorLineDoesNothing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "plain")
-	m.View()
+	m.frame()
 
 	press(m, "right", "enter")
 	if m.hint != "" {
@@ -66,18 +66,18 @@ func TestEnterOnPlainCursorLineDoesNothing(t *testing.T) {
 func TestPaneCursorMovesPauseTheTailAndStayInView(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 
 	press(m, "right")
 	for range 30 {
 		press(m, "up")
 	}
-	m.View()
+	m.frame()
 	if m.follow {
 		t.Fatal("moving the cursor did not pause the tail")
 	}
-	if row := m.paneCursorRow(); row < m.vp.YOffset || row >= m.vp.YOffset+m.paneRows() {
-		t.Fatalf("cursor row %d is outside the viewport at %d", row, m.vp.YOffset)
+	if row := m.paneCursorRow(); row < m.vp.YOffset() || row >= m.vp.YOffset()+m.paneRows() {
+		t.Fatalf("cursor row %d is outside the viewport at %d", row, m.vp.YOffset())
 	}
 
 	escToLive(m)
@@ -90,7 +90,7 @@ func TestPaneCursorMovesPauseTheTailAndStayInView(t *testing.T) {
 func TestKeyboardPicksMatchTheClicks(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	press(m, "right", "enter")
 
@@ -114,7 +114,7 @@ func TestKeyboardPicksMatchTheClicks(t *testing.T) {
 func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
-	m.View()
+	m.frame()
 	m.liveSelect()
 	press(m, "right", "enter")
 
@@ -168,7 +168,7 @@ func TestFirstExpansionShowsTheClickHint(t *testing.T) {
 func TestMarkerLeavesEllipsisInsteadOfOverwriting(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"msg":"`+strings.Repeat("a", 200)+`"}`)
-	m.View()
+	m.frame()
 
 	line := paneOf(m)[m.titleHeight()]
 	if row := ansi.Strip(line); !strings.HasSuffix(row, "… (+)") {
@@ -184,12 +184,12 @@ func TestPanReachesTheEndOfAMarkedLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	line := `{"msg":"` + strings.Repeat("a", 200) + `"}`
 	addLines(m, "web", line)
-	m.View()
+	m.frame()
 
 	m.paneCol = 1000
 	m.vpDirty = true
-	m.View()
-	if want := displayWidth("web  "+line) - (m.vp.Width - markW); m.paneCol != want {
+	m.frame()
+	if want := displayWidth("web  "+line) - (m.vp.Width() - markW); m.paneCol != want {
 		t.Fatalf("paneCol = %d, want %d", m.paneCol, want)
 	}
 	if row := ansi.Strip(paneOf(m)[m.titleHeight()]); !strings.HasSuffix(row, `"} (+)`) {
@@ -220,7 +220,7 @@ func TestCutsKeepEscapesWhole(t *testing.T) {
 func TestHeaderNameClickIsNoOp(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
-	m.View()
+	m.frame()
 	m.liveSelect()
 
 	x, y := findInPane(t, m, "method")
@@ -238,7 +238,7 @@ func TestDirtyMarkerOnSchemaAndTargetRows(t *testing.T) {
 	// The longest name sets the name column; a member's own name is cut to fit beside its star.
 	m := newTestModel(t, schemaTarget("payments-api", "db"), schemaTarget("payments-web", "db"), target("standalone-worker"))
 	m.setEdit(colNode{schema: true, name: "db"}, []Column{{Name: "level", Expr: ".level"}})
-	screen := ansi.Strip(m.View())
+	screen := ansi.Strip(m.View().Content)
 	for _, name := range []string{"db", "payments-api", "payments-web"} {
 		row := ""
 		for _, line := range strings.Split(screen, "\n") {
@@ -257,11 +257,11 @@ func TestQuitModalNamesUnsavedColumns(t *testing.T) {
 	const line = "unsaved columns — ctrl+s to save"
 	m := newTestModel(t, target("web"))
 	m.confirmQuit = true
-	if strings.Contains(ansi.Strip(m.View()), line) {
+	if strings.Contains(ansi.Strip(m.View().Content), line) {
 		t.Fatal("clean session names unsaved columns")
 	}
 	m.setEdit(colNode{name: "web"}, []Column{{Name: "level", Expr: ".level"}})
-	if !strings.Contains(ansi.Strip(m.View()), line) {
+	if !strings.Contains(ansi.Strip(m.View().Content), line) {
 		t.Fatal("quit modal lacks the unsaved columns line")
 	}
 }
@@ -270,11 +270,11 @@ func TestQuitModalNamesUnsavedColumns(t *testing.T) {
 func TestUnsavedFooterOutranksMarkerAndSearch(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "old", 60).events)
-	m.View()
+	m.frame()
 	press(m, "right", "up", "/", "o", "enter")
 	addLines(m, "web", "new line")
 	m.setEdit(colNode{name: "web"}, []Column{{Name: "level", Expr: ".level"}})
-	m.View()
+	m.frame()
 
 	last := ansi.Strip(paneOf(m)[len(paneOf(m))-1])
 	if !strings.Contains(last, unsavedNotice) || strings.Contains(last, "new") {
