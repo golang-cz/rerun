@@ -230,6 +230,9 @@ func (m *tuiModel) pinTop() (int, bool) {
 	row, ok := m.ruleRow(m.pinSeq)
 	if ok && m.pinGap {
 		row++
+		for row < m.paneLen() && m.rowInfo(row).sub >= 0 {
+			row++
+		}
 	}
 	return row, ok
 }

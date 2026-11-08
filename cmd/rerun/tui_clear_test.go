@@ -181,6 +181,28 @@ func TestClearPinsTheLineAfterTheLast(t *testing.T) {
 	}
 }
 
+// ctrl+l with the last shown line expanded holds the row after the block,
+// so no expansion text shows at the pane's top.
+func TestClearWithLastLineExpandedBlanksTheTop(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	press(m, "right", "enter") // focus the pane and expand the last line
+	press(m, "end")            // resume the tail with the block still open
+	if !strings.Contains(plainPane(m), `status: 403`) {
+		t.Fatalf("fixture is not expanded:\n%s", plainPane(m))
+	}
+
+	press(m, "ctrl+l")
+	m.frame()
+
+	noMarkerText(t, m)
+	blankTop(t, m)
+	if got := plainPane(m); strings.Contains(got, `status: 403`) {
+		t.Fatalf("pane shows the expansion text:\n%s", got)
+	}
+}
+
 // The help overlay names ctrl+l in both its views.
 func TestHelpNamesClearKey(t *testing.T) {
 	for _, keys := range [][][2]string{helpShortKeys, helpKeys} {

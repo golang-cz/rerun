@@ -158,6 +158,33 @@ func TestSStopsTheSelectedTarget(t *testing.T) {
 	}
 }
 
+// s with the pane focused acts on the pane's scope, not the list cursor's row.
+func TestSStopsTheFocusedPanesTargetNotTheCursorRow(t *testing.T) {
+	m := newTestModel(t, target("api"), target("web"))
+	m.targets[0].state = stateRunning
+	m.targets[1].state = stateRunning
+	m.cursor = 0
+	m.liveSelect()
+	press(m, "enter") // focuses api's pane without stopping it
+	if m.solo != 0 {
+		t.Fatalf("solo = %d, want the pane scoped to api", m.solo)
+	}
+
+	m.cursor = 1 // the cursor moves, the pane's scope does not
+	press(m, "s")
+
+	if m.targets[0].state != stateStopped {
+		t.Fatalf("pane target state = %v, want stopped", m.targets[0].state)
+	}
+	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStop {
+		t.Fatalf("pane target control = %v, want ctrlStop", got)
+	}
+	if m.targets[1].state != stateRunning {
+		t.Fatalf("cursor row state = %v, want it still running", m.targets[1].state)
+	}
+	noCtrlQueued(t, m, 1)
+}
+
 // s is a stop, never a toggle: a stopped target stays stopped.
 func TestSDoesNotStartAStoppedTarget(t *testing.T) {
 	m := newTestModel(t, target("api"))
@@ -214,5 +241,28 @@ func TestFocusedPaneScrollsAFullPage(t *testing.T) {
 	press(m, "pgdown")
 	if m.vp.YOffset() != before {
 		t.Fatalf("YOffset = %d after pgdown, want %d", m.vp.YOffset(), before)
+	}
+}
+
+// An unfocused pane still scrolls, but only half a page per key.
+func TestUnfocusedPaneScrollsHalfAPage(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", streamLines("web", 200)...)
+	m.frame()
+	m.cursor = 0
+	m.liveSelect()
+	if m.paneFocus {
+		t.Fatal("pane started focused")
+	}
+	page := m.vp.Height()
+	if page < 4 {
+		t.Fatalf("pane height = %d, too short for a page test", page)
+	}
+
+	press(m, "pgup")
+	before := m.vp.YOffset()
+	press(m, "pgdown")
+	if got := m.vp.YOffset() - before; got != page/2 {
+		t.Fatalf("pgdown moved %d rows, want half a page of %d", got, page/2)
 	}
 }

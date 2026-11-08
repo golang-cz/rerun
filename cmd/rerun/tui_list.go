@@ -442,23 +442,46 @@ func (m *tuiModel) enterRow() {
 	m.paneFocus = true
 }
 
-// stopRow is `s`: stops the cursor's row, or a header's running members. Never a toggle.
+// stopRow is `s`: stops the focused pane's scope, else the cursor's row. Never a toggle.
 func (m *tuiModel) stopRow() {
+	if m.paneFocus {
+		if members, ok := m.paneScope(); ok {
+			m.stopTargets(members)
+			return
+		}
+	}
 	r, ok := m.cursorRow()
 	if !ok {
 		return
 	}
 	if r.header {
-		for _, i := range r.members {
-			if m.targets[i].state.up() {
-				m.stopTarget(i)
-			}
-		}
+		m.stopTargets(r.members)
 		return
 	}
 	if m.targets[r.target].state.up() {
 		m.stopTarget(r.target)
 	}
+}
+
+// stopTargets stops every member that is up, never starting a stopped one.
+func (m *tuiModel) stopTargets(members []int) {
+	for _, i := range members {
+		if m.targets[i].state.up() {
+			m.stopTarget(i)
+		}
+	}
+}
+
+// paneScope is the pane selection's members: one solo target or a group's, or
+// false when the pane holds no scope.
+func (m *tuiModel) paneScope() ([]int, bool) {
+	switch {
+	case m.solo >= 0:
+		return []int{m.solo}, true
+	case m.schemaSel != "":
+		return m.schemaMembers(m.schemaSel), true
+	}
+	return nil, false
 }
 
 // muteRow is `m`: mutes a target, or a header's members.
@@ -481,17 +504,16 @@ func (m *tuiModel) rebootRow(r listRow) {
 
 // clearKey is ctrl+l: a focused pane clears what it shows, else the cursor's row.
 func (m *tuiModel) clearKey() {
-	switch {
-	case m.paneFocus && m.solo >= 0:
-		m.clearTargets([]int{m.solo})
-	case m.paneFocus && m.schemaSel != "":
-		m.clearTargets(m.schemaMembers(m.schemaSel))
-	default:
-		if r, ok := m.cursorRow(); ok {
-			// Act on the row under the cursor, so a clear always has a pane to blank.
-			m.applyRowScope(r)
-			m.clearRow(r)
+	if m.paneFocus {
+		if members, ok := m.paneScope(); ok {
+			m.clearTargets(members)
+			return
 		}
+	}
+	if r, ok := m.cursorRow(); ok {
+		// Act on the row under the cursor, so a clear always has a pane to blank.
+		m.applyRowScope(r)
+		m.clearRow(r)
 	}
 }
 
@@ -504,9 +526,7 @@ func (m *tuiModel) clearRow(r listRow) {
 	m.clearTargets([]int{r.target})
 }
 
-// clearTargets draws nothing and erases nothing: it holds the pane's top on the
-// row after its last line, so the pane reads blank and new output starts there.
-// The process, the state and the old lines above are all untouched.
+// A clear must not add or drop lines, so it only moves the pin.
 func (m *tuiModel) clearTargets(members []int) {
 	if !m.follow || !m.paneHoldsOnly(members) {
 		return
@@ -522,13 +542,8 @@ func (m *tuiModel) clearTargets(members []int) {
 // paneHoldsOnly reports whether the pane draws exactly these members, so clearing
 // a target it does not show cannot blank it.
 func (m *tuiModel) paneHoldsOnly(members []int) bool {
-	switch {
-	case m.solo >= 0:
-		return len(members) == 1 && members[0] == m.solo
-	case m.schemaSel != "":
-		return slices.Equal(members, m.schemaMembers(m.schemaSel))
-	}
-	return false
+	scope, ok := m.paneScope()
+	return ok && slices.Equal(members, scope)
 }
 
 // lastShownSeq is the seq of the pane's last shown line, the anchor a clear hides behind.
@@ -588,11 +603,7 @@ func (m *tuiModel) clearScope() {
 // toggleTargets is space on a header: stops the running members, else starts the ones rerun.yml auto-starts.
 func (m *tuiModel) toggleTargets(members []int) {
 	if m.anyRunning(members) {
-		for _, i := range members {
-			if m.targets[i].state.up() {
-				m.stopTarget(i)
-			}
-		}
+		m.stopTargets(members)
 		return
 	}
 	m.startTargets(members)
