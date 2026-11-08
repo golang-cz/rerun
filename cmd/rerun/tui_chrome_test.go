@@ -93,6 +93,26 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 	assertBoxRows(t, full, 30, "full help")
 }
 
+// On an 80-column screen no full-help row is cut: every row fits the box and
+// ends without the ellipsis character.
+func TestFullHelpRowsFitEightyColumns(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 80, 30
+	m.help, m.helpAll = true, true
+
+	innerW := m.modalInnerW(helpWidth(m.width))
+	for _, line := range strings.Split(ansi.Strip(m.helpView()), "\n") {
+		if strings.Contains(line, "…") {
+			t.Fatalf("full help row is cut at 80 columns: %q", line)
+		}
+	}
+	for _, kv := range helpKeys {
+		if got := displayWidth(padRight(kv[0], 12) + " " + kv[1]); got > innerW {
+			t.Fatalf("help row %q is %d cells, want at most the inner width %d", kv[0], got, innerW)
+		}
+	}
+}
+
 // Help is an overlay: the live frame, its log lines included, stays visible around the box.
 func TestHelpOverlaysTheLiveFrame(t *testing.T) {
 	m := newTestModel(t, target("web"))

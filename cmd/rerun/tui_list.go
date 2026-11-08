@@ -20,10 +20,8 @@ const allKeyPrefix = "\x00all:"
 const indentCells = 1
 
 // playGlyph marks a header space would start: its members are down and one auto-starts.
+// It shares the fold marker's column, so a header name keeps its column.
 const playGlyph = "▶"
-
-// playW is the play column's width. Every header keeps it, so names stay aligned.
-const playW = 2
 
 // listRow is one list line: a group header, or a target, indented by its depth.
 type listRow struct {
@@ -685,18 +683,16 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		}
 	}
 	indent := r.indent()
-	nameW := max(0, nameWidth(leftW)-indent-playW)
+	nameW := max(0, nameWidth(leftW)-indent)
 	glyph := "▾"
-	if r.collapsed {
+	switch {
+	case r.collapsed:
 		glyph = "▸"
-	}
-	play := seg{text: strings.Repeat(" ", playW)}
-	if m.startsOnSpace(r.members) {
-		play = seg{text: playGlyph + " ", faint: true}
+	case m.startsOnSpace(r.members):
+		glyph = playGlyph
 	}
 	segs := []seg{
 		{text: strings.Repeat(" ", indent) + glyph + " "},
-		play,
 		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},

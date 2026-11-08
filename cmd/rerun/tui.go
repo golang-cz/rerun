@@ -298,8 +298,8 @@ type tuiModel struct {
 	collapsed map[string]bool
 	// finder is the Ctrl+K popup over targets and groups.
 	finder finderState
-	// watch is the `w` what-changed modal over the last minute's change batches.
-	watch watchState
+	// eventsModal is the `e` fs events modal over the last minute's change batches.
+	eventsModal eventsState
 	// listTop is the list's first visible row; it moves only when the cursor leaves the window.
 	listTop int
 	// listScrolled means a wheel moved the window off the cursor, which it left at listScrollAt.
@@ -690,7 +690,7 @@ func (m *tuiModel) applyEvents(events []event) {
 	if m.search != "" {
 		m.recomputeSearch(false)
 	}
-	m.fitWatch()
+	m.fitEvents()
 }
 
 func (m *tuiModel) applyEvent(ev event) {

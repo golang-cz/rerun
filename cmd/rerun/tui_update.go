@@ -61,12 +61,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vpDirty = true
 		// A rule's cut and its expansion depend on the width, so the rows are redone too.
 		m.dispDirty = true
-		m.fitWatch()
+		m.fitEvents()
 		return m, nil
 
 	case tickMsg:
 		m.now = time.Time(msg)
-		m.fitWatch()
+		m.fitEvents()
 		return m, tickCmd()
 
 	case eventsMsg:
@@ -111,7 +111,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ctrl+k opens the finder from the list, not over the bar, help or quit confirm.
-	if msg.String() == "ctrl+k" && !m.finder.open && !m.watch.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+	if msg.String() == "ctrl+k" && !m.finder.open && !m.eventsModal.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
 		m.finder = finderState{open: true}
 		return m, nil
 	}
@@ -119,9 +119,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFinderKey(msg)
 	}
 
-	// The what-changed modal owns every key while it is up, the way the finder does.
-	if m.watch.open {
-		return m.handleWatchKey(msg)
+	// The fs events modal owns every key while it is up, the way the finder does.
+	if m.eventsModal.open {
+		return m.handleEventsKey(msg)
 	}
 
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
@@ -365,8 +365,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		m.toggleDrawer()
 
-	case "w":
-		m.openWatch()
+	case "e":
+		m.openEvents()
 
 	case "o":
 		if i := m.cursorTarget(); i >= 0 {
@@ -589,7 +589,7 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.watch.open {
+	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open {
 		return m, nil
 	}
 	e := msg.Mouse()

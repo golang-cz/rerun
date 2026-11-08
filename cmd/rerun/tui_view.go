@@ -151,8 +151,8 @@ func (m *tuiModel) frame() string {
 	if m.finder.open {
 		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
 	}
-	if m.watch.open {
-		frame = overlayCenter(frame, m.watchView(), m.width, m.height)
+	if m.eventsModal.open {
+		frame = overlayCenter(frame, m.eventsView(), m.width, m.height)
 	}
 	if m.help {
 		frame = overlayCenter(frame, m.helpView(), m.width, m.height)
@@ -247,6 +247,15 @@ const modalMinWidth = 40
 // modalWidth is a modal box's outer width: 80% of the terminal, floored, never past it.
 func modalWidth(termW int) int {
 	return max(1, min(max(termW*4/5, min(modalMinWidth, termW)), termW))
+}
+
+// helpMaxW is the widest the help box grows, so a full key list fits on a wide screen.
+const helpMaxW = 80
+
+// helpWidth is the help box's outer width: at least 80 columns when the terminal
+// allows it, so no description is cut on an 80-column screen.
+func helpWidth(termW int) int {
+	return max(modalWidth(termW), min(termW, helpMaxW))
 }
 
 // modalInnerW is the box's content width, border and padding excluded.
@@ -1120,10 +1129,10 @@ var helpShortKeys = [][2]string{
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
-	{"esc", "scrollback: back to live · else back out: row to its group, group to all"},
+	{"esc", "scrollback: back to live · else back out one level"},
 	{"tab", "focus the fs drawer"},
-	{"w", "what changed (last minute)"},
-	{"enter → a f", "pane: expand the line · ← collapse · a adds its key, f filters its value"},
+	{"e", "fs events (last minute)"},
+	{"enter → a f", "pane: → expand · ← collapse · a adds key, f filters value"},
 	{"c", "toggle the columns table"},
 	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
 	{"ctrl+f", "find in the pane (n/N jump)"},
@@ -1136,21 +1145,21 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move between rows, selecting each; home/end first/last row, pane top-left / live tail"},
-	{"←/→ enter", "on a group: ← folds, → unfolds; on a row: ← goes to its group, → focuses the log pane (enter too, starting a stopped row)"},
-	{"space", "start or stop the row · group ▶ starts its auto targets · pane: jump to live"},
+	{"↑/↓ j/k", "move rows; home/end first/last, pane top-left / live tail"},
+	{"←/→ enter", "group: fold or unfold · row: to its group · pane: focus, expand"},
+	{"space", "start or stop · pane: jump to live · ▶ starts its auto targets"},
 	{"s", "stop the row · pane: stop what the pane shows"},
-	{"m r", "mute the stream (group row: its targets); r reboots (grace applies)"},
-	{"w t tab", "what changed (last minute) · t fs drawer, tab focuses it"},
+	{"m r", "mute the stream (group: its targets) · r reboots"},
+	{"e t tab", "fs events (last minute) · t fs drawer, tab focuses it"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
-	{"ctrl+k", "find a target or group: enter jumps or runs a make target, esc closes"},
+	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
 	{"o", "open the target's url"},
-	{"ctrl+f", "find in the pane (ctrl+g next; after enter n/N next/prev; esc clears)"},
-	{"ctrl+l", "clear the target's log (group row: its targets); old lines stay in scrollback"},
+	{"ctrl+f", "find in the pane · ctrl+g next · n/N after enter"},
+	{"ctrl+l", "clear the log; old lines stay in scrollback"},
 	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
-	{"pgup/pgdn", "scroll the pane (ctrl+u / ctrl+d); a full page while the pane is focused"},
-	{"enter → a f", "pane: enter or → expands the cursor line · ← collapses it; a adds its key, f filters its value"},
+	{"pgup/pgdn", "scroll the pane (ctrl+u/ctrl+d); a full page in focus"},
+	{"enter → a f", "pane: expand/collapse the line · a add key, f filter value"},
 	{"backspace ×", "pane: last chip · bar: ←/→ picks, backspace drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
@@ -1187,5 +1196,5 @@ func (m *tuiModel) helpView() string {
 	outerH := m.styles.box.GetVerticalFrameSize() + 3 + len(body)
 	outerH = min(outerH, max(1, m.height-2))
 	body = body[:min(len(body), max(0, outerH-m.styles.box.GetVerticalFrameSize()-3))]
-	return m.modalBox(m.styles.title.Render("rerun keys"), footer, body, modalWidth(m.width), outerH)
+	return m.modalBox(m.styles.title.Render("rerun keys"), footer, body, helpWidth(m.width), outerH)
 }

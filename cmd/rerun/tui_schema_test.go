@@ -211,8 +211,8 @@ func TestHeaderShowsPlayGlyphWhenSpaceWouldStart(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"))
 	m.targets[0].state = stateStopped
 
-	if line := leftPane(m)[0]; !strings.HasPrefix(line, "▾ ▶ backend") {
-		t.Fatalf("header = %q, want the play glyph before the name", line)
+	if line := leftPane(m)[0]; !strings.HasPrefix(line, "▶ backend") {
+		t.Fatalf("header = %q, want the play glyph in the fold column", line)
 	}
 }
 
@@ -231,8 +231,9 @@ func TestHeaderHidesPlayGlyphWhileAMemberRuns(t *testing.T) {
 	}
 }
 
-// The reserved play column keeps names in one column across headers with and without the glyph.
-func TestHeaderNamesAlignWithAndWithoutPlayGlyph(t *testing.T) {
+// The play glyph shares the fold marker's column, so a header name keeps the
+// column it had before the glyph: zero indent, one glyph, one space.
+func TestHeaderNameColumnMatchesPreGlyphColumn(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("dash", "webapps"))
 	m.targets[0].state = stateRunning
 	m.targets[1].state = stateStopped
@@ -244,7 +245,21 @@ func TestHeaderNamesAlignWithAndWithoutPlayGlyph(t *testing.T) {
 	nameCol := func(line, name string) int {
 		return displayWidth(line[:strings.Index(line, name)])
 	}
-	if a, b := nameCol(lines[0], "backend"), nameCol(lines[2], "webapps"); a != b {
-		t.Fatalf("name columns = %d and %d, want the same column", a, b)
+	if got := nameCol(lines[0], "backend"); got != 2 {
+		t.Fatalf("header name column = %d, want the pre-glyph 2", got)
+	}
+	if got := nameCol(lines[2], "webapps"); got != 2 {
+		t.Fatalf("header with glyph name column = %d, want the pre-glyph 2", got)
+	}
+}
+
+// A collapsed header keeps its fold marker, never the play glyph.
+func TestCollapsedHeaderKeepsFoldMarker(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"))
+	m.targets[0].state = stateStopped
+	m.collapsed = map[string]bool{"backend": true}
+
+	if line := leftPane(m)[0]; strings.Contains(line, playGlyph) || !strings.HasPrefix(line, "▸ backend") {
+		t.Fatalf("header = %q, want the fold marker on a collapsed header", line)
 	}
 }
