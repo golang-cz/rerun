@@ -1,5 +1,7 @@
 # FS change feed and log schemas
 
+Status: DONE
+
 ## Summary
 
 Turn rerun's TUI into a small localhost log explorer:

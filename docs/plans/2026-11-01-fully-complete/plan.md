@@ -1,5 +1,7 @@
 # rerun — fully complete
 
+Status: IN PROGRESS
+
 Everything deferred in handover.md, in build order. Each track: coder →
 reviewer gate → one commit. Copy/self-watch/reconcile already shipped
 (fb90399, 6049974); this finishes the backlog.
