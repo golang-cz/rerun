@@ -294,11 +294,14 @@ func (m *tuiModel) finderView() string {
 	}
 	count := fmt.Sprintf("%d/%d", n, len(res))
 
-	input := m.styles.chip.Render("❯ ")
+	input := m.styles.chip.Render(inputPrompt)
+	m.layout.caretW = 0
 	if m.finder.query == "" {
-		input += m.styles.paneCursor.Render(" ") + m.styles.hint.Render("find…")
+		input += " " + m.styles.hint.Render("find…")
 	} else {
-		input += finderTail(m.finder.query, innerW-2-lipgloss.Width(count)-2) + m.styles.paneCursor.Render(" ")
+		tail := finderTail(m.finder.query, innerW-2-lipgloss.Width(count)-2)
+		input += tail
+		m.layout.caretW = lipgloss.Width(tail)
 	}
 	gap := max(1, innerW-lipgloss.Width(input)-lipgloss.Width(count))
 	input += strings.Repeat(" ", gap) + m.styles.hint.Render(count)

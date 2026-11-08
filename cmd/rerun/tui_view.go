@@ -102,15 +102,25 @@ type tuiLayout struct {
 	// filter bar, and table column names on the column header row.
 	chips []chipHit
 	heads []cellSpan
+	// caretW is how many cells the open input's visible text takes; cursorX and
+	// cursorY are the frame cell its caret sits on, drawn as the terminal cursor.
+	caretW  int
+	cursorX int
+	cursorY int
 }
 
 func displayWidth(s string) int { return lipgloss.Width(s) }
 
-// View draws the frame; alt screen and mouse reporting are declared here.
+// View draws the frame; alt screen, mouse reporting and the real terminal
+// cursor for an open input are declared here.
 func (m *tuiModel) View() tea.View {
 	v := tea.NewView(m.frame())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// The config-error modal owns the keys over an open input, so it takes the caret too.
+	if (m.finder.open || m.inputMode != inputNone) && m.cfgErr == "" {
+		v.Cursor = tea.NewCursor(m.layout.cursorX, m.layout.cursorY)
+	}
 	return v
 }
 
@@ -146,10 +156,15 @@ func (m *tuiModel) frame() string {
 	}
 	frame := b.String()
 	if m.inputMode != inputNone {
-		frame = overlayAt(frame, m.inputBoxView(), m.layout.leftW+1, 0, m.width, m.height)
+		box := m.inputBoxView()
+		frame = overlayAt(frame, box, m.layout.leftW+1, 0, m.width, m.height)
+		m.layout.cursorX, m.layout.cursorY = m.inputCaret(m.layout.leftW+1, 0)
 	}
 	if m.finder.open {
-		frame = overlayCenter(frame, m.finderView(), m.width, m.height)
+		box := m.finderView()
+		x, y := overlayOrigin(box, m.width, m.height)
+		frame = overlayAt(frame, box, x, y, m.width, m.height)
+		m.layout.cursorX, m.layout.cursorY = m.inputCaret(x, y)
 	}
 	if m.eventsModal.open {
 		frame = overlayCenter(frame, m.eventsView(), m.width, m.height)
@@ -220,9 +235,14 @@ func printable(s string, keepNL bool) string {
 // overlayCenter splices box into frame at the canvas center, so the stream and
 // drawer underneath keep updating while the modal is up.
 func overlayCenter(frame, box string, width, height int) string {
+	x, y := overlayOrigin(box, width, height)
+	return overlayAt(frame, box, x, y, width, height)
+}
+
+// overlayOrigin is where overlayCenter drops a box of this rendered size: centered, never off screen.
+func overlayOrigin(box string, width, height int) (int, int) {
 	bw := lipgloss.Width(box)
-	y := max(0, (height-len(strings.Split(box, "\n")))/2)
-	return overlayAt(frame, box, max(0, (width-bw)/2), y, width, height)
+	return max(0, (width-bw)/2), max(0, (height-len(strings.Split(box, "\n")))/2)
 }
 
 // overlayAt splices box into frame at (x, y), so an anchored box cannot drift with the content.
@@ -320,16 +340,31 @@ func (m *tuiModel) inputCount() string {
 	return m.filterStatus()
 }
 
+// inputPrompt is the glyph and gap an input box draws before its text.
+const inputPrompt = "❯ "
+
+// inputCaret is the frame cell of an open input's caret: past the box's border,
+// padding and prompt, right after the visible text on its first content row.
+func (m *tuiModel) inputCaret(boxX, boxY int) (int, int) {
+	box := m.styles.box
+	innerX := boxX + box.GetBorderLeftSize() + box.GetPaddingLeft() + displayWidth(inputPrompt)
+	innerY := boxY + box.GetBorderTopSize() + box.GetPaddingTop()
+	return innerX + m.layout.caretW, innerY
+}
+
 // inputBoxView draws the typing box: one header row with the query and the count, then the keys footer.
 func (m *tuiModel) inputBoxView() string {
 	outerW := m.inputBoxW()
 	innerW := m.modalInnerW(outerW)
 	count := m.inputCount()
-	head := m.styles.chip.Render("❯ ")
+	head := m.styles.chip.Render(inputPrompt)
+	m.layout.caretW = 0
 	if m.input == "" {
-		head += m.styles.paneCursor.Render(" ") + m.styles.hint.Render(m.inputPlaceholder())
+		head += " " + m.styles.hint.Render(m.inputPlaceholder())
 	} else {
-		head += finderTail(m.input, max(0, innerW-2-displayWidth(count)-2)) + m.styles.paneCursor.Render(" ")
+		tail := finderTail(m.input, max(0, innerW-2-displayWidth(count)-2))
+		head += tail
+		m.layout.caretW = displayWidth(tail)
 	}
 	// Reserve the count's cells on a narrow pane: the query trims first, the count stays whole.
 	countW := displayWidth(count)
