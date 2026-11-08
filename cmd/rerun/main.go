@@ -32,6 +32,9 @@ Lists are also read from stdin when it is not a TTY:
 
 Everything after -- is the command, passed through verbatim.
 
+rerun.yml targets: a top-level targets: block holds them (older files keep them at
+  the top level; run rerun -migrate to move them under targets:)
+
 rerun.yml groups: a top-level groups: block shares columns, and a target names one
   with group: (older spelling: schemas and schema; use one spelling per file)
 
@@ -43,6 +46,7 @@ Flags:
   -cooldown <dur>   minimum time between restarts (default 0s)
   -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
   -no-gitignore     do not filter watched files through .gitignore
+  -migrate          move rerun.yml's top-level targets under targets:
   -h, -help         show this help
   -version          show version
 
@@ -81,6 +85,8 @@ func main() {
 	case args.Version:
 		fmt.Fprintf(os.Stdout, "rerun %s\n", version)
 		os.Exit(0)
+	case args.Migrate:
+		os.Exit(runMigrate())
 	}
 
 	if len(args.Cmd) == 0 {
@@ -88,6 +94,30 @@ func main() {
 	}
 
 	os.Exit(runAdHoc(args, os.Stdout, nil))
+}
+
+// runMigrate rewrites the nearest rerun.yml in place, so its targets sit under
+// the reserved `targets:` key and new reserved keys can never collide.
+func runMigrate() int {
+	path, err := findConfig(".")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)
+		return 1
+	}
+	status, err := migrateConfig(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rerun: migrate: %v\n", err)
+		return 1
+	}
+	switch status {
+	case migrated:
+		fmt.Fprintf(os.Stdout, "rerun: %s: targets now live under targets:\n", path)
+	case migrateAlready:
+		fmt.Fprintf(os.Stdout, "rerun: %s already uses targets:\n", path)
+	default:
+		fmt.Fprintf(os.Stdout, "rerun: %s has no top-level targets to move\n", path)
+	}
+	return 0
 }
 
 func runConfigMode(args Args) int {

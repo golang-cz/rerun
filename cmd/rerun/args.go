@@ -27,6 +27,7 @@ type Args struct {
 	Grace       time.Duration
 	NoGitignore bool
 	Legacy      bool
+	Migrate     bool
 	Help        bool
 	Version     bool
 }
@@ -120,6 +121,9 @@ parse:
 		case "-no-gitignore":
 			args.NoGitignore = true
 
+		case "-migrate":
+			args.Migrate = true
+
 		case "-h", "-help":
 			args.Help = true
 			break parse
@@ -143,7 +147,7 @@ parse:
 		}
 	}
 
-	if args.Help || args.Version {
+	if args.Help || args.Version || args.Migrate {
 		return args, nil
 	}
 

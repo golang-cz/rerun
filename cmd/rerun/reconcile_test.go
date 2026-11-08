@@ -603,7 +603,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 
 		var got []event
 		for _, ev := range sink.all() {
-			if ev.kind != evConfigOK {
+			if ev.kind != evConfigOK && !strings.Contains(ev.line, migrateNotice) {
 				got = append(got, ev)
 			}
 		}

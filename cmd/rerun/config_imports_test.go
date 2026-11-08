@@ -178,8 +178,9 @@ func TestParseImports(t *testing.T) {
 			files:    map[string]string{"bpn/rerun.yml": "imports:\n  - path: ../carol/rerun.yml\n\n" + bpn, "carol/rerun.yml": "carol:\n  cmd: echo\n"},
 			wantNext: []string{"bpn/api", "bpn/web", "bpn/worker"},
 			check: func(t *testing.T, cfg *Config) {
-				if len(cfg.Notices) != 1 || !strings.Contains(cfg.Notices[0], "one level deep") {
-					t.Errorf("notices = %q, want the nested import notice", cfg.Notices)
+				notices := withoutMigrateNotice(cfg.Notices)
+				if len(notices) != 1 || !strings.Contains(notices[0], "one level deep") {
+					t.Errorf("notices = %q, want the nested import notice", notices)
 				}
 			},
 		},
@@ -212,8 +213,9 @@ func TestParseImports(t *testing.T) {
 			files:    map[string]string{"bpn/rerun.yml": grouped},
 			wantNext: []string{"bpn/api", "bpn/web", "bpn/util"},
 			check: func(t *testing.T, cfg *Config) {
-				if len(cfg.Notices) != 1 || !strings.Contains(cfg.Notices[0], "the first one wins") {
-					t.Errorf("notices = %q, want the duplicate-listing notice", cfg.Notices)
+				notices := withoutMigrateNotice(cfg.Notices)
+				if len(notices) != 1 || !strings.Contains(notices[0], "the first one wins") {
+					t.Errorf("notices = %q, want the duplicate-listing notice", notices)
 				}
 			},
 		},

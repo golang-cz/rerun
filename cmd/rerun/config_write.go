@@ -48,7 +48,7 @@ func setColumns(path, schema, target string, cols []string) error {
 	if schema != "" {
 		err = ed.setSchemaColumns(root, groupBlockOf(root), schema, cols)
 	} else {
-		err = ed.setTargetColumns(root, target, cols)
+		err = ed.setTargetColumns(targetsMapping(root), target, cols)
 	}
 	var anchored anchorError
 	if errors.As(err, &anchored) {
@@ -111,6 +111,15 @@ func (ed *lineEdit) String() string {
 		b.WriteString(l.eol)
 	}
 	return b.String()
+}
+
+// targetsMapping is the mapping that holds the target entries: the `targets:`
+// block of the new form, else the top-level mapping of a legacy file.
+func targetsMapping(root *yaml.Node) *yaml.Node {
+	if block := mappingValue(root, targetsKey); block != nil && block.Kind == yaml.MappingNode {
+		return block
+	}
+	return root
 }
 
 // setTargetColumns writes the columns of the target named target.

@@ -793,8 +793,8 @@ func TestComposeImportWithoutProfilesKeepsGatedServices(t *testing.T) {
 	if got := targetNames(cfg); fmt.Sprint(got) != "[devbox/adminer devbox/postgres]" {
 		t.Fatalf("targets = %v, want both services without a profiles filter", got)
 	}
-	if len(cfg.Notices) != 0 {
-		t.Errorf("notices = %v, want none for a non-empty import", cfg.Notices)
+	if got := withoutMigrateNotice(cfg.Notices); len(got) != 0 {
+		t.Errorf("notices = %v, want none for a non-empty import", got)
 	}
 }
 

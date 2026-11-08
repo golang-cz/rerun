@@ -281,8 +281,8 @@ func TestImportClaimingMakeSkipsImplicitMakefileSilently(t *testing.T) {
 	if _, ok := cfg.Find("make/lint"); !ok {
 		t.Errorf("targets = %v, want make/lint from the explicit import", targetNames(cfg))
 	}
-	if len(cfg.Notices) != 0 {
-		t.Errorf("notices = %v, want none", cfg.Notices)
+	if got := withoutMigrateNotice(cfg.Notices); len(got) != 0 {
+		t.Errorf("notices = %v, want none", got)
 	}
 }
 

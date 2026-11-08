@@ -176,18 +176,35 @@ func (c *Config) Find(name string) (Target, bool) {
 }
 
 func LoadConfig(startDir string) (*Config, error) {
+	path, err := findConfig(startDir)
+	if err != nil {
+		if !errors.Is(err, ErrConfigNotFound) {
+			return nil, err
+		}
+		start, absErr := filepath.Abs(startDir)
+		if absErr != nil {
+			return nil, absErr
+		}
+		if mk := implicitMakefile(start); mk != "" {
+			return makeOnlyConfig(filepath.Join(start, ConfigFileName), mk)
+		}
+		return nil, &configNotFoundError{dir: startDir}
+	}
+	return ParseConfig(path)
+}
+
+// findConfig is the nearest rerun.yml at or above startDir.
+func findConfig(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	start := dir
-
 	for {
 		path := filepath.Join(dir, ConfigFileName)
 		if _, err := os.Stat(path); err == nil {
-			return ParseConfig(path)
+			return path, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return "", err
 		}
 
 		if isGitRoot(dir) {
@@ -199,11 +216,7 @@ func LoadConfig(startDir string) (*Config, error) {
 		}
 		dir = parent
 	}
-
-	if mk := implicitMakefile(start); mk != "" {
-		return makeOnlyConfig(filepath.Join(start, ConfigFileName), mk)
-	}
-	return nil, &configNotFoundError{dir: startDir}
+	return "", &configNotFoundError{dir: startDir}
 }
 
 func isGitRoot(dir string) bool {
@@ -341,6 +354,9 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}}
+	if file.legacy {
+		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s uses top-level targets; run rerun -migrate", filepath.Base(abs)))
+	}
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
 		return nil, err
 	}
@@ -396,6 +412,8 @@ func parseConfigBytes(path string, data []byte) (*configSource, *yaml.Node, erro
 type parsedFile struct {
 	targets []Target
 	schemas map[string]groupDef
+	// legacy is set for a file that has no `targets:` key, so its targets sit at the top level.
+	legacy bool
 }
 
 // groupDef is one `groups:` entry: its columns, and the `muted:`, `hide:` and `start:` its members start with.
@@ -410,36 +428,80 @@ type groupDef struct {
 	startSet bool
 }
 
-// parseFileBody reads a file's groups and targets under the names the file writes.
+// parseFileBody reads a file's groups and targets in the form the file writes:
+// under `targets:`, or, for a file with no such key, at the top level.
 func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile, error) {
 	schemas, err := parseSchemas(src, root)
 	if err != nil {
 		return parsedFile{}, err
 	}
+	out := parsedFile{schemas: schemas}
 
-	var out parsedFile
-	out.schemas = schemas
-	seen := make(map[string]bool)
+	if block := mappingValue(root, targetsKey); block != nil {
+		if err := checkTopLevel(src, root); err != nil {
+			return parsedFile{}, err
+		}
+		if block.Kind == yaml.ScalarNode && block.Tag == "!!null" {
+			return out, nil
+		}
+		if block.Kind != yaml.MappingNode {
+			return parsedFile{}, src.at(block, nodeSpan(block), "targets: expected a mapping of target names")
+		}
+		out.targets, err = parseTargets(src, block, schemas, file, false)
+		return out, err
+	}
+
+	out.legacy = true
+	out.targets, err = parseTargets(src, root, schemas, file, true)
+	return out, err
+}
+
+// checkTopLevel rejects any top-level key that is not rerun's own, so a typo
+// surfaces instead of turning into a silently ignored target.
+func checkTopLevel(src *configSource, root *yaml.Node) error {
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		key, value := deref(root.Content[i]), deref(root.Content[i+1])
+		key := deref(root.Content[i])
 		if key.Kind != yaml.ScalarNode {
-			return parsedFile{}, src.at(key, 1, "target names must be strings")
+			return src.at(key, 1, "top-level keys must be strings")
+		}
+		switch key.Value {
+		case targetsKey, importsKey, groupsBlock.block, schemasBlock.block:
+			continue
+		}
+		e := src.at(key, len(key.Value), fmt.Sprintf("unknown top-level key %q", key.Value))
+		e.note = "top-level keys: imports, groups, targets"
+		return e
+	}
+	return nil
+}
+
+// parseTargets reads the target entries of a mapping. In a legacy file the same
+// mapping also holds the reserved keys, which are skipped.
+func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupDef, file string, legacy bool) ([]Target, error) {
+	var out []Target
+	seen := make(map[string]bool)
+	for i := 0; i+1 < len(block.Content); i += 2 {
+		key, value := deref(block.Content[i]), deref(block.Content[i+1])
+		if key.Kind != yaml.ScalarNode {
+			return nil, src.at(key, 1, "target names must be strings")
 		}
 		name := key.Value
 		if seen[name] {
-			return parsedFile{}, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
+			return nil, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
 		}
 		seen[name] = true
-		if name == importsKey && value.Kind != yaml.SequenceNode && !(value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
-			return parsedFile{}, src.at(key, len(name), "`imports` is reserved; rename the target")
-		}
-		if name == groupsBlock.block || name == schemasBlock.block || name == importsKey {
-			continue
+		if legacy {
+			if name == importsKey && value.Kind != yaml.SequenceNode && !(value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
+				return nil, src.at(key, len(name), "`imports` is reserved; rename the target")
+			}
+			if name == groupsBlock.block || name == schemasBlock.block || name == importsKey {
+				continue
+			}
 		}
 
 		target, err := parseTarget(src, name, key, value, schemas)
 		if err != nil {
-			return parsedFile{}, err
+			return nil, err
 		}
 		target.File = file
 		target.Dir = filepath.Dir(file)
@@ -447,7 +509,7 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 			target.SchemaFile = file
 			target.SchemaLocal = target.Schema
 		}
-		out.targets = append(out.targets, target)
+		out = append(out, target)
 	}
 	return out, nil
 }
@@ -473,6 +535,9 @@ var (
 	groupsBlock  = groupBlock{block: "groups", field: "group"}
 	schemasBlock = groupBlock{block: "schemas", field: "schema"}
 )
+
+// targetsKey is the reserved top-level key holding the targets, the new form.
+const targetsKey = "targets"
 
 // schemaFields is the accepted keys inside a group entry.
 var schemaFields = []string{"columns", "muted", "hide", "start"}
