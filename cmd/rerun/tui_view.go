@@ -269,7 +269,7 @@ func modalWidth(termW int) int {
 	return max(1, min(max(termW*4/5, min(modalMinWidth, termW)), termW))
 }
 
-// helpMaxW is the widest the help box grows, so a full key list fits on a wide screen.
+// helpMaxW is a floor, not a cap: the help box is at least this wide when the terminal allows.
 const helpMaxW = 80
 
 // helpWidth is the help box's outer width: at least 80 columns when the terminal

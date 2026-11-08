@@ -19,8 +19,7 @@ const allKeyPrefix = "\x00all:"
 // indentCells is the list pane indent per nesting level.
 const indentCells = 1
 
-// playGlyph marks a header space would start: its members are down and one auto-starts.
-// It shares the fold marker's column, so a header name keeps its column.
+// playGlyph marks a header space would start; a collapsed header keeps its fold marker even so.
 const playGlyph = "▶"
 
 // listRow is one list line: a group header, or a target, indented by its depth.
@@ -692,7 +691,9 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		glyph = playGlyph
 	}
 	segs := []seg{
-		{text: strings.Repeat(" ", indent) + glyph + " "},
+		{text: strings.Repeat(" ", indent)},
+		{text: glyph, faint: glyph == playGlyph},
+		{text: " "},
 		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},

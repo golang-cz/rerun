@@ -263,3 +263,18 @@ func TestCollapsedHeaderKeepsFoldMarker(t *testing.T) {
 		t.Fatalf("header = %q, want the fold marker on a collapsed header", line)
 	}
 }
+
+// The play glyph steps back, so it reads as a hint, not as the header's own state.
+func TestPlayGlyphCellIsFaint(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"))
+	m.targets[0].state = stateStopped
+	m.cursor = m.indexOfKey("target:api")
+
+	if play := drawnRow(t, m, "schema:backend"); !faintLine(play) {
+		t.Fatalf("play glyph row = %q, want the glyph cell faint", play)
+	}
+	m.collapsed = map[string]bool{"backend": true}
+	if fold := drawnRow(t, m, "schema:backend"); faintLine(fold) {
+		t.Fatalf("fold marker row = %q, want the header's own style", fold)
+	}
+}
