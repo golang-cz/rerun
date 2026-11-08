@@ -35,7 +35,7 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	defer tty.restore()
 
 	model := newConfigTUI(targets, cfg)
-	for _, n := range cfg.Notices {
+	for _, n := range dedupNotices(cfg) {
 		model.group.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
 	}
 	model.group.start()

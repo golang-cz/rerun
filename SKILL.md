@@ -231,7 +231,7 @@ targets:
     run: go run ./cmd/api
 ```
 
-- The top level holds only rerun's own keys: `imports:`, `groups:` and `targets:`. Any other key is an error.
+- The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:` and `targets:`. Any other key is an error.
 - A file without `targets:` still loads the old way, with one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
 - `rerun -migrate` rewrites the nearest rerun.yml in place under `targets:`, keeping comments and key order and dropping blank lines.
 - A target under `targets:` may be called `imports` or `groups`.

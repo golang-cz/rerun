@@ -355,7 +355,7 @@ func ParseConfig(path string) (*Config, error) {
 	}
 	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}}
 	if file.legacy {
-		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s uses top-level targets; run rerun -migrate", filepath.Base(abs)))
+		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s %s", filepath.Base(abs), migrateNoticeText))
 	}
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
 		return nil, err
@@ -412,7 +412,7 @@ func parseConfigBytes(path string, data []byte) (*configSource, *yaml.Node, erro
 type parsedFile struct {
 	targets []Target
 	schemas map[string]groupDef
-	// legacy is set for a file that has no `targets:` key, so its targets sit at the top level.
+	// legacy is set for a file whose targets sit at the top level: no `targets:` key, at least one top-level target.
 	legacy bool
 }
 
@@ -437,7 +437,11 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 	}
 	out := parsedFile{schemas: schemas}
 
-	if block := mappingValue(root, targetsKey); block != nil {
+	if key, block := mappingEntry(root, targetsKey); block != nil {
+		// A legacy target named `targets` reads as the new form's block, so catch it first.
+		if looksLikeTarget(block) {
+			return parsedFile{}, src.at(key, len(key.Value), errTargetsReserved)
+		}
 		if err := checkTopLevel(src, root); err != nil {
 			return parsedFile{}, err
 		}
@@ -451,7 +455,7 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 		return out, err
 	}
 
-	out.legacy = true
+	out.legacy = hasTopLevelTargets(root)
 	out.targets, err = parseTargets(src, root, schemas, file, true)
 	return out, err
 }
@@ -469,10 +473,40 @@ func checkTopLevel(src *configSource, root *yaml.Node) error {
 			continue
 		}
 		e := src.at(key, len(key.Value), fmt.Sprintf("unknown top-level key %q", key.Value))
-		e.note = "top-level keys: imports, groups, targets"
+		e.note = "top-level keys: imports, groups, schemas, targets"
 		return e
 	}
 	return nil
+}
+
+// looksLikeTarget tells a legacy target named `targets` apart from the new form's block.
+func looksLikeTarget(node *yaml.Node) bool {
+	if node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := deref(node.Content[i]), deref(node.Content[i+1])
+		if key.Kind == yaml.ScalarNode && slices.Contains(targetFields, key.Value) && value.Kind != yaml.MappingNode {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTopLevelTargets reports whether a file without `targets:` holds an actual target at the top level.
+func hasTopLevelTargets(root *yaml.Node) bool {
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := deref(root.Content[i])
+		if key.Kind != yaml.ScalarNode {
+			return true
+		}
+		switch key.Value {
+		case importsKey, groupsBlock.block, schemasBlock.block:
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // parseTargets reads the target entries of a mapping. In a legacy file the same
@@ -514,14 +548,20 @@ func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupD
 	return out, nil
 }
 
-// mappingValue is the value node of key in a mapping, or nil.
-func mappingValue(root *yaml.Node, key string) *yaml.Node {
+// mappingEntry returns the key and value nodes of key in a mapping, or nils.
+func mappingEntry(root *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if k := deref(root.Content[i]); k.Kind == yaml.ScalarNode && k.Value == key {
-			return deref(root.Content[i+1])
+			return k, deref(root.Content[i+1])
 		}
 	}
-	return nil
+	return nil, nil
+}
+
+// mappingValue is the value node of key in a mapping, or nil.
+func mappingValue(root *yaml.Node, key string) *yaml.Node {
+	_, value := mappingEntry(root, key)
+	return value
 }
 
 // groupBlock is one spelling of the top-level group block and of the target key
@@ -538,6 +578,12 @@ var (
 
 // targetsKey is the reserved top-level key holding the targets, the new form.
 const targetsKey = "targets"
+
+// migrateNoticeText is the footer notice a file in the legacy form shows.
+const migrateNoticeText = "uses top-level targets; run rerun -migrate"
+
+// errTargetsReserved rejects a legacy target named `targets`, which reads as the new form's block.
+const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
 
 // schemaFields is the accepted keys inside a group entry.
 var schemaFields = []string{"columns", "muted", "hide", "start"}

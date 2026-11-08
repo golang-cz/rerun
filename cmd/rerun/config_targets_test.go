@@ -11,7 +11,7 @@ import (
 )
 
 // migrateNotice is the footer notice every file in the legacy form shows.
-const migrateNotice = "uses top-level targets; run rerun -migrate"
+const migrateNotice = migrateNoticeText
 
 // withoutMigrateNotice drops the legacy-form notice, so a test asserts only the
 // notices it is about.
@@ -102,6 +102,44 @@ func TestParseConfigLegacyFormNotices(t *testing.T) {
 	}
 	if len(cfg.Notices) != 0 {
 		t.Errorf("notices = %q, want none in the targets: form", cfg.Notices)
+	}
+}
+
+func TestParseConfigRejectsLegacyTargetNamedTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\ntargets:\n  cmd: echo targets\n")
+
+	_, err := ParseConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "targets is reserved") {
+		t.Fatalf("err = %v, want the reserved-name error", err)
+	}
+}
+
+func TestMigrateRejectsLegacyTargetNamedTargets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "api:\n  cmd: echo hi\ntargets:\n  cmd: echo targets\n")
+
+	before := readConfigText(t, path)
+	if _, err := migrateConfig(path); err == nil || !strings.Contains(err.Error(), "targets is reserved") {
+		t.Fatalf("err = %v, want the reserved-name error", err)
+	}
+	if after := readConfigText(t, path); after != before {
+		t.Errorf("migrate rewrote the file:\n%s", after)
+	}
+}
+
+func TestParseConfigImportsOnlyRootHasNoMigrateNotice(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ConfigFileName)
+	writeFile(t, path, "imports:\n  - path: b/rerun.yml\n")
+	writeFile(t, filepath.Join(dir, "b", ConfigFileName), "api:\n  cmd: echo hi\n")
+
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if len(cfg.Notices) != 0 {
+		t.Errorf("notices = %q, want none for an imports-only root", cfg.Notices)
 	}
 }
 

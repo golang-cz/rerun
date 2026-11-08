@@ -189,7 +189,7 @@ func startTargets(targets []Target, cfg *Config) int {
 	if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
 		return runTUI(targets, cfg, nil)
 	}
-	for _, n := range cfg.Notices {
+	for _, n := range dedupNotices(cfg) {
 		fmt.Fprintf(os.Stderr, "rerun: %s\n", n)
 	}
 	for _, m := range cfg.Missing {

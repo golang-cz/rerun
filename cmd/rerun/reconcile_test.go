@@ -621,6 +621,30 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 	})
 }
 
+// The migrate notice shows once per config path, however often the file reloads.
+func TestReloadShowsTheMigrateNoticeOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	if err := os.WriteFile(path, []byte("web:\n  cmd: sleep 30\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingSink{}
+	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
+	t.Cleanup(group.cancel)
+
+	group.reload(path)
+	group.reload(path)
+
+	n := 0
+	for _, ev := range sink.all() {
+		if ev.kind == evNotice && strings.Contains(ev.line, migrateNotice) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("migrate notices = %d, want one across two reloads", n)
+	}
+}
+
 // A name is the config's own text: a newline in it must not break the banner's
 // one-line invariant.
 func TestReconcileBannerStaysOneLine(t *testing.T) {

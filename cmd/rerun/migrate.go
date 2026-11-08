@@ -45,7 +45,10 @@ func migrateConfig(path string) (migrateStatus, error) {
 	if root.Kind != yaml.MappingNode {
 		return migrateNoTargets, fmt.Errorf("%s: expected a mapping of target names", real)
 	}
-	if mappingValue(root, targetsKey) != nil {
+	if value := mappingValue(root, targetsKey); value != nil {
+		if looksLikeTarget(value) {
+			return migrateNoTargets, fmt.Errorf("%s: %s", real, errTargetsReserved)
+		}
 		return migrateAlready, nil
 	}
 
