@@ -74,7 +74,7 @@ func (m *tuiModel) originalLines() []string {
 		if r.sub >= 0 || m.visibleSep[r.raw].isSep() {
 			continue
 		}
-		raw = append(raw, printable(ansi.Strip(m.visibleRaw[r.raw]), false))
+		raw = append(raw, ansi.Strip(m.visibleRaw[r.raw]))
 	}
 	return raw
 }
@@ -126,10 +126,27 @@ func (m *tuiModel) originalRows(innerW int) []string {
 			rows = append(rows, "")
 			continue
 		}
-		rows = append(rows, hardWrapCells(line, max(2, innerW))...)
+		rows = append(rows, hardWrapCells(originalDisplay(line), max(2, innerW))...)
 	}
 	o.rows, o.wrapW = rows, innerW
 	return rows
+}
+
+// originalDisplay is a raw line as the modal draws it: tabs run to the next 8-cell stop, controls drop.
+func originalDisplay(s string) string {
+	var b strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := 8 - col%8
+			b.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		b.WriteRune(r)
+		col += ansi.StringWidth(string(r))
+	}
+	return printable(b.String(), false)
 }
 
 // ansi.Hardwrap drops a space at the break, which would change the raw text.

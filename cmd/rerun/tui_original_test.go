@@ -231,3 +231,22 @@ func TestOriginalAltISkipsRerunRules(t *testing.T) {
 		t.Fatalf("lines = %q, want only the service lines %q", m.original.lines, want)
 	}
 }
+
+// The copy payload keeps tabs; only the drawn modal expands them.
+func TestOriginalCopyKeepsTabs(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "a\tb")
+	m.frame()
+	openPaneOriginal(m)
+
+	if !strings.Contains(originalBody(m), "a       b") {
+		t.Fatalf("modal does not draw the tab as spaces:\n%s", originalBody(m))
+	}
+	_, cmd := m.Update(keyMsg("c"))
+	if cmd == nil {
+		t.Fatal("c returned no clipboard command")
+	}
+	if got := reflect.ValueOf(cmd()).String(); got != "a\tb" {
+		t.Fatalf("clipboard = %q, want the tab kept", got)
+	}
+}
