@@ -102,3 +102,24 @@ func TestHiddenListFinderJumpKeepsKeysOnPane(t *testing.T) {
 		t.Fatal("space on the pane started or stopped the jumped-to target")
 	}
 }
+
+// Hidden, esc reveals the list instead of silently widening the scope.
+func TestHiddenListEscRevealsListAndKeepsScope(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.frame()
+	press(m, "b", "b")
+	m.solo = 1
+
+	press(m, "esc")
+	if m.leftMode != leftFull || m.paneFocus {
+		t.Fatalf("esc: leftMode=%d paneFocus=%v, want the list shown and focused", m.leftMode, m.paneFocus)
+	}
+	if m.solo != 1 {
+		t.Fatalf("esc cleared the scope while the list was hidden: solo=%d", m.solo)
+	}
+
+	press(m, "esc")
+	if m.solo != -1 {
+		t.Fatalf("second esc with the list shown: solo=%d, want the scope cleared", m.solo)
+	}
+}

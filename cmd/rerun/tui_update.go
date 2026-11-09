@@ -247,6 +247,12 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.goLive()
 				break
 			}
+			// Hidden, the list owns no visible cursor, so esc brings it back instead of widening scope.
+			if !m.listShown() {
+				m.leftMode = leftFull
+				m.paneFocus = false
+				break
+			}
 			before := m.scopeState()
 			m.escList()
 			if m.scopeState() == before && len(m.pills) > 0 {
