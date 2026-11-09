@@ -131,6 +131,9 @@ func (m *tuiModel) paneCursorRow() int {
 		return 0
 	}
 	if m.follow {
+		if row, ok := m.placedRow(); ok && m.inPaneView(row) {
+			return row
+		}
 		return n - 1
 	}
 	if m.paneDirect() {
@@ -142,6 +145,27 @@ func (m *tuiModel) paneCursorRow() int {
 		}
 	}
 	return m.lineRow(m.paneCurRaw)
+}
+
+// placedRow is the display row of the line focus placed the cursor on, false when it is filtered out.
+func (m *tuiModel) placedRow() (int, bool) {
+	if !m.paneCurPlaced {
+		return 0, false
+	}
+	if m.paneDirect() {
+		return m.paneCurRaw, m.paneCurRaw < m.paneLen()
+	}
+	for row, r := range m.disp {
+		if r.raw == m.paneCurRaw && r.sub == m.paneCurSub {
+			return row, true
+		}
+	}
+	return 0, false
+}
+
+// inPaneView reports whether display row row is inside the viewport.
+func (m *tuiModel) inPaneView(row int) bool {
+	return row >= m.vp.YOffset() && row < m.vp.YOffset()+m.paneRows()
 }
 
 // setPaneCursor moves the cursor to display row row.
@@ -190,13 +214,19 @@ func (m *tuiModel) moveCursorRow(delta int) {
 
 // placeCursor scrolls to a moved cursor, else keeps a paused cursor inside the viewport.
 func (m *tuiModel) placeCursor() {
+	if !m.follow {
+		m.paneCurPlaced = false
+	}
 	n := m.paneLen()
 	if n == 0 {
 		return
 	}
 	if m.follow {
 		m.revealCur, m.revealSpan = false, 0
-		m.setPaneCursor(n - 1)
+		if row, ok := m.placedRow(); !ok || !m.inPaneView(row) {
+			m.paneCurPlaced = false
+			m.setPaneCursor(n - 1)
+		}
 		return
 	}
 	row := m.paneCursorRow()
@@ -288,6 +318,7 @@ func (m *tuiModel) focusPane() {
 	// Placing the cursor on a live tail must not pause it: a rule line can end the pane.
 	if m.follow {
 		m.setPaneCursor(target)
+		m.paneCurPlaced = true
 		return
 	}
 	m.pauseTail()

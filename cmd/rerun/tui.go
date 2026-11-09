@@ -222,6 +222,8 @@ type tuiModel struct {
 	pending int
 	// paneCurRaw is the cursor's raw line, paneCurSub its expansion row (-1 for the line).
 	paneCurRaw, paneCurSub int
+	// paneCurPlaced keeps the cursor on paneCurRaw's line while the tail follows.
+	paneCurPlaced bool
 	// revealCur scrolls the pane to the cursor next frame; revealSpan more rows
 	// under the cursor must show with it, an expansion's.
 	revealCur  bool

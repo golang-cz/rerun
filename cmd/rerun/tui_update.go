@@ -464,8 +464,9 @@ func (m *tuiModel) scrollUp(n int) {
 // pauseTail freezes the pane on its rows, with the cursor left on the newest line.
 func (m *tuiModel) pauseTail() {
 	if m.follow && m.paneLen() > 0 {
-		m.setPaneCursor(m.paneLen() - 1)
+		m.setPaneCursor(m.paneCursorRow())
 	}
+	m.paneCurPlaced = false
 	m.follow = false
 	m.pending = 0
 }

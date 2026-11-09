@@ -849,3 +849,62 @@ func TestRightArrowKeepsUserPlacedCursor(t *testing.T) {
 		t.Fatal("← → resumed the tail")
 	}
 }
+
+// While following, → draws the cursor on the service line, not the rule after it.
+func TestFollowingDrawsCursorOnPlacedServiceLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{
+		{kind: evExited, target: "web", restart: true, code: -1, status: "stopped for restart"},
+		{kind: evExited, target: "web", code: 1},
+	})
+	m.frame()
+
+	press(m, "right")
+	m.frame()
+	if !m.follow {
+		t.Fatal("→ paused the live tail")
+	}
+	if got := m.visibleRaw[m.rowInfo(m.paneCursorRow()).raw]; got != "two" {
+		t.Fatalf("drawn cursor on %q, want the service line", got)
+	}
+}
+
+// The placed cursor rides its service line as new lines arrive, and the tail keeps running.
+func TestPlacedCursorStaysOnItsLineWhileFollowing(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{
+		{kind: evExited, target: "web", restart: true, code: -1, status: "stopped for restart"},
+		{kind: evExited, target: "web", code: 1},
+	})
+	m.frame()
+	press(m, "right")
+
+	addLines(m, "web", "three")
+	m.frame()
+	if got := m.visibleRaw[m.rowInfo(m.paneCursorRow()).raw]; got != "two" {
+		t.Fatalf("cursor on %q after a new line, want it kept on the service line", got)
+	}
+	if !m.follow {
+		t.Fatal("a new line paused the live tail")
+	}
+}
+
+// Once the placed line scrolls out of view, the cursor falls back to the newest row.
+func TestPlacedCursorFallsBackToNewestWhenScrolledOut(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
+	m.frame()
+	press(m, "right")
+
+	m.applyEvents(streamEvents("web", "l", 60).events)
+	m.frame()
+	if !m.follow {
+		t.Fatal("scrolling the placed line out paused the live tail")
+	}
+	if got := m.paneCursorRow(); got != m.paneLen()-1 {
+		t.Fatalf("cursor on row %d, want the newest row %d", got, m.paneLen()-1)
+	}
+}
