@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// tableHint is shown when `c` has no columns to work with.
-const tableHint = "c needs a target with columns"
+// tableHint is shown when `t` has no columns to work with.
+const tableHint = "t needs a target with columns"
 
 const columnCapW = 24
 

@@ -326,10 +326,10 @@ func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	}
 	seq := m.copySeq
 
-	// Let the copy feedback expire, then press c on a row without columns: that
+	// Let the copy feedback expire, then press t on a row without columns: that
 	// arms the table hint window, which used to bring the stale copy back.
 	m.now = m.copyUntil
-	press(m, "c")
+	press(m, "t")
 
 	lines := paneOf(m)[m.titleHeight():]
 	last := lines[len(lines)-1]
@@ -424,7 +424,7 @@ func TestSelectionClearsOnKeypress(t *testing.T) {
 		t.Fatal("the press did not anchor a selection")
 	}
 
-	press(m, "c") // unbound key
+	press(m, "j") // any other key
 	if m.selAnchor != nil {
 		t.Fatal("the keypress kept the selection")
 	}
@@ -594,5 +594,42 @@ func TestHoverDoesNotDragAKeyboardSelection(t *testing.T) {
 	m.handleMouse(motion(paneX(m), 9))
 	if m.selEnd != end {
 		t.Fatalf("hover moved the keyboard selection end from %d to %d", end, m.selEnd)
+	}
+}
+
+// c copies the pane cursor line when nothing is selected.
+func TestCKeyCopiesTheCursorLine(t *testing.T) {
+	m := frozenPane(t)
+	press(m, "right", "up", "up")
+	want := m.visibleRaw[m.paneCursorRow()] + "\n"
+
+	press(m, "c")
+	if got := decodeCopy(t, m.copySeq); got != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+	if m.copyHint != "copied 1 line" {
+		t.Fatalf("hint = %q, want copied 1 line", m.copyHint)
+	}
+}
+
+// c copies the selected lines, and the selection ends with the copy.
+func TestCKeyCopiesTheSelection(t *testing.T) {
+	m := frozenPane(t)
+	press(m, "right", "up", "up", "shift+down", "shift+down")
+	lo, hi, ok := m.selectionRange()
+	if !ok {
+		t.Fatal("setup: no selection")
+	}
+	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
+
+	press(m, "c")
+	if got := decodeCopy(t, m.copySeq); got != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+	if m.copyHint != "copied 3 lines" {
+		t.Fatalf("hint = %q, want copied 3 lines", m.copyHint)
+	}
+	if m.selAnchor != nil {
+		t.Fatal("the copy kept the selection")
 	}
 }

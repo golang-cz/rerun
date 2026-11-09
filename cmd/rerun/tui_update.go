@@ -99,8 +99,8 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Any key ends a frozen selection, except the shift+arrows that grow it; copy feedback survives its 3s window.
-	if !m.growsSelection(msg.String()) {
+	// Any key ends a frozen selection, except the ones that act on it; copy feedback survives its 3s window.
+	if !m.keepsSelection(msg.String()) {
 		m.clearSelection()
 	}
 
@@ -215,6 +215,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "c":
+		m.copyKey()
+
+	case "t":
 		m.toggleTable()
 
 	case "n":
@@ -581,11 +584,34 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // clearSelection drops the frozen selection highlight and the press state.
 func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved, m.selKey = nil, false, false }
 
-// growsSelection reports whether key extends the pane's selection rather than ending it.
-func (m *tuiModel) growsSelection(key string) bool {
-	return m.paneFocus && (key == "shift+up" || key == "shift+down") &&
-		m.cfgErr == "" && !m.confirmQuit && !m.help && !m.finder.open &&
-		!m.eventsModal.open && m.inputMode == inputNone
+// keepsSelection reports whether key acts on the selection instead of ending it:
+// c copies it, and shift+arrows in the pane grow it.
+func (m *tuiModel) keepsSelection(key string) bool {
+	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.eventsModal.open || m.inputMode != inputNone {
+		return false
+	}
+	switch key {
+	case "c":
+		return true
+	case "shift+up", "shift+down":
+		return m.paneFocus
+	}
+	return false
+}
+
+// copyKey copies the selected lines, else the pane cursor's line.
+func (m *tuiModel) copyKey() {
+	if m.selAnchor != nil {
+		m.copySelection()
+		return
+	}
+	if m.paneLen() == 0 {
+		return
+	}
+	// An expansion row copies the line it belongs to, as a click on it would.
+	row := m.lineRow(m.rowInfo(m.paneCursorRow()).raw)
+	m.selAnchor, m.selEnd, m.selKey = &row, row, false
+	m.copySelection()
 }
 
 // extendSelection moves the pane cursor by delta rows and stretches the selection to it.

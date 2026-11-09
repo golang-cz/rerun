@@ -531,7 +531,7 @@ func TestEnterOnListRowFocusesPane(t *testing.T) {
 
 func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	press(m, "c") // arms the table hint, which has no columns to show
+	press(m, "t") // arms the table hint, which has no columns to show
 	m.follow = false
 	m.pending = 2
 

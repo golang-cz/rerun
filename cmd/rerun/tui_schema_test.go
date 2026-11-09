@@ -177,7 +177,7 @@ func TestSchemaSelectionTablesByDefaultAndCTogglesRaw(t *testing.T) {
 	if !m.tableOn() {
 		t.Fatal("a schema with columns did not start in table mode")
 	}
-	press(m, "c")
+	press(m, "t")
 	if m.tableOn() {
 		t.Fatal("c did not switch the schema to raw")
 	}
@@ -195,7 +195,7 @@ func TestNothingSelectedTablesOnlyWhenColumnsAreShared(t *testing.T) {
 	if m.tableOn() {
 		t.Fatal("mixed columns started in table mode with nothing selected")
 	}
-	press(m, "c")
+	press(m, "t")
 	if !m.tableOn() {
 		t.Fatal("c did not turn the table on for mixed columns")
 	}

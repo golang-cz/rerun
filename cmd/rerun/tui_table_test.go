@@ -38,7 +38,7 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 		t.Fatalf("status values start at %d and %d, want the same column", strings.Index(row0, "200"), strings.Index(row1, "500"))
 	}
 
-	press(m, "c")
+	press(m, "t")
 	if m.tableOn() {
 		t.Fatal("c did not turn table mode off")
 	}
@@ -92,7 +92,7 @@ func TestTableMixesRawAndColumnRows(t *testing.T) {
 	addLines(m, "api", "plain log line")
 	m.frame()
 
-	press(m, "c")
+	press(m, "t")
 	lines := paneOf(m)[m.titleHeight():]
 	if got := strings.TrimRight(lines[0], " "); !strings.Contains(got, "GET") || strings.Contains(got, jsonGet) {
 		t.Fatalf("web row = %q, want a table row", got)
@@ -110,7 +110,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 	addLines(m, "bad", jsonGet, "not json at all")
 	m.frame()
 
-	press(m, "c")
+	press(m, "t")
 	lines := paneOf(m)[m.titleHeight():]
 	if got := dropMarker(lines[0]); got != "bad  "+jsonGet {
 		t.Fatalf("bad-expr row = %q, want raw text", got)
@@ -126,7 +126,7 @@ func TestTableHintsWithoutColumns(t *testing.T) {
 	addLines(m, "web", "hi")
 	m.frame()
 
-	press(m, "c")
+	press(m, "t")
 	if m.tableOn() {
 		t.Fatal("c turned table mode on without any columns")
 	}
@@ -174,7 +174,7 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", jsonPost)
 	m.frame()
-	press(m, "c")
+	press(m, "t")
 	m.frame()
 	before := m.cellEvals
 
@@ -190,7 +190,7 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 func TestTableHintExpires(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.frame()
-	press(m, "c")
+	press(m, "t")
 	m.now = m.hintUntil
 	if got := bottomPaneLine(m); strings.Contains(got, tableHint) {
 		t.Fatalf("the table hint outlived its window: %q", got)
