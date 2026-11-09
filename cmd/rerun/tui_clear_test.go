@@ -259,29 +259,32 @@ func TestClearInTheFocusedPaneClearsAGroupScope(t *testing.T) {
 	blankTop(t, m)
 }
 
-// A frozen pane keeps its offset and adds no marker: the clear only waits.
-func TestClearInAFrozenPaneDoesNotJump(t *testing.T) {
+// A frozen pane resumes the tail first, then clears: ctrl+l is one gesture.
+func TestClearInAFrozenPaneResumesTheTail(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	addLines(m, "api", streamLines("api", 30)...)
 	m.frame()
 	m.cursor = 0
 	m.liveSelect()
 	press(m, "right", "up") // focus the pane, then freeze the tail
+	if m.follow {
+		t.Fatal("setup: the pane did not freeze")
+	}
 
-	off, pending := m.vp.YOffset(), m.pending
 	press(m, "ctrl+l")
 	m.frame()
 
-	if m.pinSeq != 0 {
-		t.Fatalf("pinSeq = %d, want no pin while the tail is frozen", m.pinSeq)
+	if !m.follow {
+		t.Fatal("ctrl+l did not resume the tail")
 	}
-	if m.vp.YOffset() != off {
-		t.Fatalf("YOffset = %d, want %d (no jump)", m.vp.YOffset(), off)
+	if m.pinSeq == 0 || !m.pinGap {
+		t.Fatalf("pinSeq = %d gap = %v, want the clear pinned", m.pinSeq, m.pinGap)
 	}
-	if m.pending != pending {
-		t.Fatalf("pending = %d, want %d", m.pending, pending)
+	if m.pending != 0 {
+		t.Fatalf("pending = %d, want 0", m.pending)
 	}
 	noMarkerText(t, m)
+	blankTop(t, m)
 }
 
 // A folded header still clears every member it hides.
@@ -343,5 +346,74 @@ func TestClearingTwiceKeepsThePaneBlank(t *testing.T) {
 	addLines(m, "api", "fresh")
 	if got := paneTop(m); !strings.Contains(got, "fresh") {
 		t.Fatalf("pane top = %q, want the newest line after a second clear", got)
+	}
+}
+
+// A target row clear works from scrollback: it resumes the tail first.
+func TestClearOnATargetRowFromScrollbackResumesAndBlanks(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	addLines(m, "api", streamLines("api", 30)...)
+	m.frame()
+	m.cursor = 0
+	m.liveSelect()
+	press(m, "pgup")
+	if m.follow {
+		t.Fatal("setup: scrolling up did not freeze the tail")
+	}
+
+	press(m, "ctrl+l")
+	m.frame()
+
+	if !m.follow {
+		t.Fatal("ctrl+l from scrollback did not resume the tail")
+	}
+	noMarkerText(t, m)
+	blankTop(t, m)
+}
+
+// A group header clear works from scrollback: it resumes the tail first.
+func TestClearOnAGroupHeaderFromScrollbackResumesAndBlanks(t *testing.T) {
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	addLines(m, "api", streamLines("api", 30)...)
+	addLines(m, "worker", streamLines("worker", 10)...)
+	m.frame()
+	m.cursor = 0 // the backend header
+	m.liveSelect()
+	press(m, "pgup")
+	if m.follow {
+		t.Fatal("setup: scrolling up did not freeze the tail")
+	}
+
+	press(m, "ctrl+l")
+	m.frame()
+
+	if !m.follow {
+		t.Fatal("ctrl+l from scrollback did not resume the tail")
+	}
+	noMarkerText(t, m)
+	blankTop(t, m)
+}
+
+// A focused unscoped pane clears the all-targets view without scoping the pane.
+func TestClearInAFocusedUnscopedPaneKeepsTheView(t *testing.T) {
+	m := newTestModel(t, target("api"), target("web"))
+	addLines(m, "api", "api-1")
+	addLines(m, "web", "web-1")
+	m.frame()
+	press(m, "right")
+	if !m.paneFocus {
+		t.Fatal("right did not focus the pane")
+	}
+	if m.solo >= 0 || m.schemaSel != "" {
+		t.Fatal("setup: the pane must start unscoped")
+	}
+
+	press(m, "ctrl+l")
+	m.frame()
+
+	noMarkerText(t, m)
+	blankTop(t, m)
+	if m.solo >= 0 || m.schemaSel != "" {
+		t.Fatalf("ctrl+l changed the scope: solo=%d schema=%q", m.solo, m.schemaSel)
 	}
 }

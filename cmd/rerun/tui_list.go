@@ -505,34 +505,23 @@ func (m *tuiModel) rebootRow(r listRow) {
 	m.rebootTarget(r.target)
 }
 
-// clearKey is ctrl+l: a focused pane clears what it shows, else the cursor's row.
+// clearKey is ctrl+l: a focused pane blanks what it shows without re-scoping; the list scopes to the cursor row first.
 func (m *tuiModel) clearKey() {
 	if m.paneFocus {
-		if members, ok := m.paneScope(); ok {
-			m.clearTargets(members)
-			return
-		}
+		m.clearTargets()
+		return
 	}
 	if r, ok := m.cursorRow(); ok {
 		// Act on the row under the cursor, so a clear always has a pane to blank.
 		m.applyRowScope(r)
-		m.clearRow(r)
+		m.clearTargets()
 	}
-}
-
-// clearRow is ctrl+l: clears a target's log, or a header's members.
-func (m *tuiModel) clearRow(r listRow) {
-	if r.header {
-		m.clearTargets(r.members)
-		return
-	}
-	m.clearTargets([]int{r.target})
 }
 
 // A clear must not add or drop lines, so it only moves the pin.
-func (m *tuiModel) clearTargets(members []int) {
-	if !m.follow || !m.paneHoldsOnly(members) {
-		return
+func (m *tuiModel) clearTargets() {
+	if !m.follow {
+		m.goLive()
 	}
 	seq, ok := m.lastShownSeq()
 	if !ok {
@@ -540,13 +529,6 @@ func (m *tuiModel) clearTargets(members []int) {
 	}
 	m.pinSeq, m.pinGap = seq, true
 	m.vpDirty = true
-}
-
-// paneHoldsOnly reports whether the pane draws exactly these members, so clearing
-// a target it does not show cannot blank it.
-func (m *tuiModel) paneHoldsOnly(members []int) bool {
-	scope, ok := m.paneScope()
-	return ok && slices.Equal(members, scope)
 }
 
 // lastShownSeq is the seq of the pane's last shown line, the anchor a clear hides behind.
