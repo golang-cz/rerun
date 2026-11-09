@@ -70,7 +70,9 @@ func migrateImports(path string) ([]string, error) {
 	}
 
 	name := filepath.Base(mk)
-	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{scalarNode("path"), scalarNode(name)}}
+	// The implicit import skipped a missing Makefile, so the entry does too.
+	optional := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"}
+	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{scalarNode("path"), scalarNode(name), scalarNode("optional"), optional}}
 	switch {
 	case imports == nil:
 		root.Content = append(root.Content, scalarNode(importsKey), &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{entry}})

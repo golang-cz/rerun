@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,5 +93,28 @@ func TestMigrateAppendsToNullImportsKey(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "path: Makefile") {
 		t.Errorf("rerun.yml after migrate:\n%s", data)
+	}
+}
+
+// The migrated entry is optional, as the implicit import was: a Makefile removed later does not break rerun.yml.
+func TestMigrateWritesOptionalMakefileImport(t *testing.T) {
+	f := newImportFixture(t, "targets:\n  local:\n    run: echo\n", map[string]string{
+		"app/Makefile": "build:\n\tgo build\n",
+	})
+	if _, err := migrateImports(f.root); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "optional: true") {
+		t.Fatalf("rerun.yml after migrate lacks optional: true:\n%s", data)
+	}
+	if err := os.Remove(filepath.Join(f.dir, "app", "Makefile")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseConfig(f.root); err != nil {
+		t.Fatalf("ParseConfig after the Makefile is removed: %v", err)
 	}
 }

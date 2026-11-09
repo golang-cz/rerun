@@ -67,6 +67,9 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 	// Beside a rerun.yml only its imports: list load; a bare Makefile dir loads its Makefile.
 	mk := implicitMakefile(filepath.Dir(rootFile))
 	rootExists := fileExists(rootFile)
+	// A rerun.yml that defines the make group itself never auto-imported its Makefile.
+	_, ownsMake := rootSchemas[makeKind]
+	ownsMake = ownsMake || slices.ContainsFunc(cfg.Targets, func(t Target) bool { return t.Schema == makeKind })
 	// Last, so an explicit import of the same file is seen first and wins the dedupe.
 	if mk != "" && !rootExists {
 		specs = append(specs, importSpec{path: filepath.Base(mk), group: makeKind, optional: true, implicit: true})
@@ -298,7 +301,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			cfg.Targets = append(cfg.Targets, t)
 		}
 	}
-	if mk != "" && rootExists {
+	if mk != "" && rootExists && !ownsMake {
 		if _, listed := seenFiles[canonicalPath(mk)]; !listed {
 			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s not imported · add it under imports:", filepath.Base(mk)))
 		}

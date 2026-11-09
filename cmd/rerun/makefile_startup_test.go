@@ -256,7 +256,7 @@ func TestUnlistedMakefileDoesNotShadowRootMakeTarget(t *testing.T) {
 	}
 }
 
-func TestRootGroupMakeSkipsImplicitMakefileWithNotice(t *testing.T) {
+func TestRootGroupMakeSkipsImplicitMakefileSilently(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
 		ConfigFileName: "groups:\n  make:\n    columns: [\"x {.x}\"]\n\nweb:\n  cmd: sleep 30\n",
@@ -268,8 +268,8 @@ func TestRootGroupMakeSkipsImplicitMakefileWithNotice(t *testing.T) {
 	if got := targetNames(cfg); !reflect.DeepEqual(got, []string{"web"}) {
 		t.Errorf("targets = %v, want only web", got)
 	}
-	if !containsNotice(cfg, "Makefile not imported") {
-		t.Errorf("notices = %v, want the not-imported notice", cfg.Notices)
+	if containsNotice(cfg, "Makefile not imported") {
+		t.Errorf("notices = %v, want no not-imported notice", cfg.Notices)
 	}
 }
 
