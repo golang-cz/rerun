@@ -545,3 +545,61 @@ func TestFinderJumpToHiddenTargetDoesNotRevealGroup(t *testing.T) {
 		t.Fatalf("after moving to build listed %v, want serve hidden again", got)
 	}
 }
+
+// A make target shows its last slash as a space, so "make/build" reads as the command.
+func TestFinderMakeRowShowsSpaceNotSlash(t *testing.T) {
+	mk := makeTestTarget("make/build")
+	nested := makeTestTarget("make/tools/build")
+	m := newTestModel(t, mk, nested, target("bpn-api/test"))
+	m.Update(ctrlK)
+	labels := map[string]string{}
+	for _, c := range m.finderCandidates() {
+		if c.kind == "target" {
+			labels[m.targets[c.target].spec.Name] = c.name
+		}
+	}
+	want := map[string]string{"make/build": "make build", "make/tools/build": "make/tools build", "bpn-api/test": "bpn-api/test"}
+	for name, label := range want {
+		if labels[name] != label {
+			t.Errorf("label for %q = %q, want %q", name, labels[name], label)
+		}
+	}
+}
+
+func TestFinderMakeRowRendersSpace(t *testing.T) {
+	m := newTestModel(t, makeTestTarget("make/build"))
+	m.Update(ctrlK)
+	for _, c := range m.finderCandidates() {
+		if c.kind != "target" {
+			continue
+		}
+		if got := ansi.Strip(m.finderName(c, false, 20)); !strings.HasPrefix(got, "make build") {
+			t.Errorf("rendered name = %q, want it to start with %q", got, "make build")
+		}
+	}
+}
+
+// Typing the slash or the space finds a make target alike.
+func TestFinderMakeRowMatchesSlashAndSpace(t *testing.T) {
+	m := newTestModel(t, makeTestTarget("make/build"), target("web"))
+	for _, q := range []string{"make b", "make/b", "make build", "make/build", "make/tools"} {
+		res := m.finderResults(q)
+		if q == "make/tools" {
+			if len(res) != 0 {
+				t.Errorf("results for %q = %v, want none", q, res)
+			}
+			continue
+		}
+		if len(res) == 0 || res[0].name != "make build" {
+			t.Errorf("results for %q = %v, want make build first", q, res)
+		}
+	}
+}
+
+func makeTestTarget(name string) Target {
+	t := target(name)
+	t.Kind = makeKind
+	t.Cmd = "make " + name[strings.LastIndex(name, "/")+1:]
+	t.Start = startManual
+	return t
+}

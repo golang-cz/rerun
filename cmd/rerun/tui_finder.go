@@ -62,12 +62,25 @@ func (m *tuiModel) finderCandidates() []finderItem {
 		item := finderItem{kind: "target", name: t.Name, desc: finderDesc(t.Desc), make: t.Kind == makeKind,
 			target: r.target, enter: func(m *tuiModel) { m.finderJump(i) }}
 		if item.make {
+			item.name = finderMakeLabel(t.Name)
 			item.enter = func(m *tuiModel) { m.finderRun(i) }
 		}
 		out = append(out, item)
 	}
 	return out
 }
+
+// finderMakeLabel shows a make target as its command: the last slash becomes a space.
+func finderMakeLabel(name string) string {
+	i := strings.LastIndex(name, "/")
+	if i < 0 {
+		return name
+	}
+	return name[:i] + " " + name[i+1:]
+}
+
+// finderMatchText reads a slash and a space alike, so either typed form finds a row.
+func finderMatchText(s string) string { return strings.ReplaceAll(s, "/", " ") }
 
 // fuzzyHit is one entry's result over all query words: summed score, merged indexes, words matched.
 type fuzzyHit struct {
@@ -105,13 +118,13 @@ func fuzzyAll(words, data []string) []fuzzyHit {
 // finderResults ranks candidates: name matches first, then desc-only matches, each by score.
 func (m *tuiModel) finderResults(query string) []finderItem {
 	cands := m.finderCandidates()
-	words := strings.Fields(query)
+	words := strings.Fields(finderMatchText(query))
 	if len(words) == 0 {
 		return cands
 	}
 	names := make([]string, len(cands))
 	for i, c := range cands {
-		names[i] = c.name
+		names[i] = finderMatchText(c.name)
 	}
 	nameHits := fuzzyAll(words, names)
 
@@ -370,7 +383,11 @@ func (m *tuiModel) finderName(c finderItem, selected bool, nameW int) string {
 		label = strings.TrimSuffix(label, "/")
 	}
 	prefix := 0
-	if i := strings.LastIndex(label, "/"); i >= 0 {
+	sep := "/"
+	if c.make {
+		sep = "/ " // a make label's only space is the one that replaced its slash
+	}
+	if i := strings.LastIndexAny(label, sep); i >= 0 {
 		prefix = utf8.RuneCountInString(label[:i+1])
 	}
 	var b strings.Builder

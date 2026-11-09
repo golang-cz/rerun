@@ -193,7 +193,7 @@ func TestFinderFooterSaysRunOnAMakeRow(t *testing.T) {
 	m := newMakeTUI(t)
 	m.Update(ctrlK)
 	press(m, "t", "e", "s", "t")
-	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "enter run") || !strings.Contains(view, "▶ make/test") {
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "enter run") || !strings.Contains(view, "▶ make test") {
 		t.Fatalf("a make row should show ▶ and say enter run:\n%s", view)
 	}
 
