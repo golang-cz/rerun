@@ -118,7 +118,10 @@ func (m *tuiModel) toggleExpand(raw int) {
 	m.vpDirty = true
 	m.ensurePane()
 	m.setPaneCursor(m.lineRow(raw))
-	m.revealCur, m.revealTop = true, opening
+	m.revealCur, m.revealSpan = true, 0
+	if opening {
+		m.revealSpan = len(m.expansionRows(raw))
+	}
 }
 
 // paneCursorRow is the display row under the cursor, the newest row while the tail follows.
@@ -182,7 +185,7 @@ func (m *tuiModel) moveCursorRow(delta int) {
 	}
 	m.pauseTail()
 	m.setPaneCursor(next)
-	m.revealCur, m.revealTop = true, false
+	m.revealCur, m.revealSpan = true, 0
 }
 
 // placeCursor scrolls to a moved cursor, else keeps a paused cursor inside the viewport.
@@ -192,22 +195,24 @@ func (m *tuiModel) placeCursor() {
 		return
 	}
 	if m.follow {
-		m.revealCur, m.revealTop = false, false
+		m.revealCur, m.revealSpan = false, 0
 		m.setPaneCursor(n - 1)
 		return
 	}
 	row := m.paneCursorRow()
 	h := m.paneRows()
 	if m.revealCur {
+		last := row + m.revealSpan
 		switch {
-		case m.revealTop:
+		case last-row+1 > h:
+			// Taller than the pane: its first row goes to the top.
 			m.vp.SetYOffset(row)
+		case last >= m.vp.YOffset()+h:
+			m.vp.SetYOffset(last - h + 1)
 		case row < m.vp.YOffset():
 			m.vp.SetYOffset(row)
-		case row >= m.vp.YOffset()+h:
-			m.vp.SetYOffset(row - h + 1)
 		}
-		m.revealCur, m.revealTop = false, false
+		m.revealCur, m.revealSpan = false, 0
 	}
 	switch {
 	case row < m.vp.YOffset():

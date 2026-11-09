@@ -96,7 +96,7 @@ copies the line. Clicks on a block's key and value cells still pick a column or 
 never collapse the block. The pane cursor (a reverse-video line) starts on the newest line; `↑/↓` move it when
 the pane is focused, and moving it off the live tail pauses the tail (`end` resumes).
 `enter` acts on the cursor line, and a non-JSON line gets a hint instead. Opening a block
-pauses the tail and keeps the block in view. Expanded keys are underlined and scalar
+pauses the tail and scrolls only as far as needed: a block that runs past the bottom scrolls until its last row shows, and one taller than the pane puts its line at the top. Expanded keys are underlined and scalar
 values tinted. The first expansion of a session shows the click hint.
 In an expanded block, a click on a key adds it as a column of the selection (a selected
 schema, else the target the pane shows), and a click on a scalar adds a `path=value` pill

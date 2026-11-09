@@ -72,7 +72,7 @@ Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or pr
 `enter` with the pane focused (it acts on the cursor line, which starts on the newest
 line), to show the pretty-printed object; `(−)` collapses it. A click anywhere on an
 expandable line toggles it the same way, and a click on a row of an open expansion
-collapses it. A click means press and release on one cell: a press that moves is a drag,
+collapses it. Opening a block scrolls only as far as needed to show it. A click means press and release on one cell: a press that moves is a drag,
 which selects text and never toggles. Moving the cursor off the
 newest line pauses the tail. Expanded keys are underlined and values tinted. With the
 cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `path=value`

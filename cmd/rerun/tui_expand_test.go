@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -723,5 +724,90 @@ func TestClearSelectionResetsThePressState(t *testing.T) {
 
 	if m.selAnchor != nil || m.selMoved {
 		t.Fatal("clearSelection left press state behind")
+	}
+}
+
+// bigJSON is a JSON object whose pretty block is taller than a pane.
+func bigJSON(keys int) string {
+	var b strings.Builder
+	b.WriteString("{")
+	for i := 0; i < keys; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"k%d":%d`, i, i)
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// Opening a line that fits on screen does not move the pane.
+func TestExpandingAFittingLineDoesNotScroll(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	lines := []string{"p0", "p1", "p2", "p3", jsonReq}
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("tail %d", i))
+	}
+	addLines(m, "web", lines...)
+	m.frame()
+	m.pauseTail()
+	m.vp.SetYOffset(2)
+	m.frame()
+
+	m.toggleExpand(4)
+	m.frame()
+	if got := m.vp.YOffset(); got != 2 {
+		t.Fatalf("a fitting expansion moved the pane to %d, want 2", got)
+	}
+}
+
+// An expansion that runs past the bottom scrolls just enough to show its last row.
+func TestExpandingScrollsMinimallyToShowTheLastRow(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	lines := make([]string, 0, 80)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("head %d", i))
+	}
+	lines = append(lines, jsonReq)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("tail %d", i))
+	}
+	addLines(m, "web", lines...)
+	m.frame()
+	m.pauseTail()
+	h := m.paneRows()
+	const row = 40
+	m.vp.SetYOffset(row - (h - 2))
+	m.frame()
+
+	m.toggleExpand(row)
+	m.frame()
+	span := len(m.expansionRows(row))
+	if want := row + span - h + 1; m.vp.YOffset() != want {
+		t.Fatalf("offset = %d, want %d so the expansion's last row is the bottom row", m.vp.YOffset(), want)
+	}
+}
+
+// An expansion taller than the pane puts its line at the top.
+func TestExpandingTallerThanThePaneShowsTheLineAtTop(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	lines := make([]string, 0, 100)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("head %d", i))
+	}
+	lines = append(lines, bigJSON(60))
+	for i := 0; i < 60; i++ {
+		lines = append(lines, fmt.Sprintf("tail %d", i))
+	}
+	addLines(m, "web", lines...)
+	m.frame()
+	m.pauseTail()
+	m.vp.SetYOffset(37)
+	m.frame()
+
+	m.toggleExpand(40)
+	m.frame()
+	if got := m.vp.YOffset(); got != 40 {
+		t.Fatalf("offset = %d, want 40, the line at the top", got)
 	}
 }

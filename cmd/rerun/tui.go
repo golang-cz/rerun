@@ -220,8 +220,10 @@ type tuiModel struct {
 	pending int
 	// paneCurRaw is the cursor's raw line, paneCurSub its expansion row (-1 for the line).
 	paneCurRaw, paneCurSub int
-	// revealCur scrolls the pane to the cursor next frame, revealTop to its top.
-	revealCur, revealTop bool
+	// revealCur scrolls the pane to the cursor next frame; revealSpan more rows
+	// under the cursor must show with it, an expansion's.
+	revealCur  bool
+	revealSpan int
 	// hintedExpand is set once the first expansion's footer hint has shown.
 	hintedExpand bool
 	// keepNoticeUntil holds the saved-columns notice against a config reload notice.
