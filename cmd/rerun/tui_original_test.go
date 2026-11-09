@@ -250,3 +250,33 @@ func TestOriginalCopyKeepsTabs(t *testing.T) {
 		t.Fatalf("clipboard = %q, want the tab kept", got)
 	}
 }
+
+// A wheel or click behind the open modal must not unpause the tail or move the list.
+func TestOriginalModalSwallowsMouse(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	addLines(m, "web", "w1", "w2")
+	m.applyEvents(streamEvents("api", "a", 60).events)
+	m.frame()
+	openPaneOriginal(m)
+	if !m.original.open {
+		t.Fatal("o did not open the modal")
+	}
+	cursor := m.cursor
+
+	m.handleMouse(wheelUp(paneX(m), 5))
+	m.handleMouse(wheelDown(1, 1))
+	click(m, 1, 1)
+
+	if !m.follow {
+		t.Error("a wheel behind the modal paused the tail")
+	}
+	if m.cursor != cursor {
+		t.Errorf("cursor = %d, want %d: a click behind the modal moved the list", m.cursor, cursor)
+	}
+	if !m.original.open {
+		t.Error("the modal closed")
+	}
+	if m.selAnchor != nil {
+		t.Error("a click behind the modal armed a pane selection")
+	}
+}

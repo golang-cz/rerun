@@ -512,7 +512,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.clearSelection()
 		return m, nil
 	}
-	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open {
+	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open || m.original.open {
 		return m, nil
 	}
 	e := msg.Mouse()
