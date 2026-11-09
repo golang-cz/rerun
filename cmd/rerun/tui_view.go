@@ -53,6 +53,9 @@ type tuiStyles struct {
 	paneCursor   lipgloss.Style
 	chip         lipgloss.Style
 	chipFind     lipgloss.Style
+	chipHi       lipgloss.Style
+	hit          lipgloss.Style
+	errText      lipgloss.Style
 	sel          lipgloss.Style
 }
 
@@ -76,6 +79,10 @@ func newTUIStyles(isDark bool) tuiStyles {
 		paneCursor:   lipgloss.NewStyle().Reverse(true),
 		chip:         lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		chipFind:     lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Underline(true),
+		chipHi:       lipgloss.NewStyle().Faint(true),
+		// Reverse, not underline: v2 wraps an underlined string per rune, which ansi.Cut miscuts.
+		hit:     lipgloss.NewStyle().Reverse(true),
+		errText: lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed)),
 	}
 }
 
@@ -328,20 +335,23 @@ func (m *tuiModel) inputBoxW() int {
 	return max(1, min(rightW, max(modalMinWidth, rightW-2)))
 }
 
-// inputPlaceholder is the faint hint an empty input box shows.
+// inputPlaceholder is the faint hint an empty query box shows.
 func (m *tuiModel) inputPlaceholder() string {
-	if m.inputMode == inputSearch {
-		return "find in pane…"
-	}
-	return "filter lines…"
+	return `level=error  "two words"  @saved  .yq`
 }
 
-// inputCount is the box header's right-aligned count: match position for find, line count for filter.
+// inputCount is the box header's right-aligned count: the picker size while
+// the @ picker is open, else the kept/total line counts.
 func (m *tuiModel) inputCount() string {
-	if m.inputMode == inputSearch {
-		return m.searchStatus()
+	if m.pickActive() {
+		if n := len(m.pickMatches()); n == 1 {
+			return "1 query"
+		} else {
+			return fmt.Sprintf("%d queries", n)
+		}
 	}
-	return m.filterStatus()
+	kept, total := m.matchCounts()
+	return fmt.Sprintf("%d/%d lines", kept, total)
 }
 
 // inputPrompt is the glyph and gap an input box draws before its text.
@@ -356,7 +366,9 @@ func (m *tuiModel) inputCaret(boxX, boxY int) (int, int) {
 	return innerX + m.layout.caretW, innerY
 }
 
-// inputBoxView draws the typing box: one header row with the query and the count, then the keys footer.
+// inputBoxView draws the query box: one header row with the input and the
+// count, the @ picker's rows when it is open, then the keys footer. A parse
+// error turns the input red and owns the footer.
 func (m *tuiModel) inputBoxView() string {
 	outerW := m.inputBoxW()
 	innerW := m.modalInnerW(outerW)
@@ -367,9 +379,12 @@ func (m *tuiModel) inputBoxView() string {
 		head += " " + m.styles.hint.Render(m.inputPlaceholder())
 	} else {
 		text, caret := m.inputWindow(max(0, innerW-2-displayWidth(count)-2))
-		if m.inputSel {
+		switch {
+		case m.inputSel:
 			head += m.styles.sel.Render(text)
-		} else {
+		case m.queryErr != "":
+			head += m.styles.errText.Render(text)
+		default:
 			head += text
 		}
 		m.layout.caretW = caret
@@ -378,14 +393,49 @@ func (m *tuiModel) inputBoxView() string {
 	countW := displayWidth(count)
 	head = truncate(head, max(0, innerW-countW-1))
 	head += strings.Repeat(" ", max(1, innerW-displayWidth(head)-countW)) + m.styles.hint.Render(count)
-	// The find box jumps between matches; the filter box only keeps or closes.
-	footer := "enter keep · ctrl+g next · esc clear"
-	if m.inputMode == inputFilter {
-		footer = "enter keep · esc close"
-	} else if wide := "enter keep · ctrl+g next · ctrl+shift+g prev · esc clear"; displayWidth(wide) <= innerW {
-		footer = wide
+	footer := "enter add pill · esc close"
+	var body []string
+	if m.barSel >= 0 && m.barSel < len(m.pills) {
+		footer = m.pillContextFooter()
 	}
-	return m.modalBox(head, footer, nil, outerW, 0)
+	if m.pickActive() {
+		body = m.pickLines(innerW)
+		footer = "↑↓ move · enter add · esc close"
+	}
+	if m.queryErr != "" {
+		footer = m.styles.errText.Render(m.queryErr + " · esc clears")
+	}
+	return m.modalBox(head, footer, body, outerW, 0)
+}
+
+// pickMaxRows caps the @ picker's list, so the box stays small.
+const pickMaxRows = 8
+
+// pickLines is the @ picker's body: one row per candidate in a window around
+// the selection, the selected one reversed.
+func (m *tuiModel) pickLines(innerW int) []string {
+	ms := m.pickMatches()
+	if len(ms) == 0 {
+		return []string{"  " + m.styles.hint.Render("no saved queries in scope")}
+	}
+	// A reload can shrink the list under the selection; clamp before windowing.
+	m.pickSel = min(m.pickSel, len(ms)-1)
+	start := max(0, min(m.pickSel-pickMaxRows+1, len(ms)-pickMaxRows))
+	shown := ms[start:min(len(ms), start+pickMaxRows)]
+	nameW := 0
+	for _, q := range shown {
+		nameW = max(nameW, displayWidth(q.name))
+	}
+	rows := make([]string, 0, len(shown))
+	for i, q := range shown {
+		plain := "  @" + padRight(q.name, nameW) + " " + q.query
+		if start+i == m.pickSel {
+			rows = append(rows, m.styles.sel.Render(padRight(plain, innerW)))
+			continue
+		}
+		rows = append(rows, "  "+m.styles.chip.Render("@"+padRight(q.name, nameW))+" "+m.styles.hint.Render(q.query))
+	}
+	return rows
 }
 
 // layoutWidths splits the screen between the two columns.
@@ -858,10 +908,6 @@ func (m *tuiModel) rightLines(w int) []string {
 		case markerShown:
 			marker := fmt.Sprintf("↓ %d new", m.pending)
 			out[last] = lipgloss.NewStyle().Width(w).Render(m.markerLine(w, marker, chip))
-		case m.search != "" && m.inputMode == inputNone:
-			out[last] = m.bottomLine(w, m.searchLine(), chip)
-		case m.filterOn():
-			out[last] = m.bottomLine(w, m.filterLine(), chip)
 		case m.now.Before(m.hintUntil):
 			out[last] = m.bottomLine(w, m.hint, chip)
 		case again != "":
@@ -945,16 +991,6 @@ func (m *tuiModel) stateChip() string {
 	return "scrollback · esc live"
 }
 
-// searchLine is the find counter.
-func (m *tuiModel) searchLine() string {
-	return "find " + m.search + " · " + m.searchStatus()
-}
-
-// filterLine is the filtered line count.
-func (m *tuiModel) filterLine() string {
-	return m.filterStatus()
-}
-
 // copyHintActive reports whether the copy feedback still owns the bottom line.
 func (m *tuiModel) copyHintActive() bool {
 	return m.copyHint != "" && m.now.Before(m.copyUntil)
@@ -969,7 +1005,7 @@ func (m *tuiModel) syncContent() {
 		m.vpDirty = true
 	}
 	if m.vpDirty {
-		lines := m.paintLevels(m.sepLines(m.tableLines(m.paneLines())))
+		lines := m.paintPills(m.paintLevels(m.sepLines(m.tableLines(m.paneLines()))))
 		m.paneCol = m.clampPaneCol(lines)
 		content := strings.Join(m.padForPin(m.markLines(m.panLines(lines))), "\n")
 		if len(lines) == 0 {
@@ -986,6 +1022,48 @@ func (m *tuiModel) syncContent() {
 		m.followTail()
 	}
 	m.placeCursor()
+}
+
+// paintPills marks every pill's spans in the pane's raw lines. Table rows
+// reflow the text, so they keep no marks; the hit list still counts them.
+func (m *tuiModel) paintPills(lines []string) []string {
+	if len(m.pills) == 0 || m.tableOn() {
+		return lines
+	}
+	var out []string
+	for row, line := range lines {
+		r := m.rowInfo(row)
+		if r.sub >= 0 || m.visibleSep[r.raw].isSep() {
+			continue
+		}
+		raw := m.visibleRaw[r.raw]
+		spans := m.lineSpans(raw)
+		if len(spans) == 0 {
+			continue
+		}
+		if out == nil {
+			out = append([]string(nil), lines...)
+		}
+		lead := displayWidth(line) - displayWidth(raw)
+		for _, sp := range spans {
+			line = paintCells(line, lead+displayWidth(raw[:sp[0]]), lead+displayWidth(raw[:sp[1]]), m.styles.hit)
+		}
+		out[row] = line
+	}
+	if out == nil {
+		return lines
+	}
+	return out
+}
+
+// paintCells styles the cells [from, to) with st, keeping the rest as it was.
+func paintCells(line string, from, to int, st lipgloss.Style) string {
+	w := displayWidth(line)
+	from, to = max(0, from), min(to, w)
+	if to <= from {
+		return line
+	}
+	return ansi.Cut(line, 0, from) + st.Render(ansi.Cut(line, from, to)) + ansi.Cut(line, to, w)
 }
 
 // clampPaneCol keeps the window where each line still ends inside it, a (+) cell taking markW cells.
@@ -1103,8 +1181,8 @@ var helpShortKeys = [][2]string{
 	{"e", "fs events (last minute)"},
 	{"enter → a f", "pane: → expand · ← collapse · a adds key, f filters value"},
 	{"c", "toggle the columns table"},
-	{"/", "filter the pane; each filter is a chip (leading . is yq)"},
-	{"ctrl+f", "find in the pane (n/N jump)"},
+	{"/ v ctrl+f", "query bar: enter adds a pill (level=error, -skip, .yq)"},
+	{"n/N ctrl+g", "jump between the pills' hits"},
 	{"pgup/pgdn", "scroll the pane; a full page while the pane is focused"},
 	{"ctrl+l", "clear the target's log (old lines stay in scrollback)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
@@ -1123,13 +1201,13 @@ var helpKeys = [][2]string{
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
 	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
 	{"o", "open the target's url"},
-	{"ctrl+f", "find in the pane · ctrl+g / ctrl+shift+g next/prev · n/N"},
+	{"/ v ctrl+f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},
+	{"n/N ctrl+g", "jump pill hits · bar: ←/→ pick, x drop, enter edit, → expands @"},
 	{"ctrl+l", "clear the log; old lines stay in scrollback"},
-	{"/ v", "filter the lines (enter adds a chip; leading . is yq)"},
 	{"c", "toggle the columns table"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u/ctrl+d); a full page in focus"},
 	{"enter → a f", "pane: expand/collapse the line · a add key, f filter value"},
-	{"backspace ×", "pane: last chip · bar: ←/→ picks, backspace drops · click ×"},
+	{"backspace ×", "pane: last pill · bar: ←/→ picks, backspace drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }

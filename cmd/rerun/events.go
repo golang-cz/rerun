@@ -95,6 +95,8 @@ type configChange struct {
 	stopped []bool
 	// missing is the optional imports whose file is absent, shown as dim rows.
 	missing []missingImport
+	// queries are the reloaded config's global saved queries.
+	queries map[string]string
 }
 
 // sink is the front-end a target runner writes its events to.

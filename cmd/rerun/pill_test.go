@@ -205,8 +205,11 @@ func TestPillSpans(t *testing.T) {
 		{"contains highlights raw", "msg~refused", `{"msg":"connection refused"}`, [][2]int{{19, 26}}},
 		{"regex spans", `msg~/time(out|d out)/`, `{"msg":"timed out"}`, [][2]int{{8, 17}}},
 		{"negated has no spans", "-healthz", "GET /healthz", nil},
-		{"exists has no spans", "trace_id=*", `{"trace_id":"abc"}`, nil},
-		{"numeric has no spans", "http.status>=400", `{"http":{"status":500}}`, nil},
+		{"exists highlights value", "trace_id=*", `{"trace_id":"abc"}`, [][2]int{{13, 16}}},
+		{"numeric highlights value", "http.status>=400", `{"http":{"status":500}}`, [][2]int{{18, 21}}},
+		{"numeric miss has no spans", "http.status>=400", `{"http":{"status":200}}`, nil},
+		{"ne highlights value", "level!=debug", `{"level":"error"}`, [][2]int{{10, 15}}},
+		{"ne match has no spans", "level!=debug", `{"level":"debug"}`, nil},
 	}
 	for _, tt := range tests {
 		pills := mustPills(t, tt.input, nil)

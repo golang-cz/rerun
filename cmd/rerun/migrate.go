@@ -58,7 +58,7 @@ func migrateConfig(path string) (migrateStatus, error) {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key, value := root.Content[i], root.Content[i+1]
 		switch key.Value {
-		case importsKey, groupsBlock.block, schemasBlock.block:
+		case importsKey, groupsBlock.block, schemasBlock.block, queriesKey:
 			rebuilt.Content = append(rebuilt.Content, key, value)
 			continue
 		}

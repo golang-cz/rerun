@@ -4,12 +4,22 @@ import (
 	"container/list"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
+)
+
+// pillKind is a pill's mode: filter hides non-matching lines, highlight keeps
+// every line and only marks hits.
+type pillKind int
+
+const (
+	pillFilter pillKind = iota
+	pillHighlight
 )
 
 // pillOp is the comparison a pill applies; pillOpText and pillOpYq carry no field.
@@ -34,6 +44,7 @@ const (
 // saved-query reference resolved later.
 type pill struct {
 	raw      string
+	kind     pillKind
 	neg      bool
 	field    string
 	op       pillOp
@@ -44,6 +55,9 @@ type pill struct {
 	re       *regexp.Regexp
 	yq       *yqlib.ExpressionNode
 	saved    string
+	sub      []pill // a saved query's parsed pills, resolved when the pill is added
+	// null marks a clicked null literal: it matches a JSON null, never the string "null".
+	null bool
 }
 
 // pillToken is one whitespace-delimited term and where it starts in the input.
@@ -250,6 +264,11 @@ func (p *pill) parseField(field, opStr, valStr, raw string, cols []Column) (pill
 			}
 			return *p, nil
 		}
+		if opStr == "=" && valStr == "null" {
+			// A bare null is the JSON literal; the string "null" needs quotes.
+			p.op, p.null = pillOpEq, true
+			return *p, nil
+		}
 		p.values = scanValues(valStr)
 		if len(p.values) == 1 && p.values[0] == "" {
 			return *p, fmt.Errorf("%s: missing value", raw)
@@ -435,7 +454,12 @@ func (p *pill) finalize() {
 }
 
 // needsJSON reports whether the pill reads the decoded document.
-func (p pill) needsJSON() bool { return p.saved == "" && p.op != pillOpText }
+func (p pill) needsJSON() bool {
+	if p.saved != "" {
+		return slices.ContainsFunc(p.sub, func(s pill) bool { return s.needsJSON() })
+	}
+	return p.op != pillOpText
+}
 
 // match reports whether the pill keeps the line; a negated JSON pill still
 // drops a non-JSON line.
@@ -449,9 +473,16 @@ func (p pill) match(line string) bool {
 // matchRoot evaluates the pill against an already-decoded line; root is nil
 // for a non-JSON line.
 func (p pill) matchRoot(root *yqlib.CandidateNode, line string) bool {
-	// Saved queries resolve in a later step; unresolved ones filter nothing.
+	// A saved query ANDs its pills, negated as a whole; an unresolved one filters nothing.
 	if p.saved != "" {
-		return true
+		ok := true
+		for _, s := range p.sub {
+			if !s.matchRoot(root, line) {
+				ok = false
+				break
+			}
+		}
+		return ok != p.neg
 	}
 	if p.op == pillOpText {
 		return strings.Contains(strings.ToLower(line), p.lowers[0]) != p.neg
@@ -468,6 +499,12 @@ func (p pill) matchDoc(root *yqlib.CandidateNode) bool {
 			if yqTruthy(n) {
 				return true
 			}
+		}
+		return false
+	}
+	if p.null {
+		if n := firstNode(p.yq, root); n != nil {
+			return n.Tag == "!!null"
 		}
 		return false
 	}
@@ -520,17 +557,56 @@ func (p pill) anyEqual(node *yqlib.CandidateNode) bool {
 
 // spans returns byte ranges to highlight in the raw line.
 func (p pill) spans(line string) [][2]int {
-	if p.neg || p.saved != "" {
+	var root *yqlib.CandidateNode
+	if p.needsJSON() {
+		root = decodeJSONLine(line)
+	}
+	return p.spansRoot(root, line)
+}
+
+// spansRoot is spans with the line's decode shared across a pill set.
+func (p pill) spansRoot(root *yqlib.CandidateNode, line string) [][2]int {
+	if p.neg {
 		return nil
+	}
+	if p.saved != "" {
+		var out [][2]int
+		for _, s := range p.sub {
+			out = append(out, s.spansRoot(root, line)...)
+		}
+		return out
 	}
 	if p.op == pillOpText {
 		return foldSpans(line, p.lowRunes)
 	}
 	switch p.op {
-	case pillOpContains, pillOpRegex, pillOpEq:
-		return p.docSpans(decodeJSONLine(line), line)
+	case pillOpContains, pillOpRegex:
+		return p.docSpans(root, line)
+	case pillOpEq, pillOpNe, pillOpGt, pillOpGe, pillOpLt, pillOpLe, pillOpExists:
+		return p.valueSpan(root, line)
 	}
 	return nil
+}
+
+// valueSpan highlights the field's value for every comparison op, so a
+// numeric or exists pill still marks what it matched.
+func (p pill) valueSpan(root *yqlib.CandidateNode, line string) [][2]int {
+	if root == nil || !p.matchDoc(root) {
+		return nil
+	}
+	node := firstValue(p.yq, root)
+	if p.null {
+		// A null pill's node is the null literal itself, which firstValue skips.
+		node = firstNode(p.yq, root)
+	}
+	if node == nil {
+		return nil
+	}
+	start, end, ok := valueOffset(line, p.field, node)
+	if !ok {
+		return nil
+	}
+	return [][2]int{{start, end}}
 }
 
 // docSpans highlights only the field's value occurrence in the raw line, never
@@ -544,15 +620,11 @@ func (p pill) docSpans(root *yqlib.CandidateNode, line string) [][2]int {
 	if node == nil {
 		return nil
 	}
-	start, ok := valueOffset(line, p.field, node)
+	start, _, ok := valueOffset(line, p.field, node)
 	if !ok {
 		return nil
 	}
 	switch p.op {
-	case pillOpEq:
-		if p.anyEqual(node) {
-			return [][2]int{{start, start + len(node.Value)}}
-		}
 	case pillOpContains:
 		var out [][2]int
 		for _, sp := range foldSpans(node.Value, p.lowRunes) {
@@ -569,29 +641,31 @@ func (p pill) docSpans(root *yqlib.CandidateNode, line string) [][2]int {
 	return nil
 }
 
-// valueOffset locates the field's value in the raw line: the key-value pair
-// first, then the quoted value, then the bare scalar.
-func valueOffset(line, field string, node *yqlib.CandidateNode) (int, bool) {
+// valueOffset locates the field's value in the raw line, start inclusive and
+// end exclusive: the key-value pair first, then the quoted value, then the
+// bare scalar. The raw line escapes a string, so the search uses its JSON
+// form and the span covers the escaped bytes.
+func valueOffset(line, field string, node *yqlib.CandidateNode) (int, int, bool) {
 	v := node.Value
 	if v == "" {
-		return 0, false
+		return 0, 0, false
 	}
 	if node.Tag == "!!str" {
-		quoted := `"` + v + `"`
+		quoted := strconv.Quote(v)
 		for _, kv := range []string{`"` + lastKey(field) + `":` + quoted, `"` + lastKey(field) + `": ` + quoted} {
 			if i := strings.Index(line, kv); i >= 0 {
-				return i + len(kv) - len(v) - 1, true // kv ends with the value's closing quote
+				return i + len(kv) - len(quoted) + 1, i + len(kv) - 1, true
 			}
 		}
 		if i := strings.Index(line, quoted); i >= 0 {
-			return i + 1, true
+			return i + 1, i + len(quoted) - 1, true
 		}
-		return 0, false
+		return 0, 0, false
 	}
 	if i := strings.Index(line, v); i >= 0 {
-		return i, true
+		return i, i + len(v), true
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 // lastKey is a field path's final segment, unquoting a yq-quoted key.
@@ -614,11 +688,16 @@ func compilePills(input string, cols []Column) (pillSet, error) {
 	if err != nil {
 		return pillSet{}, err
 	}
+	return pillSetOf(pills), nil
+}
+
+// pillSetOf wraps already-parsed pills with the precomputed decode flag.
+func pillSetOf(pills []pill) pillSet {
 	s := pillSet{pills: pills}
 	for _, p := range pills {
 		s.json = s.json || p.needsJSON()
 	}
-	return s, nil
+	return s
 }
 
 func (s pillSet) match(line string) bool {
@@ -672,6 +751,16 @@ func firstValue(expr *yqlib.ExpressionNode, root *yqlib.CandidateNode) *yqlib.Ca
 	return nil
 }
 
+// firstNode returns the field's first node, null included; a null pill needs it.
+func firstNode(expr *yqlib.ExpressionNode, root *yqlib.CandidateNode) *yqlib.CandidateNode {
+	for _, n := range evalNodes(expr, root) {
+		if n != nil {
+			return n
+		}
+	}
+	return nil
+}
+
 func numericValue(node *yqlib.CandidateNode) (float64, bool) {
 	if node == nil || node.Kind != yqlib.ScalarNode {
 		return 0, false
@@ -681,6 +770,24 @@ func numericValue(node *yqlib.CandidateNode) (float64, bool) {
 	}
 	f, err := strconv.ParseFloat(node.Value, 64)
 	return f, err == nil
+}
+
+// mergeSpans sorts spans and folds overlaps, so painting never styles a cell twice.
+func mergeSpans(spans [][2]int) [][2]int {
+	if len(spans) == 0 {
+		return nil
+	}
+	slices.SortFunc(spans, func(a, b [2]int) int { return a[0] - b[0] })
+	out := spans[:1]
+	for _, sp := range spans[1:] {
+		last := &out[len(out)-1]
+		if sp[0] <= last[1] {
+			last[1] = max(last[1], sp[1])
+			continue
+		}
+		out = append(out, sp)
+	}
+	return out
 }
 
 // foldSpans finds every case-insensitive occurrence of low (the needle's

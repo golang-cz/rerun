@@ -344,7 +344,7 @@ func TestReconcileHoldsANewTargetWhileSoloed(t *testing.T) {
 	g.setSoloGuard(true)
 	t.Cleanup(g.cancel)
 
-	g.applyConfig([]Target{recTarget("web", "web"), recTarget("api", "api")})
+	g.applyConfig([]Target{recTarget("web", "web"), recTarget("api", "api")}, nil)
 
 	var cfg *configChange
 	for _, ev := range sink.all() {
@@ -369,14 +369,14 @@ func TestApplyConfigHandsTheRunnerItsNewSpec(t *testing.T) {
 	g := newTargetGroup([]Target{recTarget("web", "web"), recTarget("api", "api")}, &recordingSink{}, "")
 
 	cmdChanged := []Target{recTarget("web", "web-v2"), recTarget("api", "api")}
-	g.applyConfig(cmdChanged)
+	g.applyConfig(cmdChanged, nil)
 	if c := nextCtrl(t, g.runners[0]); c.kind != ctrlSpec || c.target == nil || c.target.Cmd != "web-v2" {
 		t.Fatalf("control = %+v, want a ctrlSpec carrying the new cmd", c)
 	}
 
 	watchChanged := []Target{recTarget("web", "web-v2"), recTarget("api", "api")}
 	watchChanged[0].On = []string{"pkg"}
-	g.applyConfig(watchChanged)
+	g.applyConfig(watchChanged, nil)
 	if c := nextCtrl(t, g.runners[0]); c.kind != ctrlRewatch || c.target == nil || c.target.On[0] != "pkg" {
 		t.Fatalf("control = %+v, want a ctrlRewatch carrying the new roots", c)
 	}
@@ -787,5 +787,57 @@ func TestRestoredConfigClearsTheErrorModal(t *testing.T) {
 	m.applyEvents(sink.all()[len(sink.all())-1:])
 	if m.cfgErr != "" {
 		t.Fatal("restoring the same content left the modal open")
+	}
+}
+
+// A queries-only edit reconciles too: the TUI's @ list must not go stale, and
+// the runners stay untouched.
+func TestReloadQueriesOnlyEmitsReconcile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	save := func(yml string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("queries:\n  errors: err\nweb:\n  on: src\n  cmd: sleep 30\n")
+	sink := &recordingSink{}
+	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
+	t.Cleanup(group.cancel)
+	group.queries = map[string]string{"errors": "err"} // the startup load's set
+
+	save("queries:\n  errors: timeout\nweb:\n  on: src\n  cmd: sleep 30\n")
+	group.reload(path)
+
+	reconciles := 0
+	var change *configChange
+	for i, ev := range sink.all() {
+		if ev.kind == evReconcile {
+			reconciles++
+			change = sink.all()[i].cfg
+		}
+	}
+	if reconciles != 1 || change == nil {
+		t.Fatalf("reconciles = %d, want the queries-only reload to emit one", reconciles)
+	}
+	if got := change.queries["errors"]; got != "timeout" {
+		t.Fatalf("queries = %v, want the reloaded set", change.queries)
+	}
+	select {
+	case c := <-group.runners[0].ctrlCh:
+		t.Fatalf("a queries-only reload sent the runner %+v", c)
+	default:
+	}
+
+	// Nothing changed: the same reload is a no-op.
+	group.reload(path)
+	reconciles = 0
+	for _, ev := range sink.all() {
+		if ev.kind == evReconcile {
+			reconciles++
+		}
+	}
+	if reconciles != 1 {
+		t.Fatalf("reconciles = %d after a no-op reload, want still 1", reconciles)
 	}
 }

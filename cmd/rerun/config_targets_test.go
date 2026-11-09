@@ -312,3 +312,33 @@ func TestMigrateFollowsASymlink(t *testing.T) {
 		t.Errorf("target of the symlink was not migrated:\n%s", got)
 	}
 }
+
+// A legacy top-level queries: block stays at the top level through -migrate.
+func TestMigrateKeepsTopLevelQueries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "queries:\n  errors: level=error\n\nweb:\n  cmd: sleep 1\n")
+
+	status, err := migrateConfig(path)
+	if err != nil {
+		t.Fatalf("migrateConfig: %v", err)
+	}
+	if status != migrated {
+		t.Fatalf("status = %v, want migrated", status)
+	}
+	text := readConfigText(t, path)
+	queriesAt := strings.Index(text, "queries:")
+	targetsAt := strings.Index(text, "targets:")
+	if queriesAt < 0 || targetsAt < 0 || queriesAt > targetsAt {
+		t.Fatalf("queries: must stay at the top level, before targets:\n%s", text)
+	}
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig after migrate: %v", err)
+	}
+	if got := cfg.Queries["errors"]; got != "level=error" {
+		t.Fatalf("queries = %v after migrate, want errors kept", cfg.Queries)
+	}
+	if len(cfg.Targets) != 1 || cfg.Targets[0].Name != "web" {
+		t.Fatalf("targets = %+v, want only web", cfg.Targets)
+	}
+}

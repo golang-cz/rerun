@@ -2,7 +2,6 @@ package main
 
 import (
 	"time"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -133,7 +132,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
 	// into the query instead of running their commands.
 	if m.inputMode != inputNone {
-		return m.handleInputKey(msg)
+		return m.handleBarKey(msg)
 	}
 	m.dismissErrorNotice()
 
@@ -170,14 +169,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// The bar owns its arrows, backspace and esc; any other key blurs it first.
-	if m.barFocus {
-		if m.handleBarNav(msg) {
-			return m, nil
-		}
-		m.blurBar()
-	}
-
 	switch msg.String() {
 	case "ctrl+c":
 		m.confirmQuit = true
@@ -189,11 +180,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 		m.helpAll = false
 
-	case "/", "v":
-		m.openBar(inputFilter)
-
-	case "ctrl+f":
-		m.openBar(inputSearch)
+	case "/", "v", "ctrl+f":
+		m.openBar()
 
 	case "ctrl+g":
 		m.searchJump(1)
@@ -235,8 +223,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			before := m.scopeState()
 			m.escList()
-			if m.scopeState() == before && len(m.barChips()) > 0 {
-				m.showHint("filters stay · backspace removes the last · click × to remove")
+			if m.scopeState() == before && len(m.pills) > 0 {
+				m.showHint("pills stay · backspace removes the last · click × to remove")
 			}
 		}
 
@@ -319,8 +307,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "backspace":
-		if chips := m.barChips(); m.paneFocus && len(chips) > 0 {
-			m.removeBarChip(chips[len(chips)-1])
+		if m.paneFocus && len(m.pills) > 0 {
+			m.removePill(len(m.pills) - 1)
 		}
 
 	case "ctrl+s":
@@ -387,141 +375,6 @@ func (m *tuiModel) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		m.inputInsert(msg.Content)
 	}
 	return m, nil
-}
-
-// handleInputKey routes keys into the bar's open input; only Ctrl-C escapes it.
-func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-	// String() prefers Text, which drops the alt modifier that select-all rides on.
-	if msg.Mod.Contains(tea.ModAlt) && msg.Text != "" {
-		key = msg.Keystroke()
-	}
-	switch key {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "esc", "ctrl+[":
-		// Find drops the query; a line filter keeps its typed chip, as before.
-		if m.inputMode == inputSearch {
-			m.clearSearch()
-		}
-		m.leaveInput()
-	case "ctrl+g":
-		m.inputSel = false
-		m.searchJump(1)
-	// Mirror ctrl+g: the enhanced decoder keeps the shift distinct.
-	case "ctrl+shift+g":
-		m.inputSel = false
-		m.searchJump(-1)
-	case "enter", "ctrl+m":
-		if m.inputMode == inputFilter && m.filterErr != "" {
-			return m, nil
-		}
-		m.leaveInput()
-	case "left":
-		// An empty input hands the arrows to the chips, so they can be picked.
-		if chips := m.barChips(); m.input == "" && len(chips) > 0 {
-			m.inputMode = inputNone
-			m.barSel = len(chips) - 1
-			break
-		}
-		m.inputMoveRune(-1)
-	case "right":
-		m.inputMoveRune(1)
-	case "alt+left", "alt+b":
-		m.inputMoveWord(-1)
-	case "alt+right", "alt+f":
-		m.inputMoveWord(1)
-	case "home", "ctrl+a":
-		m.inputMoveTo(0)
-	case "end", "ctrl+e":
-		m.inputMoveTo(len([]rune(m.input)))
-	case "alt+i":
-		m.inputSelectAll()
-	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
-	case "backspace", "ctrl+h":
-		if m.inputSel || m.input != "" {
-			m.inputDeleteBefore()
-			break
-		}
-		if chips := m.barChips(); len(chips) > 0 {
-			m.removeBarChip(chips[len(chips)-1])
-		}
-	case "delete", "ctrl+d":
-		m.inputDeleteAfter()
-	case "ctrl+w", "alt+backspace":
-		m.inputDeleteWordBefore()
-	case "ctrl+u":
-		m.inputDeleteToStart()
-	default:
-		if msg.Text != "" {
-			m.inputInsert(msg.Text)
-			break
-		}
-		// v1 handed an alt combo over as key runes, so a printable one typed its letter.
-		if msg.Mod.Contains(tea.ModAlt) && unicode.IsPrint(msg.Code) {
-			m.inputInsert(string(msg.Code))
-		}
-	}
-	return m, nil
-}
-
-// openInput shows the bar's input; find starts from its query, a text filter empty.
-func (m *tuiModel) openInput(mode int) {
-	m.inputMode = mode
-	m.filterErr = ""
-	m.draft = nil
-	m.inputSel = false
-	if mode == inputFilter {
-		m.input = ""
-		m.inputCursor = 0
-		return
-	}
-	m.input = m.search
-	m.inputCursor = len([]rune(m.input))
-}
-
-// inputChanged previews the typed text live; a yq query that does not parse is left out.
-func (m *tuiModel) inputChanged() {
-	if m.inputMode == inputFilter {
-		m.draft, m.filterErr = nil, ""
-		if m.input != "" {
-			keep, err := compileFilter(m.input)
-			if err != nil {
-				m.filterErr = err.Error()
-			} else {
-				m.draft = keep
-			}
-		}
-		m.chipsChanged()
-		return
-	}
-	m.search = m.input
-	m.recomputeSearch(true)
-}
-
-// leaveInput turns the typed text into a chip and blurs the bar; empty adds nothing.
-func (m *tuiModel) leaveInput() {
-	if m.inputMode == inputFilter && m.draft != nil && !m.hasFilter(m.input) {
-		m.filters = append(m.filters, textFilter{query: m.input, keep: m.draft})
-	}
-	m.inputMode = inputNone
-	m.input = ""
-	m.inputCursor = 0
-	m.inputSel = false
-	m.draft = nil
-	m.filterErr = ""
-	m.blurBar()
-	m.chipsChanged()
-}
-
-// hasFilter reports whether a text filter with this query is already a chip.
-func (m *tuiModel) hasFilter(query string) bool {
-	for _, f := range m.filters {
-		if f.query == query {
-			return true
-		}
-	}
-	return false
 }
 
 // stepSelection is one ↑/↓ step, routed to the focused pane.

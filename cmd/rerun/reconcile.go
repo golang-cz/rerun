@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -342,7 +343,7 @@ func (g *targetGroup) reload(path string) *Config {
 	g.mu.Lock()
 	g.missing = cfg.Missing
 	g.mu.Unlock()
-	g.applyConfig(cfg.Targets)
+	g.applyConfig(cfg.Targets, cfg.Queries)
 	return cfg
 }
 
@@ -351,9 +352,34 @@ func (g *targetGroup) reload(path string) *Config {
 // and a changed watch set rebuilds that target's watcher alone. It reports the
 // delta as one banner line through the sink. A list identical to the running
 // one is a no-op.
-func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
+func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) []reconcileAction {
 	old := g.snapshotTargets()
 	if reflect.DeepEqual(old, targets) {
+		// Only the saved queries changed: adopt them without touching a runner.
+		g.mu.Lock()
+		if g.closing || reflect.DeepEqual(g.queries, queries) {
+			g.mu.Unlock()
+			return nil
+		}
+		g.queries = maps.Clone(queries)
+		runners := append([]*targetRunner(nil), g.runners...)
+		missing := g.missing
+		g.mu.Unlock()
+		stopped := make([]bool, len(runners))
+		for i, r := range runners {
+			stopped[i] = r.userStopped()
+		}
+		g.sink.emit(event{
+			kind: evReconcile,
+			at:   time.Now(),
+			cfg: &configChange{
+				targets: old,
+				runners: runners,
+				stopped: stopped,
+				missing: missing,
+				queries: queries,
+			},
+		})
 		return nil
 	}
 	actions := diffTargets(old, targets)
@@ -425,6 +451,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 
 	g.targets = fresh
 	g.runners = runners
+	g.queries = maps.Clone(queries)
 	missing := g.missing
 	g.mu.Unlock()
 
@@ -438,6 +465,7 @@ func (g *targetGroup) applyConfig(targets []Target) []reconcileAction {
 			runners: runners,
 			stopped: stopped,
 			missing: missing,
+			queries: queries,
 		},
 	})
 

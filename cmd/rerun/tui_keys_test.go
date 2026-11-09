@@ -22,25 +22,17 @@ func TestMovingOntoAMutedTargetKeepsItMuted(t *testing.T) {
 	}
 }
 
-func TestSlashOpensTheLineFilter(t *testing.T) {
+func TestSlashOpensTheQueryBar(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	press(m, "/")
-	if m.inputMode != inputFilter {
-		t.Fatalf("inputMode = %d, want the filter bar", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("inputMode = %d, want the query bar", m.inputMode)
 	}
 	press(m, "esc")
 
 	press(m, "v")
-	if m.inputMode != inputFilter {
-		t.Fatalf("v inputMode = %d, want the filter bar", m.inputMode)
-	}
-}
-
-func TestCtrlFOpensSearch(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	press(m, "ctrl+f")
-	if m.inputMode != inputSearch {
-		t.Fatalf("inputMode = %d, want the search bar", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("v inputMode = %d, want the query bar", m.inputMode)
 	}
 }
 
@@ -51,28 +43,23 @@ func TestFindAndFilterKeysWorkFromEveryFocus(t *testing.T) {
 		"pane": func() { m.paneFocus = true },
 	}
 	for name, focus := range focuses {
-		focus()
-		press(m, "/")
-		if m.inputMode != inputFilter {
-			t.Fatalf("%s: / inputMode = %d, want the filter bar", name, m.inputMode)
+		for _, key := range []string{"/", "ctrl+f"} {
+			focus()
+			press(m, key)
+			if m.inputMode != inputQuery {
+				t.Fatalf("%s: %s inputMode = %d, want the query bar", name, key, m.inputMode)
+			}
+			press(m, "esc")
+			m.paneFocus = false
 		}
-		press(m, "esc")
-
-		focus()
-		press(m, "ctrl+f")
-		if m.inputMode != inputSearch {
-			t.Fatalf("%s: ctrl+f inputMode = %d, want the search bar", name, m.inputMode)
-		}
-		press(m, "esc")
-		m.paneFocus = false
 	}
 }
 
 func TestSlashInAnOpenBarTypesIt(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	press(m, "/", "/")
-	if m.inputMode != inputFilter || m.input != "/" {
-		t.Fatalf("inputMode = %d input = %q, want / typed into the filter bar", m.inputMode, m.input)
+	if m.inputMode != inputQuery || m.input != "/" {
+		t.Fatalf("inputMode = %d input = %q, want / typed into the query bar", m.inputMode, m.input)
 	}
 }
 
@@ -80,8 +67,8 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 100, 40
 	press(m, "?")
-	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "filter") {
-		t.Errorf("short help should name ctrl+f and the filter:\n%s", view)
+	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "pill") {
+		t.Errorf("short help should name ctrl+f and the pills:\n%s", view)
 	}
 	press(m, "?")
 	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ v") {
@@ -143,7 +130,7 @@ func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
 		t.Fatal("tab moved focus")
 	}
 
-	// esc clears and closes the find box; ctrl+[ is the same key enhanced.
+	// esc closes the box and keeps the typed pill; ctrl+[ is the same key enhanced.
 	openSearch := func() *tuiModel {
 		box := newTestModel(t, target("web"))
 		box.applyEvents(streamEvents("web", "line", 10).events)
@@ -154,25 +141,25 @@ func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
 	}
 	m = openSearch()
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.inputMode != inputNone || m.search != "" {
-		t.Fatalf("enhanced esc: mode=%d search=%q, want cleared and closed", m.inputMode, m.search)
+	if m.inputMode != inputNone || len(m.pills) != 1 {
+		t.Fatalf("enhanced esc: mode=%d pills=%v, want the pill kept and the box closed", m.inputMode, m.pills)
 	}
 	m = openSearch()
 	press(m, "ctrl+[")
-	if m.inputMode != inputNone || m.search != "" {
-		t.Fatalf("enhanced ctrl+[: mode=%d search=%q, want cleared and closed", m.inputMode, m.search)
+	if m.inputMode != inputNone || len(m.pills) != 1 {
+		t.Fatalf("enhanced ctrl+[: mode=%d pills=%v, want the pill kept and the box closed", m.inputMode, m.pills)
 	}
 
-	// enter keeps the query and its highlights; ctrl+m is the same key enhanced.
+	// enter keeps the pill and its hits; ctrl+m is the same key enhanced.
 	m = openSearch()
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.inputMode != inputNone || m.search != "line" || len(m.searchMatches) == 0 {
-		t.Fatalf("enhanced enter: mode=%d search=%q, want the box closed with the query kept", m.inputMode, m.search)
+	if m.inputMode != inputNone || len(m.pills) != 1 || m.pills[0].raw != "line" || len(m.searchMatches) == 0 {
+		t.Fatalf("enhanced enter: mode=%d pills=%v, want the box closed with the pill kept", m.inputMode, m.pills)
 	}
 	m = openSearch()
 	press(m, "ctrl+m")
-	if m.inputMode != inputNone || m.search != "line" || len(m.searchMatches) == 0 {
-		t.Fatalf("enhanced ctrl+m: mode=%d search=%q, want the box closed with the query kept", m.inputMode, m.search)
+	if m.inputMode != inputNone || len(m.pills) != 1 || m.pills[0].raw != "line" || len(m.searchMatches) == 0 {
+		t.Fatalf("enhanced ctrl+m: mode=%d pills=%v, want the box closed with the pill kept", m.inputMode, m.pills)
 	}
 }
 

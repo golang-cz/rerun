@@ -34,26 +34,53 @@ live tail; `esc` goes back to the live tail first, then backs out of the list), 
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
-`/` or `v` filters the pane (each filter is a chip; a leading `.` runs a yq expression per JSON line);
-`ctrl+f` finds in it (`n`/`N` step matches); `esc` never clears filters or find, `backspace` removes the last chip; `c` toggles the columns
+`/`, `v` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
+`esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; `c` toggles the columns
 table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 
-More keys: `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous find match, and `ctrl+l` clears the log (older lines stay in scrollback).
+More keys: `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback).
+
+The query bar's pills AND together, and one input can hold several: `level=error -healthz` adds two on `enter`.
+Each pill is a filter (`[text]`, solid) or a highlight (`⟨text⟩`, dim): a filter pill hides non-matching lines, a
+highlight pill only marks its hits. Every pill's matches are marked in the pane, and `n`/`N`/`ctrl+g`/`ctrl+shift+g`
+jump between the hit lines. With the bar open and the input empty or the cursor at 0, `←`/`→` walk the pills: `x` or
+`backspace` removes the selected one, `enter` moves its text back into the input, `space` toggles filter ⇄ highlight,
+and `→` on a `[@name]` pill expands it into its pills. A pill that does not parse keeps the input red, with the error
+in the footer. The bar names the scope, the pill count and the matching/total lines. Typing `@` lists the pane scope's
+saved queries (see `queries:` below).
+
+| Pill | Meaning |
+|---|---|
+| `timeout` | full text, case-insensitive substring of the raw line |
+| `"connection refused"` | full-text phrase (quotes allow spaces) |
+| `-healthz` | negated full text |
+| `level=error` | field equals, case-insensitive for strings, numeric compare for numbers |
+| `level=error\|fatal` | field equals any of a `\|` list |
+| `level!=debug` | field not equal (any of a `\|` list) |
+| `http.status>=400` | `>` `>=` `<` `<=` numeric |
+| `msg~refused` | field contains, case-insensitive |
+| `msg~/time(out\|d out)/` | field matches regex (Go RE2); `msg=~re` accepted as alias |
+| `trace_id=*` / `trace_id!=*` | field exists / missing |
+| `.expr` | raw yq, a truthy result keeps the line |
+
+A field name is a yq path without the leading dot (`http.status` ≡ `.http.status`); a column name from the scope's
+`columns:` resolves to that column's expression first. A field pill never matches a non-JSON line; full-text pills
+match any line.
 
 Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or press
 `enter` with the pane focused (it acts on the cursor line, which starts on the newest
 line), to show the pretty-printed object; `(−)` collapses it. Moving the cursor off the
 newest line pauses the tail. Expanded keys are underlined and values tinted. With the
-cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `.path == value`
-chip. In an expanded block, click a key to add it as a column of the
+cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `path=value`
+pill. In an expanded block, click a key to add it as a column of the
 selection: the selected schema, else the target the pane shows, else a hint says to select one.
 Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
 becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click the icon or
 `+N more`, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
 pane cuts it short.
-Click a scalar value to add a `.path == value` chip to the pane header. Chips AND together
-with `v`; click a chip's `×`, or press `backspace` with the pane focused, to remove one.
+Click a scalar value to add a `path=value` pill to the pane header. Pills AND together;
+click a pill's `×`, or press `backspace` with the pane focused, to remove one.
 Click the `×` after a column name in the table header to remove that column; a click on
 the name does nothing. Column picks are unsaved until `ctrl+s` writes them to rerun.yml;
 the footer reads `unsaved columns · ctrl+s save` until then, and a schema or target with
@@ -159,6 +186,7 @@ Each top-level key is one target. Fields:
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
 | `url` | url to open for the target (`o`, and `open: true` at startup) |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
+| `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
 | `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
 | `hide` | start the stream muted, like `muted`; a group's `hide` also starts its header folded. Own `muted` wins over `hide`, and `muted: false` overrides both. `hide: false` overrides a group's `hide: true` |
@@ -186,7 +214,7 @@ targets:
     on: [cmd, internal]
 ```
 
-- The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:` and `targets:`. Any other top-level key is an error, so a typo surfaces.
+- The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:`, `targets:` and `queries:`. Any other top-level key is an error, so a typo surfaces.
 - A file without a `targets:` key is read the old way, with its targets at the top level. rerun shows one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
 - `rerun -migrate` rewrites the nearest rerun.yml in place, so its targets move under `targets:`. It keeps comments and key order, and drops blank lines.
 - A target under `targets:` may be called `imports` or `groups`, because it no longer collides with those reserved top-level keys.
@@ -208,12 +236,37 @@ targets:
     cmd: make -C apps/api run
 ```
 
-A target's own `columns` wins over its group's. A group's `start:` sets the
+A target's own `columns` wins over its group's. A group's `queries:` pass their saved
+queries to the members, and a target's own entry wins a name clash. A group's `start:` sets the
 first run for its members, and a target's own `start:` wins. A `group:` that names no
 group is a config error. A group's `muted: true` starts its members muted, and a
 target's own `muted: false` overrides it. A group's `hide: true` mutes its members the same way and starts the group's header folded. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
+
+#### Saved queries
+
+The reserved `queries:` key maps a name to a pill string at the top level, per group, and per target:
+
+```yaml
+queries:
+  errors: level=error|fatal
+
+groups:
+  api:
+    queries:
+      4xx: http.status>=400 http.status<500
+
+targets:
+  web:
+    run: pnpm run dev
+    queries:
+      slow: http.duration_ms>500 -healthz
+```
+
+In the query bar, `@` lists the pane scope's saved queries: the scope's targets, their groups, then the global
+ones; a name clash keeps the most specific. Choosing one adds a `[@name]` pill that matches as its parsed pills.
+A bad pill string is a config error naming the file, the key and the pill.
 
 #### Imports
 

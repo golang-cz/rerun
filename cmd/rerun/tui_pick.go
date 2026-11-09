@@ -1,13 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
 // selectHint is the footer hint when a column pick has no node to write to.
@@ -25,14 +24,7 @@ const columnMarkW = 2
 // savedNoticeHold is how long the saved notice holds against a config reload notice.
 const savedNoticeHold = 2 * time.Second
 
-// pickChip is a value filter clicked into the pane: its yq expression and the
-// compiled program.
-type pickChip struct {
-	expr string
-	prog *yqlib.ExpressionNode
-}
-
-// chipHit is a chip's × cell in the header row, and the chip it removes.
+// chipHit is a pill's × cell in the header row, and the pill it removes.
 type chipHit struct{ x, idx int }
 
 // colNode is what column picks write to: a schema, or a target by name.
@@ -189,36 +181,60 @@ func (m *tuiModel) removeColumn(j int) {
 	m.setEdit(node, slices.Delete(slices.Clone(cols), j, j+1))
 }
 
-// pickValue adds a clicked scalar as a filter chip: `.path == literal`.
+// pickValue adds a clicked scalar as a filter pill: `path=value`. The JSON
+// literal is decoded first, then re-encoded canonically, so editing the pill
+// reparses to the same value; null matches a JSON null, never the string
+// "null".
 func (m *tuiModel) pickValue(f *jsonField) {
-	expr := f.path + " == " + f.lit
-	for _, c := range m.chips {
-		if c.expr == expr {
+	path := strings.TrimPrefix(f.path, ".")
+	var val any
+	if err := json.Unmarshal([]byte(f.lit), &val); err == nil {
+		switch v := val.(type) {
+		case string:
+			raw := path + "=" + pillQuote(v)
+			m.addValuePill(raw, path, func(p *pill) {
+				p.op, p.values = pillOpEq, []string{v}
+			})
+			return
+		case nil:
+			// The op only marks the pill as JSON-reading; matchDoc reads null first.
+			m.addValuePill(path+"=null", path, func(p *pill) { p.op, p.null = pillOpEq, true })
 			return
 		}
 	}
-	prog, err := yqParse(expr)
+	raw := path + "=" + f.lit
+	pills, err := parsePills(raw, m.barCols())
+	if err != nil || len(pills) != 1 {
+		m.showHint("cannot filter on " + f.path + " == " + f.lit)
+		return
+	}
+	m.addValuePill(raw, path, func(p *pill) { *p = pills[0] })
+}
+
+// pillQuote encodes a decoded string as a quoted pill value that reparses to
+// itself: only \" and \\ escape inside pill quotes.
+func pillQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+// addValuePill appends a clicked-value pill unless its raw text is already
+// committed. fill sets the pill's comparison on the shared skeleton.
+func (m *tuiModel) addValuePill(raw, path string, fill func(*pill)) {
+	for _, p := range m.pills {
+		if p.raw == raw {
+			return
+		}
+	}
+	expr, err := yqParse("." + path)
 	if err != nil {
-		m.showHint("cannot filter on " + expr)
+		m.showHint("cannot filter on ." + path)
 		return
 	}
-	m.chips = append(m.chips, pickChip{expr: expr, prog: prog})
-	m.chipsChanged()
-}
-
-func (m *tuiModel) removeChip(idx int) {
-	if idx < 0 || idx >= len(m.chips) {
-		return
-	}
-	m.chips = slices.Delete(m.chips, idx, idx+1)
-	m.chipsChanged()
-}
-
-func (m *tuiModel) chipsChanged() {
-	m.paneSelDirty = true
-	m.dispDirty = true
-	m.vpDirty = true
-	m.recomputeSearch(true)
+	p := pill{raw: raw, kind: pillFilter, field: path, yq: expr}
+	fill(&p)
+	p.finalize()
+	m.pills = append(m.pills, p)
+	m.pillsChanged()
 }
 
 func (m *tuiModel) dirty() bool { return len(m.edits) > 0 }

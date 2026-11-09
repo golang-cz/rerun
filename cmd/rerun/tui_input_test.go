@@ -25,16 +25,16 @@ func TestSearchBoxAtPaneTop(t *testing.T) {
 	press(m, "ctrl+f")
 
 	box := ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, "find in pane…") {
-		t.Fatalf("box = %q, want the find placeholder", box)
+	if !strings.Contains(box, "level=error") {
+		t.Fatalf("box = %q, want the query placeholder", box)
 	}
-	if !strings.Contains(box, "enter keep · ctrl+g next") {
+	if !strings.Contains(box, "enter add pill · esc close") {
 		t.Fatalf("box = %q, want the keys footer", box)
 	}
-	if top := boxTop(m); !strings.Contains(top, "find in pane…") {
+	if top := boxTop(m); !strings.Contains(top, "level=error") {
 		t.Fatalf("pane top = %q, want the box anchored there", top)
 	}
-	if mid := strings.Split(ansi.Strip(m.frame()), "\n")[m.height/2]; strings.Contains(mid, "find in pane…") {
+	if mid := strings.Split(ansi.Strip(m.frame()), "\n")[m.height/2]; strings.Contains(mid, "level=error") {
 		t.Fatalf("box reached the middle of the logs: %q", mid)
 	}
 
@@ -44,7 +44,7 @@ func TestSearchBoxAtPaneTop(t *testing.T) {
 	}
 }
 
-// The filter box names its own placeholder and counts the lines it keeps.
+// The box's header counts the lines the typed draft keeps against the total.
 func TestFilterBoxPlaceholderAndCount(t *testing.T) {
 	m := alphaModel(t)
 	m.frame()
@@ -52,11 +52,11 @@ func TestFilterBoxPlaceholderAndCount(t *testing.T) {
 	typeString(m, "alpha")
 
 	box := ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, "filter lines…") && !strings.Contains(box, "alpha") {
-		t.Fatalf("box = %q, want the filter placeholder or the typed query", box)
+	if !strings.Contains(box, "alpha") {
+		t.Fatalf("box = %q, want the typed query", box)
 	}
-	if !strings.Contains(box, "2 lines") {
-		t.Fatalf("box = %q, want the 2 kept lines in the header", box)
+	if !strings.Contains(box, "2/4") {
+		t.Fatalf("box = %q, want the 2 kept of 4 lines in the header", box)
 	}
 }
 
@@ -68,8 +68,8 @@ func TestSearchBoxTypesN(t *testing.T) {
 	press(m, "ctrl+f")
 	typeString(m, "naN")
 
-	if m.input != "naN" || m.search != "naN" {
-		t.Fatalf("input=%q search=%q, want n, a and N typed into the query", m.input, m.search)
+	if m.input != "naN" {
+		t.Fatalf("input=%q, want n, a and N typed into the query", m.input)
 	}
 	if !strings.Contains(ansi.Strip(m.inputBoxView()), "naN") {
 		t.Fatalf("box = %q, want the typed query", ansi.Strip(m.inputBoxView()))
@@ -81,12 +81,12 @@ func TestSearchBoxCtrlGJumpsNext(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
-	press(m, "ctrl+f")
-	typeString(m, "line")
+	commitPill(m, "line")
 	before := m.searchRow
 
+	press(m, "ctrl+f")
 	press(m, "ctrl+g")
-	if m.inputMode != inputSearch {
+	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want ctrl+g to keep the box open", m.inputMode)
 	}
 	if m.searchRow <= before {
@@ -100,9 +100,9 @@ func TestSearchCtrlShiftGJumpsPrevious(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
 
-	press(m, "ctrl+f")
-	typeString(m, "line")
+	commitPill(m, "line")
 	start := m.searchRow
+	press(m, "ctrl+f")
 	press(m, "ctrl+g")
 	if m.searchRow <= start {
 		t.Fatalf("ctrl+g did not advance from %d", start)
@@ -111,11 +111,11 @@ func TestSearchCtrlShiftGJumpsPrevious(t *testing.T) {
 	if m.searchRow != start {
 		t.Fatalf("ctrl+shift+g = %d, want back at %d", m.searchRow, start)
 	}
-	if m.inputMode != inputSearch {
+	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want the box to stay open", m.inputMode)
 	}
 
-	press(m, "enter")
+	press(m, "esc")
 	row := m.searchRow
 	press(m, "ctrl+g")
 	if m.searchRow <= row {
@@ -127,7 +127,7 @@ func TestSearchCtrlShiftGJumpsPrevious(t *testing.T) {
 	}
 }
 
-// enter closes the box but keeps the query and its highlights; n and N then step.
+// enter closes the box but keeps the pill and its hits; n and N then step.
 func TestSearchBoxEnterKeepsQueryThenNJJumps(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
@@ -136,11 +136,11 @@ func TestSearchBoxEnterKeepsQueryThenNJJumps(t *testing.T) {
 	typeString(m, "line")
 	press(m, "enter")
 
-	if m.inputMode != inputNone || m.search != "line" {
-		t.Fatalf("enter: mode=%d search=%q, want the box closed and the query kept", m.inputMode, m.search)
+	if m.inputMode != inputNone || len(m.pills) != 1 || m.pills[0].raw != "line" {
+		t.Fatalf("enter: mode=%d pills=%v, want the box closed and the pill kept", m.inputMode, m.pills)
 	}
 	if len(m.searchMatches) != 60 {
-		t.Fatalf("highlights = %d, want 60 kept", len(m.searchMatches))
+		t.Fatalf("hits = %d, want 60 kept", len(m.searchMatches))
 	}
 	before := m.searchRow
 	press(m, "n")
@@ -153,40 +153,34 @@ func TestSearchBoxEnterKeepsQueryThenNJJumps(t *testing.T) {
 	}
 }
 
-// esc in the box clears the query and its highlights.
-func TestSearchBoxEscClears(t *testing.T) {
+// esc in the box commits the typed pill and closes; the hits stay.
+func TestSearchBoxEscKeepsHits(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 10).events)
 	m.frame()
 	press(m, "ctrl+f")
 	typeString(m, "line")
-	if len(m.searchMatches) == 0 {
-		t.Fatal("the query matched nothing")
-	}
 
 	press(m, "esc")
-	if m.search != "" || m.searchRow != -1 || len(m.searchMatches) != 0 || m.inputMode != inputNone {
-		t.Fatalf("esc: search=%q row=%d matches=%d mode=%d, want cleared and closed",
-			m.search, m.searchRow, len(m.searchMatches), m.inputMode)
+	if len(m.pills) != 1 || len(m.searchMatches) == 0 || m.inputMode != inputNone {
+		t.Fatalf("esc: pills=%v matches=%d mode=%d, want the pill kept and the box closed",
+			m.pills, len(m.searchMatches), m.inputMode)
 	}
 }
 
-// The bar keeps the chips but gives up the prompt to the box.
+// The bar shows only committed pills; the draft lives in the box alone.
 func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 	m := alphaModel(t)
 	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "alpha")
-	if got := paneOf(m)[0]; strings.Contains(got, "find alpha") {
-		t.Fatalf("bar line = %q, want no find prompt", got)
+	if got := paneOf(m)[0]; strings.Contains(got, "alpha") {
+		t.Fatalf("bar line = %q, want no draft echo", got)
 	}
 	press(m, "esc")
-
-	press(m, "/")
-	typeString(m, "alpha")
-	if got := paneOf(m)[0]; strings.Contains(got, "/ alpha") {
-		t.Fatalf("bar line = %q, want no filter prompt", got)
+	if got := ansi.Strip(paneOf(m)[0]); !strings.Contains(got, "[alpha ×]") {
+		t.Fatalf("bar line = %q, want the committed pill", got)
 	}
 }
 
@@ -199,8 +193,8 @@ func TestCtrlHDeletesLikeBackspaceInInput(t *testing.T) {
 	if m.input != "alph" {
 		t.Fatalf("input = %q after ctrl+h, want %q", m.input, "alph")
 	}
-	if m.inputMode != inputSearch {
-		t.Fatalf("mode = %d after ctrl+h, want the find box still open", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("mode = %d after ctrl+h, want the query box still open", m.inputMode)
 	}
 }
 
@@ -211,58 +205,24 @@ func TestCtrlHOnEmptyInputRemovesLastChip(t *testing.T) {
 	commitText(m, "/", "beta")
 
 	press(m, "v", "ctrl+h")
-	if len(m.filters) != 1 || m.filters[0].query != "alpha" || m.inputMode != inputFilter {
-		t.Fatalf("filters = %+v mode = %d after ctrl+h, want alpha kept and the input open", m.filters, m.inputMode)
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" || m.inputMode != inputQuery {
+		t.Fatalf("pills = %+v mode = %d after ctrl+h, want alpha kept and the input open", m.pills, m.inputMode)
 	}
 }
 
-// The filter box has its own footer; the find box keeps the ctrl+g hint.
+// The box footer names its keys; the @ picker names its own.
 func TestInputBoxFootersPerMode(t *testing.T) {
 	m := alphaModel(t)
 
 	press(m, "ctrl+f")
-	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter keep · ctrl+g next") {
-		t.Fatalf("find box = %q, want its ctrl+g footer", box)
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter add pill · esc close") {
+		t.Fatalf("box = %q, want its footer", box)
+	}
+	typeString(m, "@")
+	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter add · esc close") {
+		t.Fatalf("picker box = %q, want the picker footer", box)
 	}
 	press(m, "esc")
-
-	press(m, "/")
-	box := ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, "enter keep · esc close") {
-		t.Fatalf("filter box = %q, want its own footer", box)
-	}
-	if strings.Contains(box, "ctrl+g next") {
-		t.Fatalf("filter box = %q, want no ctrl+g hint", box)
-	}
-}
-
-// The find box names the previous-match key only when the box can hold the longer footer.
-func TestInputBoxFooterGrowsWithWidth(t *testing.T) {
-	m := alphaModel(t)
-	long := "enter keep · ctrl+g next · ctrl+shift+g prev · esc clear"
-	short := "enter keep · ctrl+g next · esc clear"
-
-	press(m, "ctrl+f")
-	m.width, m.height = 200, 20
-	if innerW := m.modalInnerW(m.inputBoxW()); innerW < displayWidth(long) {
-		t.Fatalf("wide innerW = %d, want at least %d", innerW, displayWidth(long))
-	}
-	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, long) {
-		t.Fatalf("wide find box = %q, want the four-key footer %q", box, long)
-	}
-
-	// A middling pane keeps today's shorter text instead of showing a cut hint.
-	m.width, m.height = 80, 20
-	if innerW := m.modalInnerW(m.inputBoxW()); innerW < displayWidth(short) || innerW >= displayWidth(long) {
-		t.Fatalf("mid innerW = %d, want it to fit %d but not %d", innerW, displayWidth(short), displayWidth(long))
-	}
-	box := ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, short) {
-		t.Fatalf("mid find box = %q, want %q", box, short)
-	}
-	if strings.Contains(box, "ctrl+shift+g") {
-		t.Fatalf("narrow find box = %q, want no ctrl+shift+g hint", box)
-	}
 }
 
 // A narrow pane keeps the filter's line count beside the query.

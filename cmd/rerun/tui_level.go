@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // levelKeys are the JSON keys that carry a line's level, in priority order.
@@ -156,11 +155,6 @@ func (m *tuiModel) paintLevels(lines []string) []string {
 
 // paintSpan styles the cells a level covers, keeping every other cell as it was.
 func paintSpan(line string, s levelSpan) string {
-	w := displayWidth(line)
-	from, to := max(0, s.from), min(s.to, w)
-	if to <= from {
-		return line
-	}
 	st := lipgloss.NewStyle()
 	if s.paint.fg != nil {
 		st = st.Foreground(s.paint.fg)
@@ -171,5 +165,5 @@ func paintSpan(line string, s levelSpan) string {
 	if s.paint.bold {
 		st = st.Bold(true)
 	}
-	return ansi.Cut(line, 0, from) + st.Render(ansi.Cut(line, from, to)) + ansi.Cut(line, to, w)
+	return paintCells(line, s.from, s.to, st)
 }

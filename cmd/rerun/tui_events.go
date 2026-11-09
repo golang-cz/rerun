@@ -12,8 +12,14 @@ import (
 // eventsTitle is the modal's header, naming what it shows.
 const eventsTitle = "fs events"
 
-// eventsFooter is the modal's key line.
-const eventsFooter = "j k move · → expand · ← collapse · y copy all · esc close"
+// The footer names only the arrow the cursor batch can use right now.
+const (
+	eventsFooterExpand   = "j k move · → expand · y copy all · esc close"
+	eventsFooterCollapse = "j k move · ← collapse · y copy all · esc close"
+)
+
+// eventsMinH is the shortest the modal draws, so its chrome never crushes the body.
+const eventsMinH = 8
 
 // eventsEmpty is the modal's placeholder while no batch sits in the window.
 const eventsEmpty = "no fs events in the last minute"
@@ -43,8 +49,20 @@ func (m *tuiModel) openEvents() {
 	m.fitEvents()
 }
 
-// eventsSize is the modal's outer box: the finder's width, 80% of the terminal's height.
-func (m *tuiModel) eventsSize() (int, int) { return m.finderSize() }
+// eventsSize is the modal's outer box: the finder's width, and a height that
+// fits the content plus the header and the footer — at least eventsMinH rows,
+// never past the finder's 80% of the terminal.
+func (m *tuiModel) eventsSize() (int, int) {
+	outerW, maxH := m.finderSize()
+	batches, dim := m.feedVisible()
+	content := len(m.eventsRows(batches, dim, m.modalInnerW(outerW)))
+	if latestWatchErr(batches) != nil {
+		content++
+	}
+	content = max(content, 1) // the empty placeholder still takes a row
+	outerH := m.styles.box.GetVerticalFrameSize() + 3 + content
+	return outerW, min(max(outerH, eventsMinH), maxH)
+}
 
 // eventsBodyRows is how many body rows fit between the header, the rule and the footer.
 func (m *tuiModel) eventsBodyRows() int {
@@ -162,13 +180,13 @@ func (m *tuiModel) eventsRows(batches []feedBatch, dim bool, innerW int) []event
 			}
 			label := ellipsizeMiddle(r.label, max(1, innerW-r.indent-2))
 			if svcs := m.fileServices(b, r.path); len(svcs) > 0 {
-				if w := innerW - r.indent - 2 - 2 - 2 - displayWidth(svcs[0]); displayWidth(label) > w {
+				if w := innerW - r.indent - 2 - 2 - 4 - displayWidth(svcs[0]); displayWidth(label) > w {
 					// The path takes a middle ellipsis so at least the first service fits.
 					label = ellipsizeMiddle(r.label, max(1, w))
 				}
 				fileW := r.indent + 2 + displayWidth(label)
 				first, cont, col := wrapServices(svcs, fileW, innerW)
-				row := eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label, svc: "· " + first, dim: dim}
+				row := eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label, svc: "· ↻ " + first, dim: dim}
 				rows = append(rows, row)
 				for _, c := range cont {
 					rows = append(rows, eventsRow{id: b.id, cont: true, svc: c, svcCol: col, dim: dim})
@@ -184,9 +202,9 @@ func (m *tuiModel) eventsRows(batches []feedBatch, dim bool, innerW int) []event
 // wrapServices packs a file row's services: the first chunk rides the file's
 // line right-aligned, the rest wrap onto lines aligned under its `·`.
 func wrapServices(svcs []string, fileW, innerW int) (first string, cont []string, col int) {
-	budget := max(1, innerW-fileW-2-2) // the gap and the `· ` marker
+	budget := max(1, innerW-fileW-2-4) // the gap and the `· ↻ ` marker
 	first, rest := packServices(svcs, budget)
-	col = max(0, innerW-displayWidth(first)-2)
+	col = max(0, innerW-displayWidth(first)-4)
 	// A continuation starts under the `·`, but never so far right that a name
 	// would be cut.
 	for _, s := range rest {
@@ -354,7 +372,10 @@ func (m *tuiModel) eventsView() string {
 	for len(lines) < body {
 		lines = append(lines, "")
 	}
-	footer := eventsFooter
+	footer := eventsFooterExpand
+	if m.eventsModal.openID != 0 && m.eventsModal.openID == m.eventsCursorID(merged) {
+		footer = eventsFooterCollapse
+	}
 	if m.now.Before(m.eventsModal.copiedUntil) {
 		footer = "copied " + batchCount(m.eventsModal.copiedN)
 	}
@@ -410,14 +431,14 @@ func (m *tuiModel) eventsLine(w eventsRow, innerW int) string {
 	b := w.batch
 	at := b.at.Local().Format("15:04:05")
 	label := eventsBatchLabel(b)
-	svc := fitServices(b.targets, innerW-10-displayWidth(label)-4)
+	svc := fitServices(b.targets, innerW-10-displayWidth(label)-6)
 	if svc == "" && len(b.targets) > 0 {
 		// The path left no room: it takes the middle ellipsis, the services stay.
-		svc = fitServices(b.targets, innerW-10-4-12)
+		svc = fitServices(b.targets, innerW-10-6-12)
 	}
 	svcText := ""
 	if svc != "" {
-		svcText = "· " + svc
+		svcText = "· ↻ " + svc
 	}
 	label = ellipsizeMiddle(label, max(1, innerW-10-displayWidth(svcText)-2))
 	segs := []seg{

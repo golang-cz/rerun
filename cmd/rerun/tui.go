@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/golang-cz/rerun"
+	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
 // lineCap bounds each target's scrollback and the merged stream. Phase B
@@ -88,8 +90,7 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 // Bottom-line input modes. inputNone means no bar is open.
 const (
 	inputNone = iota
-	inputSearch
-	inputFilter
+	inputQuery
 )
 
 // procState is the process state a row's glyph shows.
@@ -277,8 +278,6 @@ type tuiModel struct {
 	disp      []dispRow
 	dispText  []string
 	dispDirty bool
-	// chips are the value filters clicked into the pane; every chip ANDs with the rest.
-	chips []pickChip
 	// edits are the unsaved column picks, one per schema or target node.
 	edits []colEdit
 
@@ -302,6 +301,10 @@ type tuiModel struct {
 	// barFocus routes keys to the filter bar; barSel is its focused chip, or -1.
 	barFocus bool
 	barSel   int
+	// editKindOn and editKind carry a pill's kind through an edit round-trip, so
+	// re-committing its text restores filter vs highlight.
+	editKindOn bool
+	editKind   pillKind
 
 	// pinSeq is the restart rule the pane holds at its top, 0 for none.
 	pinSeq int
@@ -316,18 +319,27 @@ type tuiModel struct {
 	inputCursor int
 	inputSel    bool
 
-	// search is the query; while inputSearch is open it tracks input live.
-	// searchMatches holds the pane rows it hits, searchRow the current hit.
-	search        string
+	// searchMatches holds the pane rows any pill hits, searchRow the current hit.
 	searchMatches []int
 	searchRow     int
 
-	// filters AND together; draft is the open input's predicate, nil when empty or invalid.
-	filters      []textFilter
-	draft        func(string) bool
-	filterErr    string
+	// pills are the query bar's committed pills: filter-kind ones narrow the
+	// pane, every pill's spans are marked, and hits feed searchMatches.
+	pills []pill
+	// queries are the config's global saved queries, picked with @ in the bar.
+	queries map[string]string
+	// draft is the open input's live-compiled pills; queryErr is its parse error.
+	draft    pillSet
+	draftOn  bool
+	queryErr string
+	// pickSel is the selected row of the bar's @ picker.
+	pickSel      int
 	paneSel      []int
 	paneSelDirty bool
+	// countKept and countTotal cache the bar's kept/total line counts; they are
+	// recomputed in rebuildPaneSel, never per frame.
+	countKept  int
+	countTotal int
 
 	// prefixW is the pane prefix column: the longest name in view, so every
 	// stream line starts its message in the same column.
@@ -394,6 +406,7 @@ func newTUI(targets []Target) *tuiModel {
 		visibleRaw:   []string{},
 		visibleIdx:   []int{},
 		visibleCells: []cellCache{},
+		paneSelDirty: true,
 		visibleSep:   []sepLine{},
 		cellBySeq:    map[int]*cellEntry{},
 		blockCache:   map[blockKey][]dispRow{},
@@ -481,6 +494,8 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 	m := newTUI(targets)
 	m.group.configPath = cfg.Path
 	m.missing = cfg.Missing
+	m.queries = cfg.Queries
+	m.group.queries = cfg.Queries
 	if cfg.MakeOnly {
 		m.finder = finderState{open: true}
 	}
@@ -619,9 +634,8 @@ func (m *tuiModel) showLine(ml mergedLine) {
 	m.visibleSep = appendCapped(m.visibleSep, ml.sep)
 	m.visibleLvl = appendCapped(m.visibleLvl, ml.lvl)
 	m.dispDirty = true
-	if m.filterActive() {
-		m.paneSelDirty = true
-	}
+	// The bar's kept/total counts track arrivals even without a filter.
+	m.paneSelDirty = true
 }
 
 // showNotice puts rerun's own message on the bottom line; newest wins.
@@ -674,7 +688,7 @@ func (m *tuiModel) applyEvents(events []event) {
 	for _, ev := range events {
 		m.applyEvent(ev)
 	}
-	if m.search != "" {
+	if len(m.pills) > 0 {
 		m.recomputeSearch(false)
 	}
 	m.fitEvents()
@@ -891,6 +905,7 @@ func (m *tuiModel) applyEvent(ev event) {
 // appeared gets a new row.
 func (m *tuiModel) rebuildRows(c *configChange) {
 	m.missing = c.missing
+	m.queries = c.queries
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
 	known := make(map[string]bool, len(old))
@@ -973,9 +988,38 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.refreshNames()
 	m.hover = -1
 	m.lastClick = -1
+	m.reresolveSaved()
 	m.mergedDirty = true
 	m.vpDirty = true
 	m.recomputeSearch(false)
+}
+
+// reresolveSaved re-runs resolveSaved on the committed pills after a reload:
+// the queries may have changed under them. A pill whose name is gone is
+// dropped and named in a notice, never left matching stale pills.
+func (m *tuiModel) reresolveSaved() {
+	if len(m.pills) == 0 {
+		return
+	}
+	var dropped []string
+	kept := m.pills[:0]
+	for _, p := range m.pills {
+		if p.saved == "" {
+			kept = append(kept, p)
+			continue
+		}
+		one := []pill{p}
+		if err := m.resolveSaved(one); err != nil {
+			dropped = append(dropped, "@"+p.saved)
+			continue
+		}
+		kept = append(kept, one[0])
+	}
+	m.pills = kept
+	if len(dropped) > 0 {
+		m.showNotice("reload dropped "+strings.Join(dropped, ", ")+": unknown query", false)
+	}
+	m.paneSelDirty = true
 }
 
 // eventTime is the event's own stamp, or the frame clock for one that carries none.
@@ -1032,91 +1076,81 @@ func (m *tuiModel) paneRowRaw(row int) int {
 	return m.disp[row].raw
 }
 
-// filterOn reports whether a text filter or an open draft narrows the pane.
-func (m *tuiModel) filterOn() bool { return len(m.filters) > 0 || m.draft != nil }
+// filterOn reports whether a filter-kind pill or an open draft narrows the pane.
+func (m *tuiModel) filterOn() bool {
+	return m.draftOn || slices.ContainsFunc(m.pills, func(p pill) bool { return p.kind == pillFilter })
+}
 
-// filterActive reports whether any text filter or value chip narrows the pane.
-func (m *tuiModel) filterActive() bool { return m.filterOn() || len(m.chips) > 0 }
+// filterActive reports whether any pill narrows the pane.
+func (m *tuiModel) filterActive() bool { return m.filterOn() }
 
-// rebuildPaneSel re-derives the visible subset for the current filters. The
-// filter expressions are compiled once per edit, never per line.
+// rebuildPaneSel re-derives the visible subset for the current filters and
+// refreshes the bar's cached line counts. The filter expressions are compiled
+// once per edit, never per line. Run rules are not output: they stay visible
+// but never count.
 func (m *tuiModel) rebuildPaneSel() {
 	m.paneSelDirty = false
 	m.dispDirty = true
 	m.paneSel = m.paneSel[:0]
+	m.countKept, m.countTotal = 0, 0
 	if !m.filterActive() {
+		for i := range m.visible {
+			if !m.visibleSep[i].isSep() {
+				m.countTotal++
+			}
+		}
+		m.countKept = m.countTotal
 		return
 	}
 	keep := m.lineKeeper()
 	for i := range m.visible {
 		// Run rules are not output, so a filter must not swallow the boundaries.
-		if m.visibleSep[i].isSep() || keep(m.visibleRaw[i]) {
+		if m.visibleSep[i].isSep() {
+			m.paneSel = append(m.paneSel, i)
+			continue
+		}
+		m.countTotal++
+		if keep(m.visibleRaw[i]) {
+			m.countKept++
 			m.paneSel = append(m.paneSel, i)
 		}
 	}
 }
 
-// lineKeeper is the per-line predicate for the text filters, the open draft,
-// and every value chip.
+// lineKeeper is the per-line predicate for the filter-kind pills and the open
+// input's draft. The pill set decodes a JSON line once for every pill.
 func (m *tuiModel) lineKeeper() func(string) bool {
-	keeps := make([]func(string) bool, 0, len(m.filters)+1)
-	for _, f := range m.filters {
-		keeps = append(keeps, f.keep)
-	}
-	if m.draft != nil {
-		keeps = append(keeps, m.draft)
-	}
-	chips := m.chips
-	return func(line string) bool {
-		for _, keep := range keeps {
-			if !keep(line) {
-				return false
-			}
+	var filters []pill
+	for _, p := range m.pills {
+		if p.kind == pillFilter {
+			filters = append(filters, p)
 		}
-		for _, c := range chips {
-			if !yqMatches(c.prog, line) {
-				return false
-			}
+	}
+	set := pillSetOf(filters)
+	draft, draftOn := m.draft, m.draftOn
+	return func(line string) bool {
+		if !set.match(line) {
+			return false
+		}
+		if draftOn && !draft.match(line) {
+			return false
 		}
 		return true
 	}
 }
 
-// textFilter is a committed text filter chip: its query and its compiled predicate.
-type textFilter struct {
-	query string
-	keep  func(string) bool
-}
-
-// compileFilter builds the per-line predicate: a yq expression when the query
-// starts with ".", else a case-insensitive substring. A yq query that does not
-// parse returns the error, so it never reaches the pane.
-func compileFilter(query string) (func(string) bool, error) {
-	if strings.HasPrefix(query, ".") {
-		expr, err := yqParse(query)
-		if err != nil {
-			return nil, err
-		}
-		return func(line string) bool { return yqMatches(expr, line) }, nil
-	}
-	needle := strings.ToLower(query)
-	return func(line string) bool {
-		return strings.Contains(strings.ToLower(line), needle)
-	}, nil
-}
-
-// recomputeSearch re-sweeps the pane's raw lines for the query. One Contains
-// pass over at most lineCap lines, run on edits and arrivals, never per frame.
+// recomputeSearch re-sweeps the pane's raw lines for pill hits: a line is a
+// hit when a highlight-mode pill matches it or any pill paints a span in it.
+// One pass over at most lineCap lines, run on edits and arrivals, never per frame.
 // reset parks the hit at the first match in view; otherwise the current hit is
 // kept when it still matches.
 func (m *tuiModel) recomputeSearch(reset bool) {
 	m.ensurePane()
 	m.searchMatches = m.searchMatches[:0]
-	if m.search == "" {
+	if len(m.pills) == 0 {
 		m.searchRow = -1
 		return
 	}
-	q := strings.ToLower(m.search)
 	n := m.paneLen()
 	for row := 0; row < n; row++ {
 		if m.rowInfo(row).sub >= 0 {
@@ -1127,7 +1161,7 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 		if m.visibleSep[raw].isSep() {
 			continue
 		}
-		if strings.Contains(strings.ToLower(m.visibleRaw[raw]), q) {
+		if m.lineHit(m.visibleRaw[raw]) {
 			m.searchMatches = append(m.searchMatches, row)
 		}
 	}
@@ -1147,17 +1181,56 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 	}
 }
 
-// clearSearch drops the query and its matches.
-func (m *tuiModel) clearSearch() {
-	m.search = ""
-	m.searchMatches = m.searchMatches[:0]
-	m.searchRow = -1
+// pillHits reports whether the pill hits the line: a painted span, or a raw
+// yq match, which has no span to paint.
+func pillHits(p pill, root *yqlib.CandidateNode, line string) bool {
+	if len(p.spansRoot(root, line)) > 0 {
+		return true
+	}
+	if p.saved != "" {
+		return slices.ContainsFunc(p.sub, func(s pill) bool { return pillHits(s, root, line) })
+	}
+	return !p.neg && p.op == pillOpYq && p.matchRoot(root, line)
+}
+
+// lineHit reports whether any pill marks the line, decoding JSON at most once.
+func (m *tuiModel) lineHit(line string) bool {
+	var root *yqlib.CandidateNode
+	decoded := false
+	for _, p := range m.pills {
+		if !decoded && p.needsJSON() {
+			root = decodeJSONLine(line)
+			decoded = true
+		}
+		if p.kind == pillHighlight && p.matchRoot(root, line) {
+			return true
+		}
+		if pillHits(p, root, line) {
+			return true
+		}
+	}
+	return false
+}
+
+// lineSpans merges every pill's spans in the raw line, decoding JSON at most once.
+func (m *tuiModel) lineSpans(line string) [][2]int {
+	var root *yqlib.CandidateNode
+	decoded := false
+	var out [][2]int
+	for _, p := range m.pills {
+		if !decoded && p.needsJSON() {
+			root = decodeJSONLine(line)
+			decoded = true
+		}
+		out = append(out, p.spansRoot(root, line)...)
+	}
+	return mergeSpans(out)
 }
 
 // searchJump moves to the next (dir > 0) or previous match and centers it,
 // wrapping at the ends. A search with no matches is a no-op.
 func (m *tuiModel) searchJump(dir int) {
-	if m.search == "" || len(m.searchMatches) == 0 {
+	if len(m.searchMatches) == 0 {
 		return
 	}
 	if dir < 0 {
@@ -1205,9 +1278,39 @@ func (m *tuiModel) searchStatus() string {
 	return fmt.Sprintf("%d/%d", pos, len(m.searchMatches))
 }
 
-// filterStatus is the bottom line's filtered row count.
-func (m *tuiModel) filterStatus() string {
-	return fmt.Sprintf("%d lines", m.paneLen())
+// pillStatus is the bar's scope, pill count, line counts, and hit position.
+func (m *tuiModel) pillStatus() string {
+	kept, total := m.matchCounts()
+	s := fmt.Sprintf("%s · %s · %d/%d lines", m.scopeName(), pillCount(len(m.pills)), kept, total)
+	if len(m.searchMatches) > 0 && m.searchRow >= 0 {
+		s += " · hit " + m.searchStatus()
+	}
+	return s
+}
+
+func pillCount(n int) string {
+	if n == 1 {
+		return "1 pill"
+	}
+	return fmt.Sprintf("%d pills", n)
+}
+
+// scopeName is the pane scope's label: the solo target, the group, or all.
+func (m *tuiModel) scopeName() string {
+	if m.solo >= 0 && m.solo < len(m.targets) {
+		return m.targets[m.solo].spec.Name
+	}
+	if m.schemaSel != "" {
+		return groupLabel(m.schemaSel)
+	}
+	return "all"
+}
+
+// matchCounts reads the kept/total counts rebuildPaneSel cached; the pane is
+// ensured first, so a stale selection is rebuilt here and only here.
+func (m *tuiModel) matchCounts() (kept, total int) {
+	m.ensurePane()
+	return m.countKept, m.countTotal
 }
 
 // mergedLine is one line of the arrival-ordered log the pane filters. The

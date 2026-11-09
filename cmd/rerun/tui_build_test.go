@@ -618,8 +618,12 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 		buildStart("api", buildAt, "/x/a.go", "/x/b.go"),
 		{kind: evOutput, target: "web", line: "web line"},
 	})
-	m.filters = []textFilter{{query: "building", keep: func(s string) bool { return strings.Contains(s, "building") }}}
-	m.paneSelDirty = true
+	pills, err := parsePills("building", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.pills = pills
+	m.pillsChanged()
 	m.frame()
 	if !m.filterActive() {
 		t.Fatal("the filter is not active")

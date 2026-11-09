@@ -254,14 +254,14 @@ func TestValueClickAddsChipFilter(t *testing.T) {
 	x, y := findInPane(t, m, `status: 403`)
 	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 
-	if len(m.chips) != 1 || m.chips[0].expr != ".status == 403" {
-		t.Fatalf("chips = %+v, want .status == 403", m.chips)
+	if len(m.pills) != 1 || m.pills[0].raw != "status=403" {
+		t.Fatalf("pills = %+v, want status=403", m.pills)
 	}
 	if got := strings.Join(m.paneLines(), "\n"); strings.Contains(got, "200") || strings.Contains(got, "plain") {
 		t.Fatalf("filtered pane = %q, want only the 403 line", got)
 	}
-	if !strings.Contains(plainPane(m), "[.status == 403 ×]") {
-		t.Fatalf("header lacks the chip:\n%s", plainPane(m))
+	if !strings.Contains(plainPane(m), "[status=403 ×]") {
+		t.Fatalf("header lacks the pill:\n%s", plainPane(m))
 	}
 }
 
@@ -276,15 +276,15 @@ func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 	x, y = findInPane(t, m, "×")
 	m.handleMouse(mouse(x, y, false))
-	if len(m.chips) != 0 {
-		t.Fatalf("chips = %+v after clicking ×, want none", m.chips)
+	if len(m.pills) != 0 {
+		t.Fatalf("pills = %+v after clicking ×, want none", m.pills)
 	}
 
 	x, y = findInPane(t, m, `status: 403`)
 	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
 	press(m, "right", "backspace")
-	if len(m.chips) != 0 {
-		t.Fatalf("chips = %+v after backspace, want none", m.chips)
+	if len(m.pills) != 0 {
+		t.Fatalf("pills = %+v after backspace, want none", m.pills)
 	}
 }
 
@@ -386,8 +386,8 @@ func TestSaveWritesSchemaAndSurvivesReload(t *testing.T) {
 	m.applyEvent(event{kind: evReconcile, cfg: &configChange{
 		targets: saved.Targets, runners: runners, stopped: make([]bool, len(runners)),
 	}})
-	if m.schemaSel != "backend" || len(m.chips) != 1 || !m.expanded[m.visibleSeq[0]] {
-		t.Fatalf("reload reset state: schema=%q chips=%d expanded=%v", m.schemaSel, len(m.chips), m.expanded[m.visibleSeq[0]])
+	if m.schemaSel != "backend" || len(m.pills) != 1 || !m.expanded[m.visibleSeq[0]] {
+		t.Fatalf("reload reset state: schema=%q pills=%d expanded=%v", m.schemaSel, len(m.pills), m.expanded[m.visibleSeq[0]])
 	}
 	if m.noticeErr {
 		t.Fatalf("reload flashed an error: %q", m.notice)

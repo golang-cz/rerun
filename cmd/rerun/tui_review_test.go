@@ -68,10 +68,8 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 	if len(m.searchMatches) != 0 {
 		t.Fatalf("search matched the run rule: %v", m.searchMatches)
 	}
-	press(m, "ctrl+f")
-	for range "started" {
-		press(m, "backspace")
-	}
+	// The bar reopens empty, so one backspace drops the "started" pill.
+	press(m, "ctrl+f", "backspace")
 	typeString(m, "listen")
 	press(m, "enter")
 	if len(m.searchMatches) != 1 {

@@ -76,16 +76,23 @@ func TestEventsModalOpensWithHeaderAndFooter(t *testing.T) {
 		t.Fatal("e did not open the fs events modal")
 	}
 	outerW, outerH := m.eventsSize()
-	if outerW != modalWidth(m.width) || outerH != m.height*4/5 {
-		t.Fatalf("modal size = %dx%d, want the finder's %dx%d", outerW, outerH, modalWidth(m.width), m.height*4/5)
+	if outerW != modalWidth(m.width) {
+		t.Fatalf("modal width = %d, want the finder's %d", outerW, modalWidth(m.width))
+	}
+	// One batch fits on one row: the box hugs its content, floored at 8 rows.
+	if outerH != 8 {
+		t.Fatalf("modal height = %d, want the 8-row floor for one batch", outerH)
 	}
 
 	lines := eventsLines(m)
 	if !strings.Contains(lines[1], "fs events") || !strings.Contains(lines[1], "last 1m · 1 batch") {
 		t.Fatalf("header = %q, want the title and the window count", lines[1])
 	}
-	if got := eventsFooterLine(m); !strings.Contains(got, "j k move · → expand · ← collapse · y copy all · esc close") {
-		t.Fatalf("footer = %q, want the key line", got)
+	if got := eventsFooterLine(m); !strings.Contains(got, "j k move · → expand · y copy all · esc close") {
+		t.Fatalf("footer = %q, want the expand key line on a collapsed cursor", got)
+	}
+	if strings.Contains(eventsFooterLine(m), "← collapse") {
+		t.Fatalf("footer = %q, want no ← collapse while the cursor batch is collapsed", eventsFooterLine(m))
 	}
 }
 
@@ -130,13 +137,13 @@ func TestEventsModalCollapsedRowLayout(t *testing.T) {
 	if !strings.HasPrefix(row, want) {
 		t.Fatalf("row = %q, want it to start with %q", row, want)
 	}
-	if !strings.HasSuffix(row, "· omsx-api, files") {
-		t.Fatalf("row = %q, want the services right-aligned behind one ·", row)
+	if !strings.HasSuffix(row, "· ↻ omsx-api, files") {
+		t.Fatalf("row = %q, want the services right-aligned behind one · with the ↻ mark", row)
 	}
 	if strings.Contains(row, "→") || strings.Contains(row, "~1") || strings.Contains(row, "none") {
 		t.Fatalf("row = %q, want no arrow, op counts or none", row)
 	}
-	between := row[len(want) : len(row)-len("· omsx-api, files")]
+	between := row[len(want) : len(row)-len("· ↻ omsx-api, files")]
 	if strings.Contains(between, "·") {
 		t.Fatalf("row = %q, want a single middle dot, never a dot leader", row)
 	}
@@ -278,10 +285,10 @@ func TestEventsModalExpandedRowsNamePerFileServices(t *testing.T) {
 			yRow = rowText(line)
 		}
 	}
-	if !strings.HasSuffix(xRow, "· web, api") {
+	if !strings.HasSuffix(xRow, "· ↻ web, api") {
 		t.Fatalf("x.go row = %q, want both watchers named", xRow)
 	}
-	if !strings.HasSuffix(yRow, "· web") {
+	if !strings.HasSuffix(yRow, "· ↻ web") {
 		t.Fatalf("y.go row = %q, want only web named", yRow)
 	}
 }
@@ -303,10 +310,10 @@ func TestEventsModalPerFileServicesAreRecordedNotInferred(t *testing.T) {
 		if strings.Contains(line, "debug.log") && strings.Contains(line, "web") {
 			t.Fatalf("debug.log row = %q, want only logger: services are recorded, not re-matched", rowText(line))
 		}
-		if strings.Contains(line, "~ debug.log") && !strings.HasSuffix(rowText(line), "· logger") {
+		if strings.Contains(line, "~ debug.log") && !strings.HasSuffix(rowText(line), "· ↻ logger") {
 			t.Fatalf("debug.log row = %q, want logger named", rowText(line))
 		}
-		if strings.Contains(line, "~ a.go") && !strings.HasSuffix(rowText(line), "· web") {
+		if strings.Contains(line, "~ a.go") && !strings.HasSuffix(rowText(line), "· ↻ web") {
 			t.Fatalf("a.go row = %q, want web named", rowText(line))
 		}
 	}
@@ -351,7 +358,7 @@ func TestEventsModalExpandedRowEllipsizesPathAndClampsServices(t *testing.T) {
 		t.Fatalf("no expanded file row:\n%s", joined)
 	}
 	row := rowText(fileRow)
-	if !strings.Contains(row, "…") || !strings.HasSuffix(row, "· svc-one") {
+	if !strings.Contains(row, "…") || !strings.HasSuffix(row, "· ↻ svc-one") {
 		t.Fatalf("file row = %q, want the path middle-ellipsized with the first service kept", row)
 	}
 	if got := displayWidth(row); got > innerW {
@@ -412,7 +419,7 @@ func TestEventsModalPerFileServicesMarkExited(t *testing.T) {
 	press(m, "e", "right")
 	for _, line := range eventsBody(m) {
 		if strings.Contains(line, "~ a.go") {
-			if got := rowText(line); !strings.HasSuffix(got, "· web, api ✗") {
+			if got := rowText(line); !strings.HasSuffix(got, "· ↻ web, api ✗") {
 				t.Fatalf("a.go row = %q, want api marked ✗", got)
 			}
 			return
@@ -496,7 +503,7 @@ func TestEventsModalMergesSameFileBatches(t *testing.T) {
 	if !strings.Contains(merged, spawnClock.Add(time.Second).Local().Format("15:04:05")) {
 		t.Fatalf("merged row = %q, want the newest of the merged times", merged)
 	}
-	if !strings.HasSuffix(merged, "· api, web") {
+	if !strings.HasSuffix(merged, "· ↻ api, web") {
 		t.Fatalf("merged row = %q, want both batches' services", merged)
 	}
 }
@@ -691,5 +698,43 @@ func TestEventsViewStaysPure(t *testing.T) {
 	}
 	if m.eventsModal.top != top {
 		t.Fatalf("the second render moved top from %d to %d", top, m.eventsModal.top)
+	}
+}
+
+// The modal hugs its content: header and footer plus the batch rows, floored
+// at 8 rows, capped at the finder's height. The footer offers ← collapse only
+// while the cursor batch is expanded.
+func TestEventsModalHeightFitsContent(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 100, 30
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write, "apps/b.go": fsnotify.Write})
+	m.now = spawnClock
+
+	press(m, "e")
+	if _, h := m.eventsSize(); h != 8 {
+		t.Fatalf("height = %d, want the 8-row floor for one collapsed batch", h)
+	}
+
+	press(m, "right") // expand: a dir row and two file rows join the batch row
+	if _, h := m.eventsSize(); h != 2+3+4 {
+		t.Fatalf("height = %d expanded, want frame+chrome+4 content rows", h)
+	}
+	if got := eventsFooterLine(m); !strings.Contains(got, "← collapse") || strings.Contains(got, "→ expand") {
+		t.Fatalf("footer = %q, want ← collapse only while expanded", got)
+	}
+	press(m, "left")
+	if got := eventsFooterLine(m); !strings.Contains(got, "→ expand") || strings.Contains(got, "← collapse") {
+		t.Fatalf("footer = %q, want → expand only while collapsed", got)
+	}
+
+	m2 := newTestModel(t, target("web"))
+	m2.width, m2.height = 100, 30
+	for i := range 30 {
+		changeAt(m2, "web", spawnClock.Add(time.Duration(i)*time.Second), map[string]fsnotify.Op{fmt.Sprintf("f%02d.go", i): fsnotify.Write})
+	}
+	m2.now = spawnClock.Add(30 * time.Second)
+	press(m2, "e")
+	if _, h := m2.eventsSize(); h != 30*4/5 {
+		t.Fatalf("height = %d for 30 batches, want the finder cap %d", h, 30*4/5)
 	}
 }

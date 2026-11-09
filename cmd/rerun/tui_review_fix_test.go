@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Stopping, starting, or rebooting ends the build in flight, so its ⚙ stops counting.
@@ -147,8 +148,8 @@ func TestEscThatChangesNothingHintsAtChips(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	press(m, "esc")
-	if !strings.HasPrefix(m.hint, "filters stay") {
-		t.Fatalf("hint = %q, want the filters-stay hint", m.hint)
+	if !strings.HasPrefix(m.hint, "pills stay") {
+		t.Fatalf("hint = %q, want the pills-stay hint", m.hint)
 	}
 }
 
@@ -158,15 +159,16 @@ func TestPaneBackspaceRemovesLastChipOfAnyKind(t *testing.T) {
 	commitText(m, "ctrl+f", "delta")
 	press(m, "right")
 	press(m, "backspace")
-	if m.search != "" || len(m.filters) != 1 {
-		t.Fatalf("search=%q filters=%d, want the find chip removed first", m.search, len(m.filters))
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
+		t.Fatalf("pills=%v, want the last pill removed first", m.pills)
 	}
 }
 
 func TestBarHintNamesTheKeys(t *testing.T) {
 	m := alphaModel(t)
+	m.width = 130 // wide enough for the hint beside the pill status
 	commitText(m, "/", "alpha")
-	if got := paneOf(m)[0]; !strings.Contains(got, "/ add · ← backspace remove · ctrl+f find") {
+	if got := paneOf(m)[0]; !strings.Contains(got, "/ add · ← backspace remove · space toggles") {
 		t.Fatalf("bar = %q, want the key hint", got)
 	}
 }
@@ -257,7 +259,8 @@ func TestStylesFollowTheReportedBackground(t *testing.T) {
 	}
 }
 
-// A bar too narrow for every chip folds the oldest into +N, never cutting one.
+// A bar too narrow for every chip elides the oldest behind …, never cutting
+// one or the status.
 func TestNarrowBarFoldsOldestChips(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "a1", "b1", "c1")
@@ -265,8 +268,11 @@ func TestNarrowBarFoldsOldestChips(t *testing.T) {
 		commitText(m, "/", q)
 	}
 	line := m.barLine(34)
-	if !strings.Contains(line, "+") || !strings.Contains(line, "gamma-long ×]") {
-		t.Fatalf("bar = %q, want the oldest folded into +N and the newest whole", line)
+	if !strings.HasPrefix(ansi.Strip(line), "… ") || !strings.Contains(line, "gamma-long ×]") {
+		t.Fatalf("bar = %q, want the oldest elided behind … and the newest whole", ansi.Strip(line))
+	}
+	if strings.Contains(line, "alpha-long") {
+		t.Fatalf("bar = %q, want alpha-long elided", ansi.Strip(line))
 	}
 	if displayWidth(line) != 34 {
 		t.Fatalf("bar width = %d, want 34", displayWidth(line))

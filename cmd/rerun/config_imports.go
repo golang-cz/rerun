@@ -261,6 +261,12 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if t.Muted == nil {
 					t.Muted = root.muted
 				}
+				// The importer's group hands its saved queries down too; the file's own win a name clash.
+				t.groupQueries = mergeQueries(root.queries, t.groupQueries)
+				if t.groupQueryCols == nil {
+					t.groupQueryCols = root.columns
+				}
+				t.Queries = mergeQueries(root.queries, t.Queries)
 				if !t.startSet && root.startSet {
 					t.Start, t.startSet = root.start, true
 				}

@@ -58,8 +58,8 @@ func TestBarChipClickRemovesIt(t *testing.T) {
 
 	cross := m.layout.chips[1]
 	m.handleMouse(mouse(m.layout.leftW+1+cross.x, 0, false))
-	if len(m.filters) != 1 || m.filters[0].query != "alpha" {
-		t.Fatalf("filters = %+v after clicking beta's ×, want only alpha", m.filters)
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
+		t.Fatalf("pills = %+v after clicking beta's ×, want only alpha", m.pills)
 	}
 }
 
@@ -73,8 +73,8 @@ func TestScopeHasNoBarChipAndBackspaceKeepsIt(t *testing.T) {
 	if m.schemaSel != "backend" {
 		t.Fatalf("schemaSel = %q, want backend from the header", m.schemaSel)
 	}
-	if n := len(m.barChips()); n != 0 {
-		t.Fatalf("bar chips = %d with only a scope, want none", n)
+	if n := len(m.pills); n != 0 {
+		t.Fatalf("bar pills = %d with only a scope, want none", n)
 	}
 	press(m, "backspace")
 	if m.schemaSel != "backend" {
@@ -88,8 +88,8 @@ func TestBackspaceOnEmptyInputRemovesLastChip(t *testing.T) {
 	commitText(m, "/", "beta")
 
 	press(m, "v", "backspace")
-	if len(m.filters) != 1 || m.filters[0].query != "alpha" || m.inputMode != inputFilter {
-		t.Fatalf("filters = %+v mode = %d, want alpha kept and the input still open", m.filters, m.inputMode)
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" || m.inputMode != inputQuery {
+		t.Fatalf("pills = %+v mode = %d, want alpha kept and the input still open", m.pills, m.inputMode)
 	}
 }
 
@@ -98,14 +98,14 @@ func TestBackspaceRemovesTheFocusedChip(t *testing.T) {
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	// An empty input and left hand the focus to the last chip.
+	// An empty input and left hand the focus to the last pill.
 	press(m, "v", "left")
-	if !m.barFocus || m.inputMode != inputNone || m.barSel != 1 {
-		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last chip", m.barFocus, m.inputMode, m.barSel)
+	if !m.barFocus || m.inputMode != inputQuery || m.barSel != 1 {
+		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last pill", m.barFocus, m.inputMode, m.barSel)
 	}
 	press(m, "backspace")
-	if len(m.filters) != 1 || m.filters[0].query != "alpha" {
-		t.Fatalf("filters = %+v, want beta removed", m.filters)
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
+		t.Fatalf("pills = %+v, want beta removed", m.pills)
 	}
 	press(m, "esc")
 	if m.barFocus {
@@ -120,16 +120,16 @@ func TestCtrlHRemovesTheFocusedChip(t *testing.T) {
 	commitText(m, "/", "beta")
 
 	press(m, "v", "left")
-	if !m.barFocus || m.inputMode != inputNone || m.barSel != 1 {
-		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last chip", m.barFocus, m.inputMode, m.barSel)
+	if !m.barFocus || m.inputMode != inputQuery || m.barSel != 1 {
+		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last pill", m.barFocus, m.inputMode, m.barSel)
 	}
 	press(m, "ctrl+h")
-	if len(m.filters) != 1 || m.filters[0].query != "alpha" {
-		t.Fatalf("filters = %+v, want beta removed by ctrl+h", m.filters)
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
+		t.Fatalf("pills = %+v, want beta removed by ctrl+h", m.pills)
 	}
 }
 
-// Esc backs out one level per focus and never clears filters, find, or chips.
+// Esc backs out one level per focus and never clears the bar's pills.
 func TestEscLadderNeverClearsFilters(t *testing.T) {
 	m := groupedModel(t)
 	commitText(m, "/", "keep")
@@ -139,8 +139,8 @@ func TestEscLadderNeverClearsFilters(t *testing.T) {
 
 	keep := func(step string) {
 		t.Helper()
-		if len(m.filters) != 1 || m.search != "keep" {
-			t.Fatalf("%s cleared filters=%d search=%q", step, len(m.filters), m.search)
+		if len(m.pills) != 2 {
+			t.Fatalf("%s cleared pills=%d", step, len(m.pills))
 		}
 	}
 
@@ -182,8 +182,8 @@ func TestEscLadderNeverClearsFilters(t *testing.T) {
 
 	press(m, "/", "x")
 	press(m, "esc")
-	if len(m.filters) != 2 {
-		t.Fatalf("esc with typed text: filters = %d, want the typed query kept as a chip", len(m.filters))
+	if len(m.pills) != 3 {
+		t.Fatalf("esc with typed text: pills = %d, want the typed query kept as a pill", len(m.pills))
 	}
 }
 
@@ -198,7 +198,6 @@ func TestSlashAndCtrlFFocusTheBarFromEveryFocus(t *testing.T) {
 	cases := []focusCase{
 		{"list", func() {}},
 		{"pane", func() { press(m, "right") }},
-		{"bar", func() { press(m, "v", "left") }},
 	}
 	for _, c := range cases {
 		for _, key := range []string{"/", "ctrl+f"} {
@@ -206,7 +205,7 @@ func TestSlashAndCtrlFFocusTheBarFromEveryFocus(t *testing.T) {
 			c.setup()
 			wasPane := m.paneFocus
 			press(m, key)
-			if !m.barFocus || m.inputMode == inputNone {
+			if !m.barFocus || m.inputMode != inputQuery {
 				t.Fatalf("%s then %s: bar focus=%v mode=%d, want the bar input open", c.name, key, m.barFocus, m.inputMode)
 			}
 			press(m, "esc")
@@ -285,16 +284,15 @@ func TestEscOnUngroupedRowInFlatListClearsScope(t *testing.T) {
 	}
 }
 
-// The filter bar's chips are the pane's first line; the target title no longer sits above them.
+// The query bar's pills are the pane's first line; the target title no longer sits above them.
 func TestFirstPaneLineIsThePillsRow(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "alpha", "beta")
-	m.filters = []textFilter{{query: "beta", keep: func(s string) bool { return strings.Contains(s, "beta") }}}
-	m.chipsChanged()
+	commitText(m, "/", "beta")
 
 	lines := paneOf(m)
 	if got := ansi.Strip(lines[0]); !strings.Contains(got, "[beta ×]") {
-		t.Fatalf("first pane line = %q, want the filter chip", got)
+		t.Fatalf("first pane line = %q, want the filter pill", got)
 	}
 	if got := ansi.Strip(lines[1]); !strings.Contains(got, "beta") {
 		t.Fatalf("second pane line = %q, want the first log line", got)

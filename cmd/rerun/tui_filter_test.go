@@ -44,37 +44,39 @@ func addLines(m *tuiModel, name string, lines ...string) {
 	m.applyEvents(evs)
 }
 
-// The counter updates on every keystroke, before the search is committed.
+// The kept/total count updates on every keystroke, before the pill is committed.
 func TestSearchCounterIsIncremental(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.frame()
 
 	press(m, "ctrl+f")
-	if m.inputMode != inputSearch {
-		t.Fatalf("inputMode = %d, want inputSearch", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("inputMode = %d, want inputQuery", m.inputMode)
 	}
 	typeString(m, "line-1")
-	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "1/11") {
-		t.Fatalf("input box = %q, want line-1 and 1/11", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "11/20") {
+		t.Fatalf("input box = %q, want line-1 and 11/20", got)
 	}
-	if got := bottomPaneLine(m); strings.Contains(got, "1/11") {
+	if got := bottomPaneLine(m); strings.Contains(got, "11/20") {
 		t.Fatalf("bottom line = %q, want no counter echo while the box is open", got)
 	}
 
 	typeString(m, "9")
-	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-19") || !strings.Contains(got, "1/1") {
-		t.Fatalf("input box = %q, want line-19 and 1/1", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-19") || !strings.Contains(got, "1/20") {
+		t.Fatalf("input box = %q, want line-19 and 1/20", got)
 	}
 
-	// The counter lands on the first hit in view, so only the total is fixed.
 	press(m, "backspace")
-	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "/11") {
-		t.Fatalf("after backspace box = %q, want line-1 and n/11", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line-1") || !strings.Contains(got, "11/20") {
+		t.Fatalf("after backspace box = %q, want line-1 and 11/20", got)
 	}
 }
 
-// New lines extend the matches while the query is live.
+// barLine is the pane's header row: the pills and the pill status.
+func barLine(m *tuiModel) string { return ansi.Strip(paneOf(m)[0]) }
+
+// New lines extend the matches while the pill is committed.
 func TestSearchRecomputesOnNewLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
@@ -82,14 +84,21 @@ func TestSearchRecomputesOnNewLines(t *testing.T) {
 	press(m, "ctrl+f")
 	typeString(m, "fresh")
 	press(m, "enter")
-	if got := bottomPaneLine(m); !strings.Contains(got, "0/0") {
-		t.Fatalf("bottom line = %q, want 0/0", got)
+	m.frame()
+	if got := barLine(m); !strings.Contains(got, "0/5 lines") {
+		t.Fatalf("bar = %q, want 0/5 lines", got)
+	}
+	if len(m.searchMatches) != 0 {
+		t.Fatalf("matches = %v, want none", m.searchMatches)
 	}
 
 	m.applyEvents(streamEvents("web", "fresh", 3).events)
 	m.frame()
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/3") {
-		t.Fatalf("bottom line = %q, want 1/3 after new matching lines", got)
+	if got := barLine(m); !strings.Contains(got, "3/8 lines") {
+		t.Fatalf("bar = %q, want 3/8 lines after new matching lines", got)
+	}
+	if len(m.searchMatches) != 3 {
+		t.Fatalf("matches = %v, want 3", m.searchMatches)
 	}
 }
 
@@ -104,10 +113,10 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	typeString(m, "line")
 	press(m, "enter")
 	if !m.follow {
-		t.Fatal("committing a search froze the pane before any jump")
+		t.Fatal("committing a pill froze the pane before any jump")
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "41/60") {
-		t.Fatalf("bottom line = %q, want 41/60", got)
+	if got := m.searchStatus(); !strings.HasSuffix(got, "/60") {
+		t.Fatalf("search status = %q, want n/60", got)
 	}
 
 	press(m, "n")
@@ -120,13 +129,13 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	if want := 41 - m.vp.Height()/2; m.vp.YOffset() != want {
 		t.Fatalf("YOffset = %d, want the match centered at %d", m.vp.YOffset(), want)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "42/60") {
-		t.Fatalf("bottom line after n = %q, want 42/60", got)
+	if got := m.searchStatus(); got != "42/60" {
+		t.Fatalf("status after n = %q, want 42/60", got)
 	}
 
 	press(m, "N")
-	if got := bottomPaneLine(m); !strings.Contains(got, "41/60") {
-		t.Fatalf("bottom line after N = %q, want 41/60", got)
+	if got := m.searchStatus(); got != "41/60" {
+		t.Fatalf("status after N = %q, want 41/60", got)
 	}
 
 	m.searchRow = 59
@@ -134,8 +143,8 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	if m.searchRow != 0 {
 		t.Fatalf("n at the last match did not wrap: row = %d", m.searchRow)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/60") {
-		t.Fatalf("bottom line after wrap = %q, want 1/60", got)
+	if got := m.searchStatus(); got != "1/60" {
+		t.Fatalf("status after wrap = %q, want 1/60", got)
 	}
 
 	m.searchRow = 0
@@ -143,8 +152,8 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	if m.searchRow != 59 {
 		t.Fatalf("N at the first match did not wrap: row = %d", m.searchRow)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "60/60") {
-		t.Fatalf("bottom line after wrap = %q, want 60/60", got)
+	if got := m.searchStatus(); got != "60/60" {
+		t.Fatalf("status after wrap = %q, want 60/60", got)
 	}
 }
 
@@ -162,38 +171,32 @@ func TestSearchKeysInertWithoutQuery(t *testing.T) {
 	if m.vp.YOffset() != yOff {
 		t.Fatalf("n/N without a search moved the pane: %d -> %d", yOff, m.vp.YOffset())
 	}
-	if m.search != "" || m.searchRow != -1 {
-		t.Fatalf("n/N without a search armed something: search=%q row=%d", m.search, m.searchRow)
+	if len(m.pills) != 0 || m.searchRow != -1 {
+		t.Fatalf("n/N without a pill armed something: pills=%v row=%d", m.pills, m.searchRow)
 	}
 }
 
-// esc in the open find box clears the query; enter keeps it, and esc in the list never clears it.
-func TestSearchEscInBoxClearsTheQuery(t *testing.T) {
+// Reopening the bar always starts from an empty input, and esc in the list
+// never clears the committed pills.
+func TestSearchEscInBoxKeepsThePill(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.frame()
 
 	press(m, "ctrl+f")
 	typeString(m, "line")
-	press(m, "esc")
-	if m.inputMode != inputNone || m.barFocus || m.search != "" {
-		t.Fatalf("esc while typing: mode=%d bar=%v search=%q, want the query cleared and the bar blurred",
-			m.inputMode, m.barFocus, m.search)
+	press(m, "enter")
+	if len(m.pills) != 1 || m.pills[0].raw != "line" || m.inputMode != inputNone {
+		t.Fatalf("enter did not commit: mode=%d pills=%v", m.inputMode, m.pills)
 	}
 
 	press(m, "ctrl+f")
 	if m.input != "" {
-		t.Fatalf("reopening after esc seeded input = %q, want empty", m.input)
+		t.Fatalf("reopening seeded input = %q, want empty", m.input)
 	}
-	typeString(m, "line")
-	press(m, "enter")
-	if m.search != "line" || m.inputMode != inputNone {
-		t.Fatalf("enter did not commit: mode=%d search=%q", m.inputMode, m.search)
-	}
-
 	press(m, "esc")
-	if m.search != "line" {
-		t.Fatalf("esc in the list cleared search = %q", m.search)
+	if len(m.pills) != 1 {
+		t.Fatalf("esc in the list cleared pills = %v", m.pills)
 	}
 }
 
@@ -217,16 +220,16 @@ func TestBottomLinePrecedence(t *testing.T) {
 	}
 
 	press(m, "ctrl+f")
-	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "line") {
-		t.Fatalf("the input box lost the seeded query: %q", got)
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "enter add pill") {
+		t.Fatalf("the input box did not open: %q", got)
 	}
-	if got := paneOf(m)[0]; strings.Contains(got, "find line") {
-		t.Fatalf("the bar still shows the prompt: %q", got)
+	if got := ansi.Strip(paneOf(m)[0]); !strings.Contains(got, "[line ×]") {
+		t.Fatalf("the bar lost the pill: %q", got)
 	}
 	if got := bottomPaneLine(m); !strings.Contains(got, "↓ 3 new") {
 		t.Fatalf("the open bar displaced the marker: %q", got)
 	}
-	press(m, "enter")
+	press(m, "esc")
 
 	// Copy feedback wins next, still leaving the marker hit-testable.
 	x := paneX(m)
@@ -247,8 +250,8 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	m.frame()
 
 	press(m, "v")
-	if m.inputMode != inputFilter {
-		t.Fatalf("inputMode = %d, want inputFilter", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("inputMode = %d, want inputQuery", m.inputMode)
 	}
 	typeString(m, "keep")
 	press(m, "enter")
@@ -258,8 +261,8 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	if got := rawPane(m); !equalStrings(got, want) {
 		t.Fatalf("filtered pane = %q, want %q", got, want)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "3 lines") {
-		t.Fatalf("bottom line = %q, want 3 lines", got)
+	if got := barLine(m); !strings.Contains(got, "3/5 lines") {
+		t.Fatalf("bar = %q, want 3/5 lines", got)
 	}
 
 	press(m, "esc")
@@ -268,10 +271,10 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	}
 	press(m, "v", "backspace", "esc")
 	if m.filterOn() || m.paneSelDirty {
-		t.Fatalf("backspace on the empty input left the filter: filters=%d dirty=%v", len(m.filters), m.paneSelDirty)
+		t.Fatalf("backspace on the empty input left the filter: pills=%d dirty=%v", len(m.pills), m.paneSelDirty)
 	}
 	if got := len(rawPane(m)); got != 5 {
-		t.Fatalf("removing the chip restored %d rows, want 5", got)
+		t.Fatalf("removing the pill restored %d rows, want 5", got)
 	}
 }
 
@@ -318,8 +321,8 @@ func TestYQFilterKeepsTruthyJSONOnly(t *testing.T) {
 	if got := rawPane(m); !equalStrings(got, want) {
 		t.Fatalf("yq pane = %q, want %q", got, want)
 	}
-	if got := bottomPaneLine(m); !strings.Contains(got, "2 lines") {
-		t.Fatalf("bottom line = %q, want 2 lines", got)
+	if got := barLine(m); !strings.Contains(got, "2/5 lines") {
+		t.Fatalf("bar = %q, want 2/5 lines", got)
 	}
 }
 
@@ -406,6 +409,34 @@ func TestNewLinesCollectWhileFiltered(t *testing.T) {
 	}
 }
 
+// The kept/total counts are cached on the pane rebuild, not recomputed per
+// read, and run rules count in neither.
+func TestMatchCountsCachedAndSkipRunRules(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "keep-0", "drop-0", "keep-1")
+	m.addRule(0, startedRule("web", m.now, "sleep 1"))
+	m.frame()
+	if kept, total := m.matchCounts(); kept != 3 || total != 3 {
+		t.Fatalf("counts = %d/%d, want 3/3 with the run rule out of both", kept, total)
+	}
+	commitText(m, "/", "keep")
+	if kept, total := m.matchCounts(); kept != 2 || total != 3 {
+		t.Fatalf("counts = %d/%d, want 2/3", kept, total)
+	}
+	// The rule row stays visible under the filter; it just never counts.
+	m.ensurePane()
+	if len(m.paneSel) != 3 {
+		t.Fatalf("paneSel = %d rows, want the 2 kept lines plus the rule", len(m.paneSel))
+	}
+
+	// A clean pane serves the counts from the cache, with no re-filter.
+	m.paneSelDirty = false
+	m.countKept, m.countTotal = 7, 9
+	if kept, total := m.matchCounts(); kept != 7 || total != 9 {
+		t.Fatalf("counts = %d/%d, want the cached 7/9", kept, total)
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -470,8 +501,8 @@ func TestFilterEscKeepsTypedChip(t *testing.T) {
 		t.Fatalf("the junk edit did not apply live:\n%s", body)
 	}
 	press(m, "esc")
-	if len(m.filters) != 2 || m.filters[0].query != "keep" || m.filters[1].query != "junk" {
-		t.Fatalf("esc left filters = %+v, want keep then junk", m.filters)
+	if len(m.pills) != 2 || m.pills[0].raw != "keep" || m.pills[1].raw != "junk" {
+		t.Fatalf("esc left pills = %+v, want keep then junk", m.pills)
 	}
 	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {
@@ -517,15 +548,16 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 	press(m, "ctrl+f")
 	typeString(m, "alpha")
 	press(m, "enter")
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/2") {
-		t.Fatalf("bottom line = %q, want 1/2", got)
+	m.frame()
+	if got := barLine(m); !strings.Contains(got, "2/2 lines") {
+		t.Fatalf("bar = %q, want 2/2 lines", got)
 	}
 
 	m.toggleMute(0)
 	fadeNotice(m)
 	m.frame()
-	if got := bottomPaneLine(m); !strings.Contains(got, "1/1") {
-		t.Fatalf("after muting web the counter = %q, want 1/1", got)
+	if got := barLine(m); !strings.Contains(got, "1/1 lines") {
+		t.Fatalf("after muting web the bar = %q, want 1/1 lines", got)
 	}
 }
 
@@ -539,11 +571,14 @@ func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	press(m, "v")
 	typeString(m, ".a >")
 	m.frame()
-	if m.inputMode != inputFilter {
+	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want the bar still open on a parse error", m.inputMode)
 	}
-	if got := paneOf(m)[0]; !strings.Contains(got, "yq:") {
-		t.Fatalf("bar line = %q, want the yq error", got)
+	if m.queryErr == "" {
+		t.Fatal("a bad expression set no parse error")
+	}
+	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, m.queryErr) {
+		t.Fatalf("box = %q, want the yq error %q in the footer", got, m.queryErr)
 	}
 	if m.filterOn() {
 		t.Fatal("a parse error left the filter active")
@@ -553,13 +588,13 @@ func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	}
 
 	press(m, "enter")
-	if m.inputMode != inputFilter {
+	if m.inputMode != inputQuery {
 		t.Fatal("enter closed the bar despite the parse error")
 	}
 
 	press(m, "esc")
-	if len(m.filters) != 0 || m.inputMode != inputNone {
-		t.Fatalf("esc kept the invalid draft: filters=%d mode=%d", len(m.filters), m.inputMode)
+	if len(m.pills) != 0 || m.inputMode != inputNone {
+		t.Fatalf("esc kept the invalid draft: pills=%d mode=%d", len(m.pills), m.inputMode)
 	}
 	if got := m.paneLen(); got != 3 {
 		t.Fatalf("after esc the pane kept %d rows, want 3", got)

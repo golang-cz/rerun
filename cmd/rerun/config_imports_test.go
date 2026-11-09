@@ -790,3 +790,27 @@ func TestMakeGroupsSortLast(t *testing.T) {
 		}
 	}
 }
+
+// An import's same-named root group hands its saved queries down to the
+// imported targets, like it does its columns; the file's own win a name clash.
+func TestImportGroupPassesQueriesDown(t *testing.T) {
+	f := newImportFixture(t,
+		"groups:\n  bpn:\n    queries:\n      errors: level=error\n      slow: group-slow\n\nimports:\n  - path: ../bpn/rerun.yml\n",
+		map[string]string{
+			"bpn/rerun.yml": "api:\n  cmd: go run ./api\n  queries:\n    slow: api-slow\n",
+		})
+	cfg, err := ParseConfig(f.root)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	api, _ := cfg.Find("bpn/api")
+	if got := api.Queries["errors"]; got != "level=error" {
+		t.Fatalf("errors = %q, want the root group's query handed down", got)
+	}
+	if got := api.Queries["slow"]; got != "api-slow" {
+		t.Fatalf("slow = %q, want the file's own winning the clash", got)
+	}
+	if got := api.groupQueries["errors"]; got != "level=error" {
+		t.Fatalf("groupQueries = %v, want errors tracked as inherited", api.groupQueries)
+	}
+}

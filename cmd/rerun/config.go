@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -77,6 +78,14 @@ type Target struct {
 	Columns []Column
 	// ownColumns is set when the target writes its own `columns:` instead of inheriting.
 	ownColumns bool
+	// Queries are the effective saved queries: the group's, overlaid with the target's own.
+	Queries map[string]string
+	// ownQueries are the target's `queries:` entries alone, and groupQueries the
+	// ones its group handed down. groupQueryCols are the group's columns, which
+	// the group's queries resolve their field names against.
+	ownQueries     map[string]string
+	groupQueries   map[string]string
+	groupQueryCols []Column
 	// Schema names the top-level `schemas:` entry the target uses, or "".
 	Schema   string
 	Delay    time.Duration
@@ -154,6 +163,8 @@ type Config struct {
 	Missing []missingImport
 	// MakeOnly is set when no rerun.yml exists and the Makefile in its dir is the whole config.
 	MakeOnly bool
+	// Queries are the top-level saved queries, shared by every pane scope.
+	Queries map[string]string
 	// Notices are warnings that do not stop the config from loading.
 	Notices []string
 }
@@ -353,11 +364,14 @@ func ParseConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}}
+	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}, Queries: file.queries}
 	if file.legacy {
 		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s %s", filepath.Base(abs), migrateNoticeText))
 	}
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateQueries(); err != nil {
 		return nil, err
 	}
 
@@ -412,6 +426,7 @@ func parseConfigBytes(path string, data []byte) (*configSource, *yaml.Node, erro
 type parsedFile struct {
 	targets []Target
 	schemas map[string]groupDef
+	queries map[string]string
 	// legacy is set for a file whose targets sit at the top level: no `targets:` key, at least one top-level target.
 	legacy bool
 }
@@ -419,6 +434,7 @@ type parsedFile struct {
 // groupDef is one `groups:` entry: its columns, and the `muted:`, `hide:` and `start:` its members start with.
 type groupDef struct {
 	columns []Column
+	queries map[string]string
 	muted   *bool
 	hide    bool
 	// hideSet tells `hide: false` apart from no hide key, which Makefile groups read differently.
@@ -436,6 +452,12 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 		return parsedFile{}, err
 	}
 	out := parsedFile{schemas: schemas}
+	if _, block := mappingEntry(root, queriesKey); block != nil {
+		out.queries, err = parseQueries(src, queriesKey, block, nil)
+		if err != nil {
+			return parsedFile{}, err
+		}
+	}
 
 	if key, block := mappingEntry(root, targetsKey); block != nil {
 		// A legacy target named `targets` reads as the new form's block, so catch it first.
@@ -469,11 +491,11 @@ func checkTopLevel(src *configSource, root *yaml.Node) error {
 			return src.at(key, 1, "top-level keys must be strings")
 		}
 		switch key.Value {
-		case targetsKey, importsKey, groupsBlock.block, schemasBlock.block:
+		case targetsKey, importsKey, groupsBlock.block, schemasBlock.block, queriesKey:
 			continue
 		}
 		e := src.at(key, len(key.Value), fmt.Sprintf("unknown top-level key %q", key.Value))
-		e.note = "top-level keys: imports, groups, schemas, targets"
+		e.note = "top-level keys: imports, groups, schemas, targets, queries"
 		return e
 	}
 	return nil
@@ -501,7 +523,7 @@ func hasTopLevelTargets(root *yaml.Node) bool {
 			return true
 		}
 		switch key.Value {
-		case importsKey, groupsBlock.block, schemasBlock.block:
+		case importsKey, groupsBlock.block, schemasBlock.block, queriesKey:
 			continue
 		}
 		return true
@@ -528,7 +550,7 @@ func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupD
 			if name == importsKey && value.Kind != yaml.SequenceNode && !(value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
 				return nil, src.at(key, len(name), "`imports` is reserved; rename the target")
 			}
-			if name == groupsBlock.block || name == schemasBlock.block || name == importsKey {
+			if name == groupsBlock.block || name == schemasBlock.block || name == importsKey || name == queriesKey {
 				continue
 			}
 		}
@@ -579,6 +601,126 @@ var (
 // targetsKey is the reserved top-level key holding the targets, the new form.
 const targetsKey = "targets"
 
+// queriesKey is the reserved key holding saved query pills, at the top level,
+// in a group, and in a target.
+const queriesKey = "queries"
+
+// parseQueries reads a `queries:` mapping of name -> pill string. Every value
+// must parse with cols, the columns its scope resolves field names against.
+func parseQueries(src *configSource, owner string, node *yaml.Node, cols []Column) (map[string]string, error) {
+	node = deref(node)
+	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, src.at(node, nodeSpan(node), fmt.Sprintf("%s: expected a mapping of query names", owner))
+	}
+	out := make(map[string]string)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := deref(node.Content[i]), deref(node.Content[i+1])
+		if key.Kind != yaml.ScalarNode {
+			return nil, src.at(key, 1, owner+": query names must be strings")
+		}
+		name := key.Value
+		if _, ok := out[name]; ok {
+			return nil, src.at(key, len(name), fmt.Sprintf("%s: duplicate query %q", owner, name))
+		}
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("%s: query %q: expected a string, got %s", owner, name, yamlType(value)))
+		}
+		if _, err := parsePills(value.Value, cols); err != nil {
+			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("%s: query %q: %v", owner, name, err))
+		}
+		out[name] = value.Value
+	}
+	return out, nil
+}
+
+// mergeQueries overlays b on a; the more specific b wins a name clash.
+func mergeQueries(a, b map[string]string) map[string]string {
+	if len(a) == 0 {
+		return b
+	}
+	out := maps.Clone(a)
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
+
+// queryRef is one saved query and the columns its field names resolve against.
+type queryRef struct {
+	query string
+	cols  []Column
+}
+
+// maxQueryDepth caps a chain of saved queries referring to saved queries.
+const maxQueryDepth = 8
+
+// validateQueries resolves every saved query's @refs in its effective scope at
+// load: an unknown name, a cycle, or a chain past maxQueryDepth is a config
+// error, not an inert pill that matches every line.
+func (cfg *Config) validateQueries() error {
+	global := func(name string) (queryRef, bool) {
+		q, ok := cfg.Queries[name]
+		return queryRef{q, nil}, ok
+	}
+	check := func(owner string, names map[string]string, lookup func(string) (queryRef, bool)) error {
+		for _, name := range slices.Sorted(maps.Keys(names)) {
+			if err := checkQueryRef(lookup, nil, name); err != nil {
+				return fmt.Errorf("%s: %s: query %q: %v", cfg.Path, owner, name, err)
+			}
+		}
+		return nil
+	}
+	if err := check(queriesKey, cfg.Queries, global); err != nil {
+		return err
+	}
+	for _, t := range cfg.Targets {
+		lookup := func(name string) (queryRef, bool) {
+			if q, ok := t.ownQueries[name]; ok {
+				return queryRef{q, t.Columns}, true
+			}
+			if q, ok := t.groupQueries[name]; ok {
+				return queryRef{q, t.groupQueryCols}, true
+			}
+			return global(name)
+		}
+		if err := check(fmt.Sprintf("target %q", t.Name), t.Queries, lookup); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkQueryRef walks one saved query's @refs; stack holds the chain so a
+// cycle names itself instead of recursing forever.
+func checkQueryRef(lookup func(string) (queryRef, bool), stack []string, name string) error {
+	ref, ok := lookup(name)
+	if !ok {
+		return fmt.Errorf("unknown query @%s", name)
+	}
+	if slices.Contains(stack, name) {
+		return fmt.Errorf("@%s refers to itself", name)
+	}
+	if len(stack) > maxQueryDepth {
+		return fmt.Errorf("@%s nests saved queries past %d levels", name, maxQueryDepth)
+	}
+	pills, err := parsePills(ref.query, ref.cols)
+	if err != nil {
+		return err
+	}
+	for _, p := range pills {
+		if p.saved == "" {
+			continue
+		}
+		if err := checkQueryRef(lookup, append(stack, name), p.saved); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // migrateNoticeText is the footer notice a file in the legacy form shows.
 const migrateNoticeText = "uses top-level targets; run rerun -migrate"
 
@@ -586,7 +728,7 @@ const migrateNoticeText = "uses top-level targets; run rerun -migrate"
 const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "muted", "hide", "start"}
+var schemaFields = []string{"columns", "queries", "muted", "hide", "start"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
@@ -649,6 +791,7 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 	}
 
 	var def groupDef
+	var queriesNode *yaml.Node
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
@@ -659,6 +802,10 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 		seen[field] = true
 
 		switch field {
+		case "queries":
+			// Validated after the loop, so a later columns: still resolves its fields.
+			queriesNode = node.Content[i+1]
+
 		case "columns":
 			parsed, err := parseColumnList(src, owner, field, deref(node.Content[i+1]))
 			if err != nil {
@@ -694,13 +841,20 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 		}
 	}
 
+	if queriesNode != nil {
+		var err error
+		def.queries, err = parseQueries(src, fmt.Sprintf("%s: field %q", owner, queriesKey), queriesNode, def.columns)
+		if err != nil {
+			return groupDef{}, err
+		}
+	}
 	return def, nil
 }
 
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "group", "muted", "hide", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "queries", "group", "muted", "hide", "open", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
@@ -712,6 +866,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
 	var hide *bool
+	var queriesNode *yaml.Node
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
 		field := key.Value
@@ -769,6 +924,10 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			}
 			target.Columns = cols
 			target.ownColumns = true
+
+		case "queries":
+			// Validated after the group merge, so the effective columns resolve its fields.
+			queriesNode = value
 
 		case "group", "schema":
 			s, err := scalarField(src, name, field, value)
@@ -842,6 +1001,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		if !seen["columns"] {
 			target.Columns = slices.Clone(group.columns)
 		}
+		target.groupQueries = group.queries
+		target.groupQueryCols = group.columns
+		target.Queries = group.queries
 		if target.Muted == nil {
 			target.Muted = group.muted
 		}
@@ -853,6 +1015,14 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		if !target.startSet && group.startSet {
 			target.Start, target.startSet = group.start, true
 		}
+	}
+	if queriesNode != nil {
+		own, err := parseQueries(src, fmt.Sprintf("%s: field %q", owner, queriesKey), queriesNode, target.Columns)
+		if err != nil {
+			return Target{}, err
+		}
+		target.ownQueries = own
+		target.Queries = mergeQueries(target.Queries, own)
 	}
 	if strings.TrimSpace(target.Cmd) == "" {
 		return Target{}, src.at(keyNode, len(name), fmt.Sprintf("target %q: run is required", name))

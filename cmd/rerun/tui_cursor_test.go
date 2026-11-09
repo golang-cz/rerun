@@ -105,8 +105,8 @@ func TestKeyboardPicksMatchTheClicks(t *testing.T) {
 
 	cursorTo(t, m, "status")
 	press(m, "f")
-	if len(m.chips) != 1 || m.chips[0].expr != ".status == 403" {
-		t.Fatalf("chips = %+v, want .status == 403", m.chips)
+	if len(m.pills) != 1 || m.pills[0].raw != "status=403" {
+		t.Fatalf("pills = %+v, want status=403", m.pills)
 	}
 }
 
@@ -123,8 +123,8 @@ func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	if want := "move the cursor onto a scalar value in an expanded line"; m.hint != want {
 		t.Fatalf("hint = %q, want %q", m.hint, want)
 	}
-	if len(m.chips) != 0 {
-		t.Fatalf("chips = %+v for an object value, want none", m.chips)
+	if len(m.pills) != 0 {
+		t.Fatalf("pills = %+v for an object value, want none", m.pills)
 	}
 }
 

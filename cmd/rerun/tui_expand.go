@@ -350,13 +350,12 @@ func (m *tuiModel) inPaneHeader(x, y int) bool {
 	return x > m.layout.leftW && x < m.width && y >= 0 && y < m.titleHeight()
 }
 
-// clickHeader acts on a header press at pane cell px: a chip's or a column's × removes it.
+// clickHeader acts on a header press at pane cell px: a pill's or a column's × removes it.
 func (m *tuiModel) clickHeader(px, y int) {
 	if y < m.barRows() {
-		chips := m.barChips()
 		for _, h := range m.layout.chips {
-			if px == h.x && h.idx < len(chips) {
-				m.removeBarChip(chips[h.idx])
+			if px == h.x && h.idx < len(m.pills) {
+				m.removePill(h.idx)
 				return
 			}
 		}

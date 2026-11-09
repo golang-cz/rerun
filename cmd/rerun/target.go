@@ -232,6 +232,9 @@ type targetGroup struct {
 	mu      sync.Mutex
 	targets []Target
 	runners []*targetRunner
+	// queries is the config's global saved-query set as last emitted to the
+	// front-end, so a queries-only edit still fires a reconcile.
+	queries map[string]string
 	// missing is the optional imports whose file is absent at the last load.
 	missing []missingImport
 	closing bool

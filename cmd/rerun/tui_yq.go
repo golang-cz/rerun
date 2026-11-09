@@ -19,35 +19,6 @@ func yqParse(expr string) (*yqlib.ExpressionNode, error) {
 	return yqlib.ExpressionParser.ParseExpression(expr)
 }
 
-// yqMatches reports whether one raw pane line is kept by the expression. A
-// line that is not JSON, or that the expression cannot evaluate, is dropped.
-func yqMatches(expr *yqlib.ExpressionNode, line string) bool {
-	dec := yqlib.NewJSONDecoder()
-	if err := dec.Init(strings.NewReader(line)); err != nil {
-		return false
-	}
-	node, err := dec.Decode()
-	if err != nil {
-		return false
-	}
-	in := list.New()
-	in.PushBack(node)
-	out, err := yqNav.GetMatchingNodes(yqlib.Context{MatchingNodes: in}, expr)
-	if err != nil {
-		return false
-	}
-	for el := out.MatchingNodes.Front(); el != nil; el = el.Next() {
-		node, ok := el.Value.(*yqlib.CandidateNode)
-		if !ok {
-			continue
-		}
-		if yqTruthy(node) {
-			return true
-		}
-	}
-	return false
-}
-
 // columnProgram is one compiled column: a single expression, or a template
 // whose parts alternate literal text and expressions.
 type columnProgram struct {

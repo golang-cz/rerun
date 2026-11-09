@@ -8,19 +8,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// withInputMode runs one case against the filter box and the find box, the two
-// open inputs that share m.input.
+// withInputMode runs one case against the query bar, the one open input.
 func withInputMode(t *testing.T, fn func(t *testing.T, m *tuiModel)) {
 	t.Helper()
-	for _, mode := range []struct{ name, key string }{{"filter", "/"}, {"find", "ctrl+f"}} {
-		t.Run(mode.name, func(t *testing.T) {
-			m := newTestModel(t, target("web"))
-			addLines(m, "web", "alpha beta", "delta gamma")
-			m.frame()
-			press(m, mode.key)
-			fn(t, m)
-		})
-	}
+	t.Run("query", func(t *testing.T) {
+		m := newTestModel(t, target("web"))
+		addLines(m, "web", "alpha beta", "delta gamma")
+		m.frame()
+		press(m, "/")
+		fn(t, m)
+	})
 }
 
 // The arrows walk the typed text rune by rune and typing lands at the cursor.
@@ -143,22 +140,22 @@ func TestInputCtrlWDeletesWordBefore(t *testing.T) {
 	})
 }
 
-// An empty input hands the left arrow to the chips, exactly as before.
+// An empty input hands the left arrow to the pills, with the bar kept open.
 func TestInputLeftOnEmptyStepsOntoChips(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	press(m, "/")
 	press(m, "left")
 
-	if m.inputMode != inputNone {
-		t.Fatalf("inputMode = %d, want the chips to take the arrows", m.inputMode)
+	if m.inputMode != inputQuery {
+		t.Fatalf("inputMode = %d, want the bar kept open while the pills take the arrows", m.inputMode)
 	}
 	if m.barSel != 0 {
-		t.Fatalf("barSel = %d, want the last chip 0 focused", m.barSel)
+		t.Fatalf("barSel = %d, want the last pill 0 focused", m.barSel)
 	}
 }
 
-// Typed text at cursor 0 keeps the arrows inside it, so a query is never lost to the chips.
+// Typed text at cursor 0 hands the left arrow to the pills but never loses the text.
 func TestInputLeftOnTypedTextStaysInInput(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
@@ -166,9 +163,12 @@ func TestInputLeftOnTypedTextStaysInInput(t *testing.T) {
 	typeString(m, "be")
 	press(m, "home", "left")
 
-	if m.inputMode != inputFilter || m.input != "be" || m.inputCursor != 0 {
+	if m.inputMode != inputQuery || m.input != "be" || m.inputCursor != 0 {
 		t.Fatalf("mode=%d input=%q cursor=%d, want the input open and the cursor at 0",
 			m.inputMode, m.input, m.inputCursor)
+	}
+	if m.barSel != 0 {
+		t.Fatalf("barSel = %d, want the last pill 0 focused", m.barSel)
 	}
 }
 
@@ -184,9 +184,6 @@ func TestInputSelectAllTypingReplaces(t *testing.T) {
 		if m.input != "b" || m.inputCursor != 1 || m.inputSel {
 			t.Fatalf("input=%q cursor=%d sel=%v, want %q at 1 with no selection",
 				m.input, m.inputCursor, m.inputSel, "b")
-		}
-		if m.inputMode == inputSearch && m.search != "b" {
-			t.Fatalf("search = %q, want the replaced query", m.search)
 		}
 	})
 }
@@ -317,8 +314,8 @@ func TestInputLongTextKeepsTheCursorVisible(t *testing.T) {
 	})
 }
 
-// Reopening the box puts the cursor back at the end of the text it starts from.
-func TestInputReopenPutsCursorAtEnd(t *testing.T) {
+// Reopening the box starts empty; the committed pill sits on the bar.
+func TestInputReopenStartsEmpty(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "alpha beta")
 	m.frame()
@@ -329,8 +326,11 @@ func TestInputReopenPutsCursorAtEnd(t *testing.T) {
 	press(m, "enter")
 
 	press(m, "ctrl+f")
-	if m.input != "alpha" || m.inputCursor != 5 {
-		t.Fatalf("input=%q cursor=%d, want the kept query with the cursor at its end", m.input, m.inputCursor)
+	if m.input != "" || m.inputCursor != 0 {
+		t.Fatalf("input=%q cursor=%d, want a fresh empty input", m.input, m.inputCursor)
+	}
+	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
+		t.Fatalf("pills = %v, want the committed alpha pill", m.pills)
 	}
 }
 
