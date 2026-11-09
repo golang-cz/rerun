@@ -811,3 +811,41 @@ func TestExpandingTallerThanThePaneShowsTheLineAtTop(t *testing.T) {
 		t.Fatalf("offset = %d, want 40, the line at the top", got)
 	}
 }
+
+// Following, → into the pane must not pause the tail when a rule ends the pane.
+func TestRightArrowKeepsLiveTailPastARule(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	paneOut(m, "web", "hello")
+	m.applyEvent(event{kind: evExited, target: "web", status: "exit 1", code: 1})
+	m.frame()
+
+	press(m, "right")
+	if !m.paneFocus {
+		t.Fatal("→ did not focus the pane")
+	}
+	if !m.follow {
+		t.Fatal("→ paused the live tail under a rule line")
+	}
+}
+
+// A cursor the user placed on screen survives a ← → round trip.
+func TestRightArrowKeepsUserPlacedCursor(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "l", 30).events)
+	m.frame()
+
+	press(m, "right", "up", "up")
+	m.frame()
+	placed := m.paneCursorRow()
+	if m.follow {
+		t.Fatal("moving the cursor did not pause the tail")
+	}
+
+	press(m, "left", "right")
+	if got := m.paneCursorRow(); got != placed {
+		t.Fatalf("← → moved the cursor from row %d to %d, want it kept", placed, got)
+	}
+	if m.follow {
+		t.Fatal("← → resumed the tail")
+	}
+}

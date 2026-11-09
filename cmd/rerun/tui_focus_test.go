@@ -328,8 +328,8 @@ func TestFocusPutsCursorOnTheLastServiceLine(t *testing.T) {
 	if got := m.visibleRaw[m.paneCurRaw]; got != "two" {
 		t.Fatalf("focus put the cursor on %q, want the service's last line", got)
 	}
-	if m.follow {
-		t.Fatal("the cursor left the newest line but the tail still follows")
+	if !m.follow {
+		t.Fatal("focus paused the live tail under a rule line")
 	}
 }
 

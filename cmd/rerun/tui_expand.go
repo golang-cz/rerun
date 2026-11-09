@@ -265,6 +265,11 @@ func (m *tuiModel) focusPane() {
 	if n == 0 {
 		return
 	}
+	// A paused cursor on a service line in view is the user's place: a ← → round trip keeps it.
+	if !m.follow && m.onScreenServiceCursor() {
+		m.pauseTail()
+		return
+	}
 	// rerun's own rules are not service output, so they never take the cursor.
 	target := -1
 	for row := n - 1; row >= 0 && target < 0; row-- {
@@ -280,11 +285,21 @@ func (m *tuiModel) focusPane() {
 	if target < top || target >= top+m.paneRows() {
 		target = n - 1
 	}
-	if m.follow && target == n-1 {
+	// Placing the cursor on a live tail must not pause it: a rule line can end the pane.
+	if m.follow {
+		m.setPaneCursor(target)
 		return
 	}
 	m.pauseTail()
 	m.setPaneCursor(target)
+}
+
+// onScreenServiceCursor reports whether the cursor sits on a service line inside the viewport.
+func (m *tuiModel) onScreenServiceCursor() bool {
+	row := m.paneCursorRow()
+	r := m.rowInfo(row)
+	return r.sub < 0 && !m.visibleSep[r.raw].isSep() &&
+		row >= m.vp.YOffset() && row < m.vp.YOffset()+m.paneRows()
 }
 
 // cursorLine is the shown line under the cursor, false while it sits on an expansion row.
