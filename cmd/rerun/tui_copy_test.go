@@ -115,6 +115,41 @@ func TestFrozenClickCopiesOneRawLine(t *testing.T) {
 	}
 }
 
+// A one-cell drag on one line copies that line, stripped of its target prefix.
+func TestFrozenDragOneCellCopiesOneRawLine(t *testing.T) {
+	m := frozenPane(t)
+	x, y := paneX(m), 2+m.titleHeight()
+	idx := m.vp.YOffset() + y - m.titleHeight()
+	want := m.visibleRaw[idx]
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(motion(x+1, y))
+	m.handleMouse(release(x+1, y))
+
+	if m.selAnchor != nil {
+		t.Fatal("the release kept the selection")
+	}
+	if m.copySeq == "" {
+		t.Fatal("the drag did not set a copy sequence")
+	}
+	if got := decodeCopy(t, m.copySeq); got != want+"\n" {
+		t.Fatalf("payload = %q, want %q", got, want+"\n")
+	}
+	if strings.HasPrefix(want, "web  ") {
+		t.Fatalf("the raw line kept the target prefix: %q", want)
+	}
+	if m.copyHint != "copied 1 line" {
+		t.Fatalf("hint = %q, want copied 1 line", m.copyHint)
+	}
+	wantUntil := m.now.Add(hintDuration)
+	if m.copyUntil != wantUntil {
+		t.Fatalf("copyUntil = %v, want %v", m.copyUntil, wantUntil)
+	}
+	if m.hintUntil == wantUntil {
+		t.Fatal("the copy armed the m/s hint window instead of its own")
+	}
+}
+
 func TestFrozenDragCopiesTheRange(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)

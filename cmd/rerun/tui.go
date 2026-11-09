@@ -233,9 +233,18 @@ type tuiModel struct {
 	copyUntil time.Time
 
 	// selAnchor is the content index a frozen drag started on; nil means no
-	// selection. selEnd is the drag row's current content index.
-	selAnchor *int
-	selEnd    int
+	// selection. selEnd is the drag row's current content index. selMoved marks
+	// the press as a drag on its first motion; without it a same-cell release
+	// is a click. selCell is the press cell a click's release must land on.
+	// selSeq/selSub/selExp are the pressed line's identity — its sequence,
+	// expansion subrow, and expandability at press — so a release after the
+	// stream shifted resolves the line instead of trusting a stale index.
+	selAnchor          *int
+	selEnd             int
+	selMoved           bool
+	selCellX, selCellY int
+	selSeq, selSub     int
+	selExp             bool
 
 	// merged is every line in arrival order; visible is the pane's
 	// materialized view of it, which muting and soloing filter.
@@ -843,7 +852,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		if ev.restart {
 			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp, cmd: oneLine(t.spec.Cmd)}
 			t.lastRule = rr
-			m.addRule(i, sepLine{restart: rr, icon: "↻", full: rr.cmd})
+			m.addRule(i, sepLine{restart: rr, full: rr.cmd})
 			if m.follow && m.solo == i && m.schemaSel == "" {
 				m.pinSeq, m.pinGap = m.nextSeq, false
 			}

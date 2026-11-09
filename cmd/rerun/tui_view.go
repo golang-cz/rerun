@@ -125,6 +125,8 @@ func (m *tuiModel) View() tea.View {
 	v := tea.NewView(m.frame())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// Blur clears an armed press whose mouse-up the focus loss can swallow.
+	v.ReportFocus = true
 	// v2 always asks for basic key disambiguation, which is all we need: the
 	// decoder's own spellings (ctrl+shift+g, shift+n, shift+/) arrive whole.
 	// Every extra flag stays off, so no release or repeat events we never read.

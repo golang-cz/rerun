@@ -381,9 +381,49 @@ func TestClickOnBuildIconTogglesRule(t *testing.T) {
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.frame()
 	row := m.paneCursorRow()
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon did not open the rule")
+	}
+}
+
+// A click anywhere on a rule line toggles it, not only on its icon.
+func TestClickOnARuleLineTogglesIt(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.frame()
+	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
+
+	click(m, paneX(m), y)
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a click on the rule line did not open it")
+	}
+	if m.copySeq != "" {
+		t.Fatal("the click copied the rule it opened")
+	}
+
+	click(m, paneX(m), y)
+	if m.expanded[buildRuleSeq(m)] {
+		t.Fatal("the second click did not close the rule")
+	}
+}
+
+// A click on a started rule whose command the pane cut short expands it to the full text.
+func TestClickOnACutCommandExpandsIt(t *testing.T) {
+	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
+	tg := target("api")
+	tg.Cmd = long
+	m := newTestModel(t, tg)
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
+	m.frame()
+	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
+
+	click(m, paneX(m), y)
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the click did not expand the cut command")
+	}
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
+		t.Fatalf("the expansion lacks the full command: %q", rows)
 	}
 }
 
@@ -393,11 +433,11 @@ func TestClickOnMoreOpensFileList(t *testing.T) {
 	m.frame()
 	s := m.visibleSep[0]
 	end := displayWidth("── " + s.label)
-	if s.more != "+2 more" || !s.hit(end-2, m.vp.Width()) || s.hit(end-10, m.vp.Width()) {
-		t.Fatalf("hit spans wrong for %q", s.label)
+	if s.more != "+2 more" {
+		t.Fatalf("more = %q, want +2 more for %q", s.more, s.label)
 	}
 	row := m.paneCursorRow()
-	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
+	click(m, m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
 	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "/x/c.go") {
 		t.Fatalf("file list not shown after +2 more: %q", rows)
 	}
@@ -572,46 +612,6 @@ func TestLateOutputAfterCancelIsIgnored(t *testing.T) {
 	}
 }
 
-func TestRuleHitHonorsPaneOffset(t *testing.T) {
-	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{
-		{kind: evOutput, target: "api", line: strings.Repeat("y", 160)},
-		buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go"),
-	})
-	m.frame()
-	m.paneCol = 10
-	m.vpDirty = true
-	m.frame()
-	if m.paneCol != 10 {
-		t.Fatalf("paneCol = %d, want the pan kept at 10", m.paneCol)
-	}
-	row := m.paneLen() - 1
-	s := m.visibleSep[m.rowInfo(row).raw]
-	end := displayWidth("── " + s.label)
-	// The more text sits at end-2 in the rule, so a press there is end-2-paneCol on screen.
-	m.clickPane(m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
-	if len(m.expanded) != 0 {
-		t.Fatal("a press at the unpanned more column opened the rule")
-	}
-	m.clickPane(m.layout.leftW+1+end-2-m.paneCol, m.titleHeight()+row-m.vp.YOffset())
-	if len(m.expanded) != 1 {
-		t.Fatal("a press on the panned more text did not open the rule")
-	}
-}
-
-func TestRuleHitNarrowPaneKeepsIconOnly(t *testing.T) {
-	rec := &buildRec{name: "api", phase: buildRunning, files: []string{"/x/a.go", "/x/b.go", "/x/c.go"}}
-	s := rec.sep()
-	end := displayWidth("── " + s.label)
-	const w = 12
-	if !s.hit(3, w) {
-		t.Fatal("the icon does not open a rule on a narrow pane")
-	}
-	if s.hit(end-2, w) {
-		t.Fatal("the +N more text is clickable though the label is cut")
-	}
-}
-
 func TestClickRuleWhileFiltered(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{
@@ -637,7 +637,7 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the filtered pane: %q", rawPane(m))
 	}
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the rule's icon while filtered did not open it")
 	}
@@ -658,7 +658,7 @@ func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the single view: %q", rawPane(m))
 	}
-	m.clickPane(m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon in single view did not open the rule")
 	}

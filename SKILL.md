@@ -83,13 +83,17 @@ between hits. `@` lists the pane scope's saved queries from the `queries:` keys 
 most specific wins a name clash). `esc` keeps the pills; `backspace` on an empty input removes the last one.
 
 Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
-becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click the icon or
-`+N more`, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
-pane cuts it short.
+becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click anywhere on
+the rule line, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
+pane cuts it short; a click on a cut rule expands it to the full command.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
-it. The pane cursor (a reverse-video line) starts on the newest line; `↑/↓` move it when
+it. A click anywhere on an expandable line toggles it too, and a click on a row of an open
+block collapses it. A click means press and release on one cell: a press that moves is a
+drag, which selects text and never toggles. A click on a line with nothing under it
+copies the line. Clicks on a block's key and value cells still pick a column or pill and
+never collapse the block. The pane cursor (a reverse-video line) starts on the newest line; `↑/↓` move it when
 the pane is focused, and moving it off the live tail pauses the tail (`end` resumes).
 `enter` acts on the cursor line, and a non-JSON line gets a hint instead. Opening a block
 pauses the tail and keeps the block in view. Expanded keys are underlined and scalar

@@ -314,11 +314,15 @@ func (m *tuiModel) markLines(lines []string) []string {
 	return out
 }
 
-// clickPane handles a press in the viewport: the (+) cell, a key or value of an
-// expansion row, or else an anchor for a copy of the line.
+// clickPane handles a press in the viewport: a key or value of an expansion
+// row picks it at once; any other cell arms a selection the release resolves —
+// a same-cell release clicks, a moved one drags. Toggling waits for the
+// release so a drag off an expandable line never opens it.
 func (m *tuiModel) clickPane(x, y int) {
 	// A press anywhere in the pane takes the keys, even past the content.
 	m.paneFocus = true
+	// A new press drops one that never saw its release.
+	m.clearSelection()
 	row := m.paneRow(x, y)
 	if row < 0 {
 		return
@@ -326,10 +330,6 @@ func (m *tuiModel) clickPane(x, y int) {
 	px := x - m.layout.leftW - 1
 	r := m.rowInfo(row)
 	switch {
-	case r.sub < 0 && r.obj && px >= m.vp.Width()-markW:
-		m.toggleExpand(r.raw)
-	case r.sub < 0 && !r.obj && m.visibleSep[r.raw].hit(px+m.paneCol, m.vp.Width()):
-		m.toggleExpand(r.raw)
 	case r.field != nil && inSpan(r.field.keyX, px+m.paneCol):
 		m.pickKey(r.field)
 	case r.field != nil && r.field.lit != "" && inSpan(r.field.valX, px+m.paneCol):
@@ -338,7 +338,65 @@ func (m *tuiModel) clickPane(x, y int) {
 		anchor := row
 		m.selAnchor = &anchor
 		m.selEnd = row
+		m.selMoved = false
+		m.selCellX, m.selCellY = x, y
+		m.selSeq, m.selSub = m.visibleSeq[r.raw], r.sub
+		m.selExp = r.sub < 0 && m.expandable(r.raw)
 	}
+}
+
+// pressRow resolves the armed press to its pane row by the line's identity,
+// or -1 when it left the pane; the anchor index goes stale once a rebuild or
+// an expansion above the press shifts the rows.
+func (m *tuiModel) pressRow() int {
+	m.ensurePane()
+	if m.paneDirect() {
+		for raw, seq := range m.visibleSeq {
+			if seq == m.selSeq {
+				return raw
+			}
+		}
+		return -1
+	}
+	for row, r := range m.disp {
+		if m.visibleSeq[r.raw] == m.selSeq && r.sub == m.selSub {
+			return row
+		}
+	}
+	return -1
+}
+
+// releasePane resolves a pane press: a drag copies its range, a same-cell
+// click toggles an expandable line — or collapses it on a row of its
+// expansion — and any other release copies the pressed line, as a click
+// always did.
+func (m *tuiModel) releasePane(x, y int) {
+	if m.selAnchor == nil {
+		return
+	}
+	if m.selMoved {
+		m.copySelection()
+		return
+	}
+	if x != m.selCellX || y != m.selCellY {
+		// A release off the press cell is no click; it still copies the line.
+		m.copySelection()
+		return
+	}
+	row := m.pressRow()
+	if row < 0 {
+		m.clearSelection()
+		return
+	}
+	r := m.rowInfo(row)
+	// Table mode shows the line as columns, so its click keeps copying.
+	if r.sub >= 0 || (m.selExp && !m.tableHeaderOn()) {
+		m.clearSelection()
+		m.toggleExpand(r.raw)
+		return
+	}
+	// A line that cannot expand keeps the old click: it copies.
+	m.copySelection()
 }
 
 func inSpan(span [2]int, x int) bool {
@@ -352,6 +410,8 @@ func (m *tuiModel) inPaneHeader(x, y int) bool {
 
 // clickHeader acts on a header press at pane cell px: a pill's or a column's × removes it.
 func (m *tuiModel) clickHeader(px, y int) {
+	// A new press drops one that never saw its release.
+	m.clearSelection()
 	if y < m.barRows() {
 		for _, h := range m.layout.chips {
 			if px == h.x && h.idx < len(m.pills) {

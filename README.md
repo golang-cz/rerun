@@ -70,7 +70,10 @@ match any line.
 
 Expand a JSON line: every JSON object line ends in a `(+)` cell. Click it, or press
 `enter` with the pane focused (it acts on the cursor line, which starts on the newest
-line), to show the pretty-printed object; `(−)` collapses it. Moving the cursor off the
+line), to show the pretty-printed object; `(−)` collapses it. A click anywhere on an
+expandable line toggles it the same way, and a click on a row of an open expansion
+collapses it. A click means press and release on one cell: a press that moves is a drag,
+which selects text and never toggles. Moving the cursor off the
 newest line pauses the tail. Expanded keys are underlined and values tinted. With the
 cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `path=value`
 pill. In an expanded block, click a key to add it as a column of the
@@ -89,7 +92,8 @@ not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and ex
 terminal forwards it.
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
 the fs events line at the bottom to open the change batches, and a click on a schema header to select
-its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
+its targets. Click a pane line to copy it; clicking an expandable line expands or
+collapses it instead, and drag copies a range and browses the scrollback
 (`esc` or `↓ N new` resumes). Shift-drag uses the terminal's own selection.
 Targets with a `group:` are listed under a `▾ name` header that counts
 its running members; targets without one follow. The right pane is always the

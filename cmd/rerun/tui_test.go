@@ -136,6 +136,12 @@ func motion(x, y int) tea.MouseMsg {
 	return tea.MouseMotionMsg{X: x, Y: y}
 }
 
+// click is a press and a release on the same cell, with no motion between.
+func click(m *tuiModel, x, y int) {
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x, y))
+}
+
 // slowClick expires the double-click window, so the next click reads as a
 // fresh single click.
 func slowClick(m *tuiModel) {

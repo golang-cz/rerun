@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -158,13 +159,92 @@ func TestClickingTheMarkerExpandsAndCollapses(t *testing.T) {
 	m.frame()
 	x, y := m.width-2, m.titleHeight()
 
-	m.handleMouse(mouse(x, y, false))
+	click(m, x, y)
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking (+) did not expand the line")
 	}
-	m.handleMouse(mouse(x, y, false))
+	click(m, x, y)
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking (−) did not collapse the line")
+	}
+}
+
+// A click — press and release on one cell, no motion — on a line that can
+// expand toggles it like →/enter and focuses the pane; it never copies.
+func TestClickTogglesAJSONLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	click(m, x, y)
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatalf("the click did not expand the line:\n%s", plainPane(m))
+	}
+	if !m.paneFocus {
+		t.Fatal("the click did not focus the pane")
+	}
+	if m.copySeq != "" {
+		t.Fatal("the click copied the line it expanded")
+	}
+
+	click(m, x, y)
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the second click did not collapse the line")
+	}
+}
+
+// A click on any row of an open expansion collapses the line, like ←.
+func TestClickOnAnExpansionRowCollapsesIt(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	m.toggleExpand(0)
+
+	// The indent cells of the first expansion row are neither key nor value.
+	click(m, m.layout.leftW+1, m.titleHeight()+1)
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("clicking an expansion row did not collapse the line")
+	}
+	if !m.paneFocus {
+		t.Fatal("the click dropped the pane focus")
+	}
+}
+
+// A press that moves even one cell is a drag: it selects and never toggles.
+func TestOneCellDragSelectsAndNeverToggles(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(motion(x+1, y))
+	m.handleMouse(release(x+1, y))
+
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the one-cell drag expanded the line")
+	}
+	if got := decodeCopy(t, m.copySeq); got != m.visibleRaw[0]+"\n" {
+		t.Fatalf("payload = %q, want the dragged line", got)
+	}
+}
+
+// A click on a scalar cell of an open block still picks its pill and wins over collapsing.
+func TestClickOnAValueCellPicksWithoutCollapsing(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	m.toggleExpand(0)
+
+	x, y := findInPane(t, m, `status: 403`)
+	click(m, x+len(`status: `)+1, y)
+
+	if len(m.pills) != 1 || m.pills[0].raw != "status=403" {
+		t.Fatalf("pills = %+v, want status=403", m.pills)
+	}
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the value click collapsed the expansion")
 	}
 }
 
@@ -401,4 +481,224 @@ func targetPos(cfg *Config, name string) int {
 		}
 	}
 	return -1
+}
+
+// A rebuild between press and release shifts the rows: the release resolves
+// the pressed line by its identity, not by the stale anchor index.
+func TestReleaseResolvesThePressedLineAfterRowsShift(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq, `{"status":200}`)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()+1
+
+	m.handleMouse(mouse(x, y, false))
+	m.toggleExpand(0) // inserts rows above the press, moving it down
+	m.handleMouse(release(x, y))
+
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the mid-press expansion closed")
+	}
+	if !m.expanded[m.visibleSeq[1]] {
+		t.Fatal("the release did not expand the pressed line after its row shifted")
+	}
+}
+
+// A pressed line that leaves the pane before the release clears the press:
+// no panic, no toggle, no copy.
+func TestReleaseAfterThePressedLineLeftThePane(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.solo = 1
+	m.mergedDirty = true
+	m.handleMouse(release(x, y))
+
+	if m.selAnchor != nil {
+		t.Fatal("the release kept a press whose line is gone")
+	}
+	if len(m.expanded) != 0 {
+		t.Fatal("the release toggled a line that replaced the pressed one")
+	}
+	if m.copySeq != "" {
+		t.Fatal("the release copied a line that replaced the pressed one")
+	}
+}
+
+// A focus loss can swallow the mouse-up; the blur itself clears the press.
+func TestBlurClearsAnArmedPress(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.Update(tea.BlurMsg{})
+	if m.selAnchor != nil {
+		t.Fatal("the blur kept the press armed")
+	}
+	m.handleMouse(release(x, y))
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the late release toggled the line")
+	}
+	if m.copySeq != "" {
+		t.Fatal("the late release copied the line")
+	}
+}
+
+// A wheel tick that cannot move the window keeps the press: the release clicks.
+func TestUnmovedWheelKeepsThePress(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(wheelDown(x, y)) // already at the bottom: nothing moves
+	m.handleMouse(release(x, y))
+
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the unmoved wheel ate the click")
+	}
+}
+
+// A wheel tick that scrolls drops the press, so its release does nothing.
+func TestMovedWheelClearsThePress(t *testing.T) {
+	m := frozenPane(t)
+	x, y := paneX(m), 2+m.titleHeight()
+	row := m.vp.YOffset() + y - m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(wheelUp(x, y))
+	m.handleMouse(release(x, y))
+
+	if m.selAnchor != nil {
+		t.Fatal("the scrolled wheel kept the press armed")
+	}
+	if m.copySeq != "" {
+		t.Fatal("the release copied after a scroll")
+	}
+	if m.expanded[m.visibleSeq[row]] {
+		t.Fatal("the release toggled after a scroll")
+	}
+}
+
+// A release one cell off the press, with no motion between, is no click but
+// still copies the pressed line, as a release always did.
+func TestReleaseOnADifferentCellCopies(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x+1, y))
+
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the off-cell release expanded the line")
+	}
+	if got := decodeCopy(t, m.copySeq); got != m.visibleRaw[0]+"\n" {
+		t.Fatalf("payload = %q, want the pressed line", got)
+	}
+}
+
+// A motion report on the press cell is no drag: the release still clicks.
+func TestSameCellMotionStaysAClick(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(motion(x, y))
+	m.handleMouse(release(x, y))
+
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("a same-cell motion turned the click into a drag")
+	}
+	if m.copySeq != "" {
+		t.Fatal("a same-cell motion made the release copy")
+	}
+}
+
+// A new press drops one that never saw its release; the release then resolves
+// the second press only.
+func TestNewPressClearsAStalePress(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq, `{"status":200}`)
+	m.frame()
+	x := paneX(m)
+	y0, y1 := m.titleHeight(), m.titleHeight()+1
+
+	m.handleMouse(mouse(x, y0, false))
+	m.handleMouse(mouse(x, y1, false))
+	m.handleMouse(release(x, y1))
+
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the stale press on the first line toggled it")
+	}
+	if !m.expanded[m.visibleSeq[1]] {
+		t.Fatal("the second press did not click its line")
+	}
+}
+
+// A release landing while a modal is up still ends the press; the modal only
+// swallows new presses.
+func TestModalReleaseStillClearsThePress(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.help = true
+	m.handleMouse(release(x, y))
+	if m.selAnchor != nil {
+		t.Fatal("the modal swallowed the release and kept the press armed")
+	}
+
+	m.handleMouse(mouse(x, y, false))
+	if m.selAnchor != nil {
+		t.Fatal("a press over the help modal armed a selection")
+	}
+	m.help = false
+}
+
+// A click on a block's key cell picks its column; the release must not
+// collapse the block.
+func TestClickOnAKeyCellPicksWithoutCollapsing(t *testing.T) {
+	m := newTestModel(t, tableTarget("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	m.liveSelect()
+	m.toggleExpand(0)
+
+	x, y := findInPane(t, m, `status: 403`)
+	click(m, x+1, y)
+
+	got := m.headerColumns()
+	if len(got) != 3 || got[2].Name != "status" || got[2].Expr != ".status" {
+		t.Fatalf("columns = %+v, want the picked .status column added", got)
+	}
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the key click's release collapsed the expansion")
+	}
+}
+
+// clearSelection resets the whole press state, not only the anchor.
+func TestClearSelectionResetsThePressState(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(motion(x+1, y))
+	m.clearSelection()
+
+	if m.selAnchor != nil || m.selMoved {
+		t.Fatal("clearSelection left press state behind")
+	}
 }

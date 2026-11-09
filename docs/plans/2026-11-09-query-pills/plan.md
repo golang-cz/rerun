@@ -1,6 +1,6 @@
 # Query pills: one bar for filter and search
 
-Status: IN PROGRESS
+Status: DONE
 
 ## Summary
 Merge `/` (filter) and `ctrl+f` (find) into one query bar. A query is a list of pills, ANDed.

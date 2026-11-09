@@ -87,6 +87,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
+	case tea.BlurMsg:
+		// A focus loss can take the mouse-up with it; never keep a press armed.
+		m.clearSelection()
+		return m, nil
+
 	case interruptMsg:
 		return m, tea.Quit
 	}
@@ -409,12 +414,13 @@ func (m *tuiModel) goLive() {
 // scrollUp freezes the tail: new lines collect behind the `↓ N new` marker.
 // A gesture that cannot move the window (nothing above it) leaves the tail live.
 func (m *tuiModel) scrollUp(n int) {
-	m.clearSelection()
 	before := m.vp.YOffset()
 	m.vp.SetYOffset(before - n)
+	// A wheel tick that cannot move the window keeps an armed press.
 	if m.vp.YOffset() == before {
 		return
 	}
+	m.clearSelection()
 	if m.follow {
 		m.pauseTail()
 	}
@@ -439,8 +445,11 @@ func (m *tuiModel) pageStep() int {
 
 // scrollDown resumes following once the pane is back at the bottom.
 func (m *tuiModel) scrollDown(n int) {
-	m.clearSelection()
-	m.vp.SetYOffset(m.vp.YOffset() + n)
+	before := m.vp.YOffset()
+	m.vp.SetYOffset(before + n)
+	if m.vp.YOffset() != before {
+		m.clearSelection()
+	}
 	if m.vp.AtBottom() {
 		m.follow = true
 		m.pending = 0
@@ -448,6 +457,18 @@ func (m *tuiModel) scrollDown(n int) {
 }
 
 func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// A release resolves its press even over a modal, which swallows every
+	// other mouse event; otherwise a release eaten by the modal stays armed.
+	if rel, ok := msg.(tea.MouseReleaseMsg); ok {
+		// Any release ends the press; only a left one acts on it. Otherwise a
+		// right-button release would leave the anchor armed for a stray copy.
+		if rel.Button == tea.MouseLeft {
+			m.releasePane(rel.X, rel.Y)
+		} else {
+			m.clearSelection()
+		}
+		return m, nil
+	}
 	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open {
 		return m, nil
 	}
@@ -474,20 +495,15 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.MouseReleaseMsg:
-		// Any release ends the drag; only a left one copies it. Otherwise a
-		// right-button release would leave the anchor armed for a stray copy.
-		if e.Button == tea.MouseLeft {
-			m.copySelection()
-		} else {
-			m.clearSelection()
-		}
-		return m, nil
-
 	case tea.MouseMotionMsg:
 		// Motion only drags an existing selection: a bare hover never starts one.
 		if m.selAnchor != nil {
-			m.dragSelection(e.Y)
+			// One moved cell makes the press a drag, so its release never clicks;
+			// a motion report on the press cell itself is not a gesture.
+			if e.X != m.selCellX || e.Y != m.selCellY {
+				m.selMoved = true
+				m.dragSelection(e.Y)
+			}
 			return m, nil
 		}
 		row := m.rowAt(e.X, e.Y)
@@ -511,8 +527,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// A press in the log pane anchors a selection instead of acting on rows.
-	// The tail freezes on the first drag motion, so a plain click copies the
-	// line and keeps the stream live. Past the content, the press does nothing.
+	// The release decides: a drag copies its range; a same-cell click toggles
+	// an expandable line and copies any other. Past the content, the press does nothing.
 	if m.inPaneHeader(e.X, e.Y) {
 		m.clickHeader(e.X-m.layout.leftW-1, e.Y)
 		return m, nil
@@ -556,8 +572,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// clearSelection drops the frozen selection highlight.
-func (m *tuiModel) clearSelection() { m.selAnchor = nil }
+// clearSelection drops the frozen selection highlight and the press state.
+func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved = nil, false }
 
 // titleHeight is the pane's fixed header height, above the viewport.
 func (m *tuiModel) titleHeight() int { return m.headerRows() }
@@ -616,7 +632,7 @@ func (m *tuiModel) dragSelection(y int) {
 	}
 }
 
-// copySelection sends the frozen selection to the clipboard as one OSC 52
+// copySelection sends the selection to the clipboard as one OSC 52
 // sequence and clears the highlight. A click without a drag copies one line.
 func (m *tuiModel) copySelection() {
 	if m.selAnchor == nil {

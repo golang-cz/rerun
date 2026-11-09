@@ -53,7 +53,9 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet)
 	m.frame()
-	press(m, "c")
+	if !m.tableHeaderOn() {
+		t.Fatal("a target with columns did not start as a table")
+	}
 
 	if got := m.visibleRaw[0]; got != jsonGet {
 		t.Fatalf("visibleRaw = %q, want the raw JSON line", got)
@@ -76,8 +78,7 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	press(m, "esc")
 
 	x, y := paneX(m), m.headerRows()
-	m.handleMouse(mouse(x, y, false))
-	m.handleMouse(release(x, y))
+	click(m, x, y)
 	if got := decodeCopy(t, m.copySeq); got != jsonGet+"\n" {
 		t.Fatalf("copied %q, want the raw line", got)
 	}

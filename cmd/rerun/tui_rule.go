@@ -27,10 +27,8 @@ type sepLine struct {
 	tone  sepTone
 	// restart is set on a ↻ rule, whose text is cut to the pane width at view time.
 	restart *restartRule
-	// icon is the click target that expands the rule.
-	icon  string
-	build *buildRec
-	// more is the "+N more" suffix of label, a click target too.
+	build   *buildRec
+	// more is the "+N more" suffix of label.
 	more string
 	// full is the command a started rule expands to when its label cuts it short.
 	full string
@@ -52,19 +50,6 @@ func (s sepLine) expandable(w int) bool {
 		return s.build.note != "" || len(s.build.files) > 1 || len(s.build.out) > 0
 	}
 	return s.full != "" && displayWidth("── "+s.raw()+" ") > w
-}
-
-// hit reports whether a press at pane cell px opens the rule: its icon, or its "+N more".
-func (s sepLine) hit(px, w int) bool {
-	if !s.expandable(w) {
-		return false
-	}
-	const lead = 3 // the "── " before the label
-	if px >= lead && px < lead+displayWidth(s.icon) {
-		return true
-	}
-	end := displayWidth("── " + s.label)
-	return s.more != "" && end+1 <= w && px >= end-displayWidth(s.more) && px < end
 }
 
 // raw is the rule's full text, kept as its pane line for copy and search.
@@ -163,7 +148,7 @@ func (r *buildRec) sep() sepLine {
 		head += " build " + r.reason
 	}
 	label := icon + " " + head
-	s := sepLine{icon: icon, build: r, tone: toneNone}
+	s := sepLine{build: r, tone: toneNone}
 	if r.phase == buildBroke {
 		s.tone = toneFail
 	}
@@ -201,7 +186,7 @@ func buildReason(ev event) string {
 
 // startedRule names the run and its command; a command too long for the pane expands to the full one.
 func startedRule(name string, at time.Time, cmd string) sepLine {
-	s := sepLine{icon: "▶", label: fmt.Sprintf("▶ %s started %s", name, at.Format("15:04:05"))}
+	s := sepLine{label: fmt.Sprintf("▶ %s started %s", name, at.Format("15:04:05"))}
 	if cmd != "" {
 		s.label += " · " + cmd
 		s.full = cmd
