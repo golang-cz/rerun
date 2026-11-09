@@ -184,7 +184,7 @@ func TestOpGlyphMapping(t *testing.T) {
 	}
 }
 
-// sevenFiles is a change batch big enough to exceed the drawer's file cap.
+// sevenFiles is a change batch big enough to exceed a batch row's file count.
 func sevenFiles() rerun.ChangeSet {
 	files := map[string]struct{}{}
 	ops := map[string]fsnotify.Op{}
@@ -205,7 +205,7 @@ func spawnModel(t *testing.T) *tuiModel {
 }
 
 // The target list is one line per target again, so every list line maps
-// straight to a row; the drawer under it resolves to the target of its entry.
+// straight to a row; the fs events line under it resolves to no row.
 func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	m := spawnModel(t)
 	m.frame()
@@ -213,7 +213,7 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 		t.Fatalf("offset = %d, want the list from the top", m.layout.offset)
 	}
 
-	// web, api, worker; the drawer takes the rows above the version line.
+	// web, api, worker; the fs events line and the version row sit below the list.
 	for y, want := range []int{0, 1, 2} {
 		if got := m.rowAt(2, y); got != want {
 			t.Fatalf("rowAt line %d = %d, want %d", y, got, want)
@@ -222,8 +222,8 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	if got := m.rowAt(2, 3); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
-	if got := m.rowAt(2, m.height-2-len(m.layout.drawer)); got != -1 {
-		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
+	if got := m.rowAt(2, m.height-2); got != -1 {
+		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 
 	m.applyScope(1, "")
@@ -238,22 +238,20 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	}
 }
 
-// The cursor row stays visible in the list area above the drawer, however tall
-// the drawer grew.
+// The cursor row stays visible in the list area above the fs events line.
 func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m := spawnModel(t)
 	m.cursor = 2 // worker, the last row
-	m.height = 4 // no room for a drawer at all
+	m.height = 4 // two list rows above the fs events line and the version row
 	m.frame()
-	if got := m.rowAt(2, m.height-2); got != 2 {
-		t.Fatalf("the last row is not on screen at offset %d: line %d maps to %d", m.layout.offset, m.height-2, got)
+	if got := m.rowAt(2, 1); got != 2 {
+		t.Fatalf("the last row is not on screen at offset %d: line 1 maps to %d", m.layout.offset, got)
 	}
-	if got := len(m.layout.drawer); got != 0 {
-		t.Fatalf("a %d-row column drew %d drawer rows, want none", m.height, got)
+	if got := m.rowAt(2, m.height-2); got != -1 {
+		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 
-	// A screenful of targets with a drawer under it: the cursor row scrolls
-	// into the list area, the drawer stays where it is.
+	// A screenful of targets: the cursor row scrolls into the list area.
 	names := []string{"t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9"}
 	defs := make([]Target, 0, len(names))
 	for _, name := range names {
@@ -268,8 +266,8 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	many.frame()
 
 	visible := many.listHeight()
-	if visible >= many.height-1 {
-		t.Fatalf("list height = %d, want the drawer to take rows from it", visible)
+	if visible != many.height-2 {
+		t.Fatalf("list height = %d, want the fs events line and version row to take 2 rows", visible)
 	}
 	line := many.cursor - many.layout.offset
 	if line < 0 || line >= visible {
@@ -278,8 +276,8 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	if got := many.rowAt(2, line); got != many.cursor {
 		t.Fatalf("the cursor row is off screen: line %d maps to %d, want %d", line, got, many.cursor)
 	}
-	if got := many.rowAt(2, many.height-2-len(many.layout.drawer)); got != -1 {
-		t.Fatalf("rowAt on the drawer separator = %d, want no row", got)
+	if got := many.rowAt(2, many.height-2); got != -1 {
+		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 }
 

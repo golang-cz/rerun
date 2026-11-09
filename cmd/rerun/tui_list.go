@@ -441,7 +441,6 @@ func (m *tuiModel) enterRow() {
 		}
 		m.applyRowScope(r)
 	}
-	m.drawerFocus = false
 	m.paneFocus = true
 }
 
@@ -543,7 +542,7 @@ func (m *tuiModel) lastShownSeq() (int, bool) {
 }
 
 func (m *tuiModel) liveSelect() {
-	if m.paneFocus || m.drawerFocus {
+	if m.paneFocus {
 		return
 	}
 	if r, ok := m.cursorRow(); ok {

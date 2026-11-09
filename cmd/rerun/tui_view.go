@@ -98,7 +98,6 @@ func (r rect) contains(x, y int) bool {
 type tuiLayout struct {
 	leftW  int
 	offset int
-	drawer []drawerRow
 	marker rect
 	// chips and heads are the header's clickable cells: chip × cells on the
 	// filter bar, and table column names on the column header row.
@@ -142,7 +141,6 @@ func (m *tuiModel) frame() string {
 
 	leftW, rightW := m.layoutWidths()
 	m.layout.leftW = leftW
-	m.layout.drawer = m.drawerRows()
 	m.layout.offset = m.listOffset()
 	right := m.rightLines(rightW)
 
@@ -239,7 +237,7 @@ func printable(s string, keepNL bool) string {
 }
 
 // overlayCenter splices box into frame at the canvas center, so the stream and
-// drawer underneath keep updating while the modal is up.
+// columns underneath keep updating while the modal is up.
 func overlayCenter(frame, box string, width, height int) string {
 	x, y := overlayOrigin(box, width, height)
 	return overlayAt(frame, box, x, y, width, height)
@@ -439,18 +437,14 @@ func marker(dirty bool) string {
 func (m *tuiModel) listLen() int { return len(m.listRows()) }
 
 // listHeight is how many screen rows the target list has: everything above the
-// drawer, which itself sits above a blank divider and the version line.
+// fs events line and the version row at the bottom.
 func (m *tuiModel) listHeight() int {
-	reserved := len(m.layout.drawer)
-	if reserved > 0 {
-		reserved++ // the blank line between the drawer and the version line
-	}
-	return max(1, m.height-1-reserved)
+	return max(1, m.height-2)
 }
 
 // listOffset keeps the list's stored top row, and moves it only when the cursor
 // leaves the window: just enough to put the cursor on the top or bottom row.
-// A wheel parks the window until the cursor moves. The drawer never scrolls with it.
+// A wheel parks the window until the cursor moves. The bottom lines never scroll with it.
 func (m *tuiModel) listOffset() int {
 	visible := m.listHeight()
 	top := m.listTop
@@ -476,16 +470,6 @@ func (m *tuiModel) scrollList(delta int) {
 	m.listScrolled = true
 	m.listScrollAt = m.cursor
 	m.layout.offset = m.listOffset()
-}
-
-// inDrawer reports whether a screen row is inside the drawer, and which of its
-// lines it is. The drawer sits between the list and the version line.
-func (m *tuiModel) inDrawer(y int) (drawerRow, bool) {
-	n := len(m.layout.drawer)
-	if n == 0 || y < m.height-2-n || y >= m.height-2 {
-		return drawerRow{}, false
-	}
-	return m.layout.drawer[y-(m.height-2-n)], true
 }
 
 // versionCell draws the left column's bottom line: the version text and the
@@ -567,18 +551,14 @@ func opText(op byte) string {
 }
 
 // leftLine draws one screen line of the left column: the version line owns the
-// last row, the fs drawer the rows above it, and the target list the rest.
+// last row, the fs events line the row above it, and the target list the rest.
 func (m *tuiModel) leftLine(y, leftW int) string {
 	// The list reserves the screen's very last row; the version line owns it.
 	if y == m.height-1 {
 		return m.versionCell(leftW)
 	}
-	// The blank divider keeps the drawer's last line off the version line.
-	if len(m.layout.drawer) > 0 && y == m.height-2 {
-		return strings.Repeat(" ", leftW)
-	}
-	if row, ok := m.inDrawer(y); ok {
-		return m.drawerLine(row, leftW)
+	if y == m.height-2 {
+		return m.feedHintCell(leftW)
 	}
 	r, ok := m.listRowAt(m.layout.offset + y)
 	if !ok {
@@ -593,82 +573,37 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	return m.targetLine(m.layout.offset+y, r, leftW)
 }
 
-// drawerLine draws one line of the fs drawer: its header, a feed batch, or a
-// file list's directory and file lines.
-func (m *tuiModel) drawerLine(row drawerRow, leftW int) string {
-	base := m.styles.base
-	if row.dim {
-		base = m.styles.muted
-	}
-	switch row.kind {
-	case drawerSep:
-		label := truncate(row.label+" ", leftW)
-		return m.styles.divider.Render(label + strings.Repeat("─", max(0, leftW-displayWidth(label))))
-
-	case drawerBatch:
-		if row.cursor && m.drawerFocus {
-			base = m.styles.cursor
+// feedHintCell is the left column's fs events line: the newest visible
+// batch's age, a red watch failure while its batch sits in the modal's window,
+// and a 1s highlight when a batch lands. A click on it opens the fs events modal.
+func (m *tuiModel) feedHintCell(leftW int) string {
+	style := m.styles.hint
+	text := "fs events · idle"
+	if batches, dim := m.feedVisible(); !dim && len(batches) > 0 {
+		b := batches[0]
+		switch {
+		case b.err != nil:
+			text = fitWatchFailed(leftW)
+			style = style.Foreground(lipgloss.Color(colorRed))
+		default:
+			text = "fs events · " + fmtDur(m.now.Sub(b.at)) + " ago"
 		}
-		return batchLine(row, leftW, base)
-
-	case drawerDir:
-		return renderSegs([]seg{{text: row.label}}, m.styles.all, leftW)
-
-	case drawerFile:
-		segs := []seg{
-			{text: strings.Repeat(" ", row.indent)},
-			{text: row.glyph, color: opColor(row.glyph)},
-			{text: " " + row.label},
-		}
-		return renderSegs(segs, base, leftW)
 	}
-	return strings.Repeat(" ", leftW)
+	if m.now.Before(m.feedFlashUntil) {
+		style = style.Reverse(true)
+	}
+	text = truncate(text, leftW)
+	return style.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
 }
 
-// batchLine draws a feed batch as `  5s  path +N  → targets`. The arrow is reserved
-// first; the path takes the rest and cuts from its left, so the file name survives.
-func batchLine(row drawerRow, leftW int, base lipgloss.Style) string {
-	age := strings.Repeat(" ", max(0, feedAgeW-displayWidth(row.age))) + row.age
-	if row.err != nil {
-		return renderSegs([]seg{
-			{text: age, faint: true},
-			{text: "  "},
-			{text: printable(row.err.Error(), false), color: colorRed},
-		}, base, leftW)
+// fitWatchFailed is the hint's failure text, shortened until it fits leftW.
+func fitWatchFailed(leftW int) string {
+	for _, s := range []string{"fs events · ⚠ watch failed", "⚠ fs failed", "⚠ fs"} {
+		if displayWidth(s) <= leftW {
+			return s
+		}
 	}
-	path := row.label
-	if row.extra > 0 {
-		path += fmt.Sprintf(" +%d", row.extra)
-	}
-	room := leftW - feedAgeW - 2
-	arrow := targetsArrow(row.targets, room, displayWidth(path))
-	return renderSegs([]seg{
-		{text: age, faint: true},
-		{text: "  "},
-		{text: ellipsizeLeft(path, room-displayWidth(arrow))},
-		{text: arrow, color: colorGray},
-	}, base, leftW)
-}
-
-// targetsArrow is the batch's `→ targets` cell. It names every target when the path
-// keeps minPath cells beside it, else the first target, else how many.
-func targetsArrow(targets []string, room, pathW int) string {
-	if len(targets) == 0 {
-		return ""
-	}
-	full := "  → " + strings.Join(targets, ", ")
-	first := "  → " + targets[0]
-	count := fmt.Sprintf("  → %d targets", len(targets))
-	budget := room - min(pathW, 12)
-	switch {
-	case displayWidth(full) <= budget:
-		return full
-	case budget >= displayWidth(first)+2: // room for the first name and a cut mark
-		return ellipsize(full, budget)
-	case displayWidth(first) <= room:
-		return first
-	}
-	return truncate(count, room)
+	return truncate("⚠ fs", leftW)
 }
 
 // ellipsize cuts s to w cells, ending a cut string with an ellipsis.
@@ -714,18 +649,6 @@ func tailCells(s string, n int) string {
 		start--
 	}
 	return strings.Repeat(" ", n-cells) + string(rs[start:])
-}
-
-// ellipsizeLeft cuts s to w cells from its left, with an ellipsis at the cut, so a
-// path keeps its end.
-func ellipsizeLeft(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if displayWidth(s) <= w {
-		return s
-	}
-	return "…" + ansi.TruncateLeft(s, displayWidth(s)-(w-1), "")
 }
 
 // missingLine draws an absent optional import below the list; it is no list row, so the cursor skips it.
@@ -774,7 +697,7 @@ func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
 		return m.styles.muted
 	}
 	switch {
-	case row == m.cursor && (m.drawerFocus || m.paneFocus || m.barFocus):
+	case row == m.cursor && (m.paneFocus || m.barFocus):
 		if m.paneFocus {
 			return m.styles.cursor // the in-scope cursor band keeps its brightness
 		}
@@ -1177,7 +1100,6 @@ var helpShortKeys = [][2]string{
 	{"r", "run/reboot the row"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
-	{"tab", "focus the fs drawer"},
 	{"e", "fs events (last minute)"},
 	{"enter → a f", "pane: → expand · ← collapse · a adds key, f filters value"},
 	{"c", "toggle the columns table"},
@@ -1197,7 +1119,7 @@ var helpKeys = [][2]string{
 	{"space", "start or stop · pane: jump to live · ▶ starts its auto targets"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r", "mute the stream (group: its targets) · r reboots"},
-	{"e t tab", "fs events (last minute) · t fs drawer, tab focuses it"},
+	{"e", "fs events (last minute)"},
 	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
 	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
 	{"o", "open the target's url"},
@@ -1215,7 +1137,7 @@ var helpKeys = [][2]string{
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
-	"click a group scopes to its targets; click a batch lists its files",
+	"click a group scopes to its targets; the fs line opens the batches",
 	"drag copies a range; shift-drag uses the terminal's selection",
 	"⚙ building  ● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",

@@ -98,12 +98,16 @@ is refused with a footer error (edit rerun.yml by hand). Writes keep the file's 
 and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
-The fs drawer under the list is a change feed: one line per batch of changes
-(events within 150ms of each other), with the batch age, the first changed file, `+N` for the
-rest, and the targets the batch restarted. A created directory shows a trailing `/` and heads
-the files reported under it; a narrow column cuts the path from its left. The pane's top line
-names a muted row (`muted`). `tab` focuses it, `j/k` move, `enter`
-lists a batch's files, `esc` closes. A rerun.yml reload shows as the `config`
+The fs events line above the bottom-left footer ages the newest change batch
+(`fs events · 4s ago`, `idle` past a minute), highlights for a second when one
+lands, and turns red `⚠ watch failed` after a watcher error; a click (or `e`)
+opens the fs events modal. The modal lists the last minute's batches (events
+within 150ms of each other), newest first: the time, the first changed file with
+`+N` for the rest, and the targets the batch restarted right-aligned behind a `·`.
+`→` expands a batch's files, each naming the services whose watch globs it
+matched; `y` copies every batch expanded. A created directory shows a trailing `/`
+and heads the files reported under it. The pane's top line
+names a muted row (`muted`). A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.
 
 ### Imports: other projects' rerun.yml

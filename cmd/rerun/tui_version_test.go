@@ -104,15 +104,18 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 		targets = append(targets, target(fmt.Sprintf("t%d", i)))
 	}
 	m := newTestModel(t, targets...)
-	m.height = 4 // three list rows plus the version row
+	m.height = 4 // two list rows plus the fs events line and the version row
 	m.cursor = 5 // the last target
 
 	lines := strings.Split(m.View().Content, "\n")
 	if m.layout.offset == 0 {
 		t.Fatal("the list did not scroll to keep the cursor row visible")
 	}
-	if got := m.rowAt(2, m.height-2); got != 5 {
+	if got := m.rowAt(2, m.height-3); got != 5 {
 		t.Fatalf("cursor row = %d at the last list line, want 5", got)
+	}
+	if got := m.rowAt(2, m.height-2); got != -1 {
+		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {
 		t.Fatalf("rowAt on the version row = %d, want no row", got)

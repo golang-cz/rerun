@@ -455,16 +455,16 @@ func TestNoTitleOnSchemaRowAndPaneUsesFullHeight(t *testing.T) {
 }
 
 // The left column has no command footer now, so its bottom list line is a
-// row; only the version line under it is inert.
+// row; the fs events line and the version line under it are inert.
 func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
-	m.height = 4
+	m.height = 5
 	m.frame()
 
-	if row := m.rowAt(2, m.height-2); row != 2 {
+	if row := m.rowAt(2, m.height-3); row != 2 {
 		t.Fatalf("rowAt at the bottom = %d, want 2", row)
 	}
-	m.handleMouse(mouse(2, m.height-2, false))
+	m.handleMouse(mouse(2, m.height-3, false))
 	if m.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2 after a click on the bottom row", m.cursor)
 	}

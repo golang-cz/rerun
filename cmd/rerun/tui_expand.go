@@ -319,7 +319,6 @@ func (m *tuiModel) markLines(lines []string) []string {
 func (m *tuiModel) clickPane(x, y int) {
 	// A press anywhere in the pane takes the keys, even past the content.
 	m.paneFocus = true
-	m.drawerFocus = false
 	row := m.paneRow(x, y)
 	if row < 0 {
 		return

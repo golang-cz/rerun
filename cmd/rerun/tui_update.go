@@ -226,13 +226,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc", "ctrl+[":
 		switch {
-		case m.drawerFocus:
-			if m.feedOpened() != nil {
-				m.feedOpen = 0
-				m.feedTop = 0
-			} else {
-				m.drawerFocus = false
-			}
 		case m.paneFocus:
 			m.paneFocus = false
 		default:
@@ -254,23 +247,10 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.stepSelection(1)
 
 	case "k":
-		if m.drawerFocus {
-			m.moveDrawer(-1)
-		} else {
-			m.moveCursor(-1)
-		}
+		m.moveCursor(-1)
 
 	case "j":
-		if m.drawerFocus {
-			m.moveDrawer(1)
-		} else {
-			m.moveCursor(1)
-		}
-
-	case "tab", "ctrl+i":
-		if m.drawerOpen && len(m.feed) > 0 {
-			m.setDrawerFocus(!m.drawerFocus)
-		}
+		m.moveCursor(1)
 
 	case "left":
 		if m.paneFocus {
@@ -293,7 +273,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.paneFocus = true
-			m.drawerFocus = false
 		} else if !m.arrowExpand() {
 			m.paneCol++
 			m.vpDirty = true
@@ -323,8 +302,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "enter", "ctrl+m":
 		switch {
-		case m.drawerFocus:
-			m.openCursorBatch()
 		case m.paneFocus:
 			m.toggleCursorExpand()
 		default:
@@ -371,9 +348,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.cursorRow(); ok {
 			m.rebootRow(r)
 		}
-
-	case "t":
-		m.toggleDrawer()
 
 	case "e":
 		m.openEvents()
@@ -552,14 +526,11 @@ func (m *tuiModel) hasFilter(query string) bool {
 
 // stepSelection is one ↑/↓ step, routed to the focused pane.
 func (m *tuiModel) stepSelection(delta int) {
-	switch {
-	case m.paneFocus:
+	if m.paneFocus {
 		m.moveCursorRow(delta)
-	case m.drawerFocus:
-		m.moveDrawer(delta)
-	default:
-		m.moveCursor(delta)
+		return
 	}
+	m.moveCursor(delta)
 }
 
 func (m *tuiModel) moveCursor(delta int) {
@@ -700,14 +671,11 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.clearSelection()
 
-	// The drawer never solos a target: a click focuses it and opens a batch's files.
-	if e.X < m.layout.leftW {
-		if drow, inDrawer := m.inDrawer(e.Y); inDrawer {
-			m.clickDrawer(drow)
-			return m, nil
-		}
+	// The fs events line opens the modal, like `e`.
+	if e.X < m.layout.leftW && e.Y == m.height-2 {
+		m.openEvents()
+		return m, nil
 	}
-	m.drawerFocus = false
 
 	row := m.rowAt(e.X, e.Y)
 	if row < 0 {
@@ -832,14 +800,10 @@ func (m *tuiModel) copySelection() {
 	m.copyUntil = m.now.Add(hintDuration)
 }
 
-// rowAt resolves a screen cell to a list row index, or -1 for none.
-// The drawer is not target-scoped: no drawer line resolves to a row.
+// rowAt resolves a screen cell to a list row index, or -1 for none. The fs
+// events line and the version row below it are never list rows.
 func (m *tuiModel) rowAt(x, y int) int {
-	// The last screen row is the version line, never a list row.
-	if y < 0 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
-		return -1
-	}
-	if _, ok := m.inDrawer(y); ok {
+	if y < 0 || y >= m.height-2 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
 	idx := m.layout.offset + y

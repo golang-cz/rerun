@@ -200,18 +200,11 @@ type tuiModel struct {
 	paneFocus bool
 	paneCol   int // horizontal column offset of the pane
 
-	// drawerOpen shows the fs drawer under the list. One global toggle, open
-	// by default, so every target's spawns are on screen without a per-row
-	// expansion.
-	drawerOpen bool
-
-	// feed is the drawer's change batches, oldest first; feedOpen lists one batch's files (0 for none).
-	feed        []feedBatch
-	feedSeq     int
-	feedCursor  int
-	feedOpen    int
-	feedTop     int
-	drawerFocus bool
+	// feed is the change batches the fs events modal lists, oldest first.
+	feed    []feedBatch
+	feedSeq int
+	// feedFlashUntil ends the fs events line's highlight a landed batch leaves behind.
+	feedFlashUntil time.Time
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -389,7 +382,6 @@ func newTUI(targets []Target) *tuiModel {
 		buildTime:  buildTime,
 		solo:       -1,
 		follow:     true,
-		drawerOpen: true,
 		now:        time.Now(),
 		lastClick:  -1,
 		hover:      -1,
@@ -466,17 +458,6 @@ func (m *tuiModel) toggleMute(i int) {
 		m.showNotice("muted "+t.spec.Name, false)
 	} else {
 		m.showNotice("unmuted "+t.spec.Name, false)
-	}
-}
-
-// toggleDrawer shows or hides the fs drawer under the target list, closing any
-// open file list and dropping its focus when it hides.
-func (m *tuiModel) toggleDrawer() {
-	m.drawerOpen = !m.drawerOpen
-	if !m.drawerOpen {
-		m.drawerFocus = false
-		m.feedOpen = 0
-		m.feedTop = 0
 	}
 }
 

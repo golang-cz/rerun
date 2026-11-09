@@ -47,9 +47,8 @@ func TestCtrlFOpensSearch(t *testing.T) {
 func TestFindAndFilterKeysWorkFromEveryFocus(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	focuses := map[string]func(){
-		"list":   func() {},
-		"pane":   func() { m.paneFocus = true },
-		"drawer": func() { m.drawerFocus = true },
+		"list": func() {},
+		"pane": func() { m.paneFocus = true },
 	}
 	for name, focus := range focuses {
 		focus()
@@ -65,7 +64,7 @@ func TestFindAndFilterKeysWorkFromEveryFocus(t *testing.T) {
 			t.Fatalf("%s: ctrl+f inputMode = %d, want the search bar", name, m.inputMode)
 		}
 		press(m, "esc")
-		m.paneFocus, m.drawerFocus = false, false
+		m.paneFocus = false
 	}
 }
 
@@ -131,23 +130,17 @@ func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
 		t.Fatal("bare shift+/ did not open help")
 	}
 
-	// shift+tab is unbound, exactly as its legacy CSI Z was.
+	// shift+tab is unbound, exactly as its legacy CSI Z was; plain tab is too.
 	m = newTestModel(t, target("web"))
 	m.now = spawnClock
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if m.drawerFocus {
-		t.Fatal("shift+tab focused the drawer")
+	if m.paneFocus || m.eventsModal.open {
+		t.Fatal("shift+tab moved focus")
 	}
-	// tab focuses the drawer; ctrl+i is the same key once enhancements split it.
 	m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if !m.drawerFocus {
-		t.Fatal("tab did not focus the drawer")
-	}
-	m.drawerFocus = false
-	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModCtrl})
-	if !m.drawerFocus {
-		t.Fatal("enhanced ctrl+i did not focus the drawer like tab")
+	if m.paneFocus || m.eventsModal.open {
+		t.Fatal("tab moved focus")
 	}
 
 	// esc clears and closes the find box; ctrl+[ is the same key enhanced.

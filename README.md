@@ -29,8 +29,8 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
-live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot, `t`
-toggle the fs drawer under the list (`tab` focuses it), `m` mute a stream. Moving the cursor
+live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
+`e` fs events (last minute), `m` mute a stream. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
@@ -61,7 +61,7 @@ unsaved columns gets a `*` in its marker column, two cells after its name. A `co
 not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
-a batch in the fs drawer to list its files, and a click on a schema header to select
+the fs events line at the bottom to open the change batches, and a click on a schema header to select
 its targets. Click a pane line to copy it; drag copies a range and browses the scrollback
 (`esc` or `↓ N new` resumes). Shift-drag uses the terminal's own selection.
 Targets with a `group:` are listed under a `▾ name` header that counts
@@ -74,20 +74,23 @@ last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `hide: true` starts its header folded; `→` or a click expands it. Folding is a start state; a reload keeps your fold for groups already shown.
-The bottom-left footer reads `? help`. The fs drawer
-at the bottom of the left column is a feed of recent change batches, newest
-first. A batch is every change within 150ms of its first event, so one save
-across several targets is one line: `5s  path +N  → targets`, with the batch's age
-right-aligned. The path is the first changed file relative to the rerun.yml dir, cut
-from its left when the column is narrow so the file name survives. A created directory
-keeps a trailing `/` and heads the files reported under it. `+N` counts the rest, and
-the arrow names the targets it restarted (`config` for a rerun.yml reload). The
-feed keeps batches for a minute and dims the newest when all have aged out.
-`tab` focuses the drawer; its cursor starts on the newest batch each time it gains focus,
-and the list cursor dims while the drawer has it. `j/k` move through the batches, `enter` (or a click)
-lists a batch's files with `+`/`~`/`−` glyphs, `esc` closes the list. A target
-whose row a batch restarted lights up for a second. `t` toggles the drawer,
-which grows on demand and never takes more than seven lines.
+The bottom-left footer reads `? help`. The line above it is the fs events line:
+`fs events · 4s ago` ages the newest change batch, reading `fs events · idle`
+when none landed in the last minute. It highlights for a second when a batch
+lands, turns red `fs events · ⚠ watch failed` after a watcher error until the
+next successful batch, and a click opens the fs events modal, like `e`. The
+modal lists the last minute's batches, newest first: `22:32:00  path +N` with
+the targets it restarted right-aligned behind a `·` (`config` for a rerun.yml
+reload). A batch is every change within 150ms of its first event, so one save
+across several targets is one line. The path is the first changed file relative
+to the rerun.yml dir, cut with a middle ellipsis when the row is still too long
+after the target list shortens to `a, b +N more`. A created directory keeps a
+trailing `/` and heads the files reported under it. A watcher error is one red
+line above the batches, never a row. `→` lists a batch's files with
+`+`/`~`/`−` glyphs, each naming the services whose watch globs it matched,
+wrapping to continuation lines when they don't fit; `←` collapses. `y` copies
+every batch expanded to the clipboard. A target whose row a batch restarted
+lights up for a second.
 
 #### Examples:
 ```bash

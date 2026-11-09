@@ -226,9 +226,9 @@ func (m *tuiModel) scopeState() scopeState {
 	return scopeState{solo: m.solo, sel: m.schemaSel, cursor: m.cursor}
 }
 
-// listFocused reports whether the list, not the pane or drawer, owns the keys.
+// listFocused reports whether the list, not the pane, owns the keys.
 func (m *tuiModel) listFocused() bool {
-	return !m.paneFocus && !m.drawerFocus
+	return !m.paneFocus
 }
 
 // escList backs the scope out one level; filters and chips are never touched.

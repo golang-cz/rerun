@@ -39,7 +39,7 @@ func spawnWithChange(m *tuiModel, name string, cs rerun.ChangeSet, at time.Time)
 	m.applyEvent(event{kind: evStarted, target: name, at: at})
 }
 
-// A change batch writes no pane line of its own: the drawer owns the record.
+// A change batch writes no pane line of its own: the fs events feed owns the record.
 func TestChangeBatchAddsNoPaneLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	before := m.paneLen()

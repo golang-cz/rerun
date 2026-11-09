@@ -234,7 +234,6 @@ func dropControl(r rune) rune {
 func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
 	m.paneFocus = false
-	m.setDrawerFocus(false)
 	rows := m.allRows()
 	m.revealRow(rows, idx)
 	m.cursor = m.indexOfKey(m.rowKey(rows[idx]))
