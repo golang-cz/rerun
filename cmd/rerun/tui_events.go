@@ -35,8 +35,8 @@ type eventsState struct {
 	cursor int // the batch the cursor sits on
 	openID int // the batch whose file list is expanded, 0 for none
 	top    int // the first body row drawn
-	// copiedN and copiedUntil show the `c` confirmation in the footer for 2s.
-	copiedN     int
+	// copiedMsg and copiedUntil show the `c` confirmation in the footer for 2s.
+	copiedMsg   string
 	copiedUntil time.Time
 }
 
@@ -310,13 +310,18 @@ func (m *tuiModel) handleEventsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "left":
 		m.collapseEvents()
 	case "c":
-		text, n := m.eventsCopyText()
-		if text != "" {
-			m.eventsModal.copiedN = n
-			m.eventsModal.copiedUntil = m.now.Add(2 * time.Second)
-			m.fitEvents()
-			return m, copyToClipboard(text)
+		lines := m.eventsCopyLines()
+		if len(lines) == 0 {
+			break
 		}
+		payload, n, truncated := copyPayload(lines)
+		m.eventsModal.copiedMsg = copyNotice(payload, n, truncated)
+		m.eventsModal.copiedUntil = m.now.Add(2 * time.Second)
+		m.fitEvents()
+		if payload == "" {
+			break
+		}
+		return m, copyToClipboard(payload)
 	}
 	m.fitEvents()
 	return m, nil
@@ -376,7 +381,7 @@ func (m *tuiModel) eventsView() string {
 		footer = eventsFooterCollapse
 	}
 	if m.now.Before(m.eventsModal.copiedUntil) {
-		footer = "copied " + batchCount(m.eventsModal.copiedN)
+		footer = m.eventsModal.copiedMsg
 	}
 	return m.modalBox(m.eventsHeader(len(merged), innerW), footer, lines, outerW, outerH)
 }
@@ -454,14 +459,14 @@ func eventsBatchLabel(b *feedBatch) string {
 	return label
 }
 
-// eventsCopyText is the `c` payload: every visible batch expanded, one line per
-// batch and per file, each naming its services. It returns the batch count too.
-func (m *tuiModel) eventsCopyText() (string, int) {
+// eventsCopyLines is the `c` text: every visible batch expanded, one line per
+// batch and per file, each naming its services.
+func (m *tuiModel) eventsCopyLines() []string {
 	batches, _ := m.feedVisible()
 	merged := mergeEventsBatches(batches)
-	var out strings.Builder
+	var out []string
 	if err := latestWatchErr(batches); err != nil {
-		fmt.Fprintf(&out, "⚠ watch failed: %s\n", printable(err.Error(), false))
+		out = append(out, "⚠ watch failed: "+printable(err.Error(), false))
 	}
 	for i := range merged {
 		b := &merged[i]
@@ -469,18 +474,18 @@ func (m *tuiModel) eventsCopyText() (string, int) {
 		if len(b.targets) > 0 {
 			line += "  · " + strings.Join(b.targets, ", ")
 		}
-		out.WriteString(line + "\n")
+		out = append(out, line)
 		for _, r := range feedFileRows(*b) {
 			if r.dir {
-				out.WriteString(r.label + "\n")
+				out = append(out, r.label)
 				continue
 			}
 			file := strings.Repeat(" ", r.indent) + r.glyph + " " + r.label
 			if svcs := m.fileServices(b, r.path); len(svcs) > 0 {
 				file += "  · " + strings.Join(svcs, ", ")
 			}
-			out.WriteString(file + "\n")
+			out = append(out, file)
 		}
 	}
-	return out.String(), len(merged)
+	return out
 }

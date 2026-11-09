@@ -396,7 +396,7 @@ func TestEventsModalCopyWithOnlyAnError(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("y on an error-only modal returned no clipboard command")
 	}
-	text, _ := m.eventsCopyText()
+	text, _, _ := copyPayload(m.eventsCopyLines())
 	if got := fmt.Sprint(cmd()); got != text {
 		t.Fatalf("clipboard payload = %q, want the copy text %q", got, text)
 	}
@@ -410,7 +410,7 @@ func TestEventsCopySendsItsTextToTheClipboard(t *testing.T) {
 	m.now = spawnClock
 	press(m, "e")
 
-	text, _ := m.eventsCopyText()
+	text, _, _ := copyPayload(m.eventsCopyLines())
 	if text == "" {
 		t.Fatal("setup: the modal has nothing to copy")
 	}
@@ -534,7 +534,7 @@ func TestEventsModalCopyAll(t *testing.T) {
 	if _, cmd := m.Update(keyMsg("c")); cmd == nil {
 		t.Fatal("y returned no clipboard command")
 	}
-	if got := eventsFooterLine(m); !strings.Contains(got, "copied 2 batches") {
+	if got := eventsFooterLine(m); !strings.Contains(got, "copied 5 lines") {
 		t.Fatalf("footer = %q, want the copy confirmation", got)
 	}
 	m.now = spawnClock.Add(3 * time.Second)
@@ -542,10 +542,7 @@ func TestEventsModalCopyAll(t *testing.T) {
 		t.Fatalf("footer after 3s = %q, want the key line back", got)
 	}
 
-	text, n := m.eventsCopyText()
-	if n != 2 {
-		t.Fatalf("copied %d batches, want 2", n)
-	}
+	lines := m.eventsCopyLines()
 	want := []string{
 		"14:32:08  b.go  · web",
 		"~ b.go  · web",
@@ -553,13 +550,12 @@ func TestEventsModalCopyAll(t *testing.T) {
 		"~ api/x.go  · web, api",
 		"~ web/y.go  · web",
 	}
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	if len(lines) != len(want) {
-		t.Fatalf("copy = %d lines, want %d:\n%s", len(lines), len(want), text)
+		t.Fatalf("copy = %d lines, want %d:\n%s", len(lines), len(want), strings.Join(lines, "\n"))
 	}
 	for i, w := range want {
 		if lines[i] != w {
-			t.Fatalf("copy line %d = %q, want %q\nfull text:\n%s", i, lines[i], w, text)
+			t.Fatalf("copy line %d = %q, want %q", i, lines[i], w)
 		}
 	}
 }
@@ -801,5 +797,23 @@ func TestEventsServicesCapAtSixtyPercent(t *testing.T) {
 		if !strings.Contains(row, "…") || !strings.Contains(row, "schema.svg") {
 			t.Fatalf("%d cols: row %q, want the path middle-ellipsized and the file name kept", width, row)
 		}
+	}
+}
+
+// The fs events modal's c shares the pane's clipboard cap and says when it cut the copy short.
+func TestEventsCopyIsCapped(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 100, 30
+	long := strings.Repeat("x", 40<<10)
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{long + "a.go": fsnotify.Write, long + "b.go": fsnotify.Write})
+	m.now = spawnClock
+	press(m, "e")
+
+	got := clipboardText(t, press(m, "c"))
+	if len(got) > copyCap {
+		t.Fatalf("clipboard payload is %d bytes, want at most the %d cap", len(got), copyCap)
+	}
+	if !strings.Contains(eventsFooterLine(m), "(truncated)") {
+		t.Fatalf("footer has no truncation notice:\n%s", eventsFooterLine(m))
 	}
 }

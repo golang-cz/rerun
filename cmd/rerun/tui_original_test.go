@@ -170,7 +170,7 @@ func TestOriginalCopyPayloadEqualsModalText(t *testing.T) {
 		t.Fatal("c returned no clipboard command")
 	}
 	got := reflect.ValueOf(cmd()).String()
-	want := strings.Join(m.original.text(), "\n")
+	want := strings.Join(m.original.text(), "\n") + "\n"
 	if got != want {
 		t.Fatalf("clipboard = %q, want the modal text %q", got, want)
 	}
@@ -246,7 +246,7 @@ func TestOriginalCopyKeepsTabs(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("c returned no clipboard command")
 	}
-	if got := reflect.ValueOf(cmd()).String(); got != "a\tb" {
+	if got := reflect.ValueOf(cmd()).String(); got != "a\tb\n" {
 		t.Fatalf("clipboard = %q, want the tab kept", got)
 	}
 }
@@ -278,5 +278,27 @@ func TestOriginalModalSwallowsMouse(t *testing.T) {
 	}
 	if m.selAnchor != nil {
 		t.Error("a click behind the modal armed a pane selection")
+	}
+}
+
+// The modal's c shares the pane's clipboard cap and says when it cut the copy short.
+func TestOriginalCopyIsCapped(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	big := strings.Repeat("x", 40<<10)
+	addLines(m, "web", big, big)
+	m.frame()
+	m.focusPane()
+	press(m, "alt+i", "o")
+
+	_, cmd := m.Update(keyMsg("c"))
+	got := clipboardText(t, cmd)
+	if len(got) > copyCap {
+		t.Fatalf("clipboard payload is %d bytes, want at most the %d cap", len(got), copyCap)
+	}
+	if want := big + "\n"; got != want {
+		t.Fatalf("clipboard = %d bytes, want the first line only", len(got))
+	}
+	if !strings.Contains(originalBody(m), "copied 1 line (truncated)") {
+		t.Fatalf("footer has no truncation notice:\n%s", originalBody(m))
 	}
 }

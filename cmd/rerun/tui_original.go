@@ -30,7 +30,7 @@ type originalState struct {
 	// rows caches the wrapped body; a resize or a `f` toggle rewraps it.
 	rows        []string
 	wrapW       int
-	copiedN     int
+	copiedMsg   string
 	copiedUntil time.Time
 }
 
@@ -192,10 +192,17 @@ func (m *tuiModel) handleOriginalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			o.rows, o.top = nil, 0
 		}
 	case "c":
-		o.copiedN = len(o.lines) // the source lines, not the indented rows
+		payload, n, truncated := copyPayload(o.text())
+		if !truncated {
+			n = len(o.lines) // the footer counts the source lines, not the indented rows
+		}
+		o.copiedMsg = copyNotice(payload, n, truncated)
 		o.copiedUntil = m.now.Add(2 * time.Second)
 		m.fitOriginal()
-		return m, copyToClipboard(strings.Join(o.text(), "\n"))
+		if payload == "" {
+			return m, nil
+		}
+		return m, copyToClipboard(payload)
 	}
 	m.fitOriginal()
 	return m, nil
@@ -226,7 +233,7 @@ func originalLineCount(n int) string {
 func (m *tuiModel) originalFooter() string {
 	o := m.original
 	if m.now.Before(o.copiedUntil) {
-		return copyMessage(o.copiedN, false)
+		return o.copiedMsg
 	}
 	switch {
 	case o.pretty == nil:

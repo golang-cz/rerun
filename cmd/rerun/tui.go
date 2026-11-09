@@ -1589,6 +1589,14 @@ func copyMessage(n int, truncated bool) string {
 	return s
 }
 
+// copyNotice names a modal copy's outcome for its footer: the lines that reached the clipboard, or why none did.
+func copyNotice(payload string, n int, truncated bool) string {
+	if payload == "" {
+		return "line too long — not copied"
+	}
+	return copyMessage(n, truncated)
+}
+
 // padRight truncates or pads plain text to exactly w display cells.
 func padRight(s string, w int) string {
 	if w <= 0 {
