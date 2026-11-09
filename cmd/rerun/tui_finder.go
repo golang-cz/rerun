@@ -35,8 +35,14 @@ type finderItem struct {
 	desc    string
 	matched []int // rune indexes of name that the query matched
 	// make marks a Makefile target, whose enter runs it instead of jumping.
-	make  bool
-	enter func(m *tuiModel)
+	make   bool
+	target int // the index into m.targets; -1 for a group
+	enter  func(m *tuiModel)
+}
+
+// finderRuns is whether enter starts the row's command: a make target that is not up.
+func (m *tuiModel) finderRuns(c finderItem) bool {
+	return c.make && c.target >= 0 && !m.targets[c.target].state.up()
 }
 
 // finderDesc collapses a description onto one line, so a newline cannot break the popup.
@@ -48,13 +54,13 @@ func (m *tuiModel) finderCandidates() []finderItem {
 	out := make([]finderItem, 0, len(rows))
 	for i, r := range rows {
 		if r.header {
-			out = append(out, finderItem{kind: "group", name: groupLabel(r.schema), desc: "",
+			out = append(out, finderItem{kind: "group", name: groupLabel(r.schema), desc: "", target: -1,
 				enter: func(m *tuiModel) { m.finderJump(i) }})
 			continue
 		}
 		t := m.targets[r.target].spec
 		item := finderItem{kind: "target", name: t.Name, desc: finderDesc(t.Desc), make: t.Kind == makeKind,
-			enter: func(m *tuiModel) { m.finderJump(i) }}
+			target: r.target, enter: func(m *tuiModel) { m.finderJump(i) }}
 		if item.make {
 			item.enter = func(m *tuiModel) { m.finderRun(i) }
 		}
@@ -224,8 +230,8 @@ func dropControl(r rune) rune {
 // finderJump unfolds the rows hiding allRows()[idx] and the group itself when it is one, then moves the cursor to it.
 func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
-	// A hidden list cannot show its cursor, so the keys stay on the pane.
-	m.paneFocus = !m.listShown()
+	// The jump lands in the pane, where the target's log is.
+	m.paneFocus = true
 	rows := m.allRows()
 	m.revealRow(rows, idx)
 	// A hidden target is listed only with its group's hidden members shown.
@@ -313,9 +319,9 @@ func (m *tuiModel) finderView() string {
 	}
 	footer := ""
 	if m.finderHasFooter() {
-		footer = "↑↓ move  ⏎ jump  esc close"
-		if m.finder.sel < len(res) && res[m.finder.sel].make {
-			footer = "↑↓ move  ⏎ run  esc close"
+		footer = "↑↓ move  enter go to  esc close"
+		if m.finder.sel < len(res) && m.finderRuns(res[m.finder.sel]) {
+			footer = "↑↓ move  enter run  esc close"
 		}
 		if len(res) == 0 {
 			footer = "esc close"
@@ -344,8 +350,12 @@ func (m *tuiModel) finderLine(c finderItem, selected bool, nameW, innerW int) st
 	if selected {
 		marker = paint(m.styles.chip).Render("▌") + paint(lipgloss.NewStyle()).Render(" ")
 	}
-	row := marker + m.finderName(c, selected, nameW)
-	if descW := innerW - 4 - nameW; descW >= 8 && c.desc != "" {
+	glyph := "  "
+	if m.finderRuns(c) {
+		glyph = "▶ "
+	}
+	row := marker + paint(lipgloss.NewStyle()).Render(glyph) + m.finderName(c, selected, nameW)
+	if descW := innerW - 6 - nameW; descW >= 8 && c.desc != "" {
 		row += paint(lipgloss.NewStyle()).Render("  ") + paint(m.styles.hint).Render(ansi.Truncate(c.desc, descW, "…"))
 	}
 	return row + paint(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, innerW-lipgloss.Width(row))))

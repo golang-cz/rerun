@@ -470,3 +470,21 @@ func TestFinderIsNamedGoTo(t *testing.T) {
 		t.Fatal("help does not name ctrl+k as go to")
 	}
 }
+
+// Enter on a rerun.yml row jumps to it and lands in its pane; the row shows no run glyph.
+func TestGoToJumpFocusesThePane(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.width, m.height = 100, 30
+	press(m, "g")
+	press(m, "a", "p", "i")
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "enter go to") || strings.Contains(view, "▶") {
+		t.Fatalf("a jump-only row should say enter go to and show no ▶:\n%s", view)
+	}
+	press(m, "enter")
+	if !m.paneFocus {
+		t.Fatal("the jump did not focus the target's pane")
+	}
+	if r, ok := m.cursorRow(); !ok || m.targets[r.target].spec.Name != "api" {
+		t.Fatal("the jump did not land on api")
+	}
+}

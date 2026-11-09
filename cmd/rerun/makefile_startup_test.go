@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // makeDir is a repo dir with a .git stop, so LoadConfig does not walk above it.
@@ -149,6 +151,9 @@ func TestFinderEnterRunsAMakeRowOnce(t *testing.T) {
 	if m.targets[i].state != stateRunning {
 		t.Fatalf("state = %v, want running", m.targets[i].state)
 	}
+	if !m.paneFocus {
+		t.Fatal("running a make row did not focus its pane")
+	}
 
 	m.Update(ctrlK)
 	press(m, "t", "e", "s", "t", "enter")
@@ -188,14 +193,14 @@ func TestFinderFooterSaysRunOnAMakeRow(t *testing.T) {
 	m := newMakeTUI(t)
 	m.Update(ctrlK)
 	press(m, "t", "e", "s", "t")
-	if view := m.View().Content; !strings.Contains(view, "⏎ run") {
-		t.Fatalf("footer on a make row lacks ⏎ run:\n%s", view)
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "enter run") || !strings.Contains(view, "▶ make/test") {
+		t.Fatalf("a make row should show ▶ and say enter run:\n%s", view)
 	}
 
 	m.finder.query = ""
 	press(m, "w", "e", "b")
-	if view := m.View().Content; !strings.Contains(view, "⏎ jump") || strings.Contains(view, "⏎ run") {
-		t.Fatalf("footer on a rerun.yml row should say jump:\n%s", view)
+	if view := m.View().Content; !strings.Contains(view, "enter go to") || strings.Contains(view, "enter run") {
+		t.Fatalf("footer on a rerun.yml row should say enter go to:\n%s", view)
 	}
 }
 
