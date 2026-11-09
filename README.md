@@ -114,7 +114,7 @@ when none landed in the last minute. It highlights for a second when a batch
 lands, turns red `fs events · ⚠ watch failed` after a watcher error until the
 next successful batch, and a click opens the fs events modal, like `e`. The
 modal lists the last minute's batches, newest first: `22:32:00  path +N` with
-the targets it restarted right-aligned behind a `·` (`config` for a rerun.yml
+the targets it restarted, after a 2-space gap and a `↻` mark (`config` for a rerun.yml
 reload). A batch is every change within 150ms of its first event, so one save
 across several targets is one line. The path is the first changed file relative
 to the rerun.yml dir, cut with a middle ellipsis when the row is still too long

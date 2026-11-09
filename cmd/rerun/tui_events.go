@@ -18,6 +18,12 @@ const (
 	eventsFooterCollapse = "j k move · ← collapse · c copy all · esc close"
 )
 
+// eventsLabelCol is where a batch row's label starts: the time and two spaces.
+const eventsLabelCol = 10
+
+// eventsServicesCapPct keeps a long path from pushing the services off the modal.
+const eventsServicesCapPct = 60
+
 // eventsEmpty is the modal's placeholder while no batch sits in the window.
 const eventsEmpty = "no fs events in the last minute"
 
@@ -65,7 +71,7 @@ type eventsRow struct {
 	indent int
 	label  string
 	svc    string // the right-aligned services text, "· " included
-	svcCol int    // a continuation's start column, under the file row's ·
+	svcCol int    // where the services start, shared by every row of this kind
 	dim    bool
 	sel    bool
 }
@@ -148,56 +154,67 @@ func latestWatchErr(batches []feedBatch) error {
 func (m *tuiModel) eventsRows(batches []feedBatch, dim bool, innerW int) []eventsRow {
 	merged := mergeEventsBatches(batches)
 	cur := m.eventsCursorID(merged)
+	capCol := innerW * eventsServicesCapPct / 100
+	batchCol := eventsBatchServicesCol(merged, capCol)
 	rows := make([]eventsRow, 0, len(merged))
 	for i := range merged {
 		b := &merged[i]
-		rows = append(rows, eventsRow{id: b.id, batch: b, sel: b.id == cur, dim: dim})
+		row := eventsRow{id: b.id, batch: b, sel: b.id == cur, dim: dim, svcCol: batchCol}
+		if names := fitServices(b.targets, innerW-batchCol-2); names != "" {
+			row.svc = "↻ " + names
+		}
+		rows = append(rows, row)
 		if b.id != m.eventsModal.openID {
 			continue
 		}
-		for _, r := range feedFileRows(*b) {
+		fileRows := feedFileRows(*b)
+		fileCol := eventsFilesServicesCol(fileRows, capCol)
+		for _, r := range fileRows {
 			if r.dir {
 				rows = append(rows, eventsRow{id: b.id, dir: true, label: r.label, dim: dim})
 				continue
 			}
-			label := ellipsizeMiddle(r.label, max(1, innerW-r.indent-2))
-			if svcs := m.fileServices(b, r.path); len(svcs) > 0 {
-				if w := innerW - r.indent - 2 - 2 - 4 - displayWidth(svcs[0]); displayWidth(label) > w {
-					// The path takes a middle ellipsis so at least the first service fits.
-					label = ellipsizeMiddle(r.label, max(1, w))
-				}
-				fileW := r.indent + 2 + displayWidth(label)
-				first, cont, col := wrapServices(svcs, fileW, innerW)
-				row := eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label, svc: "· ↻ " + first, dim: dim}
-				rows = append(rows, row)
-				for _, c := range cont {
-					rows = append(rows, eventsRow{id: b.id, cont: true, svc: c, svcCol: col, dim: dim})
-				}
+			svcs := m.fileServices(b, r.path)
+			if len(svcs) == 0 {
+				label := ellipsizeMiddle(r.label, max(1, innerW-r.indent-2))
+				rows = append(rows, eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label, dim: dim})
 				continue
 			}
-			rows = append(rows, eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label, dim: dim})
+			// The path takes a middle ellipsis so the services keep their column.
+			label := ellipsizeMiddle(r.label, max(1, fileCol-r.indent-4))
+			first, rest := packServices(svcs, max(1, innerW-fileCol-2))
+			rows = append(rows, eventsRow{id: b.id, file: true, glyph: r.glyph, indent: r.indent, label: label,
+				svc: "↻ " + first, svcCol: fileCol, dim: dim})
+			for len(rest) > 0 {
+				var chunk string
+				chunk, rest = packServices(rest, max(1, innerW-fileCol))
+				rows = append(rows, eventsRow{id: b.id, cont: true, svc: chunk, svcCol: fileCol, dim: dim})
+			}
 		}
 	}
 	return rows
 }
 
-// wrapServices packs a file row's services: the first chunk rides the file's
-// line right-aligned, the rest wrap onto lines aligned under its `·`.
-func wrapServices(svcs []string, fileW, innerW int) (first string, cont []string, col int) {
-	budget := max(1, innerW-fileW-2-4) // the gap and the `· ↻ ` marker
-	first, rest := packServices(svcs, budget)
-	col = max(0, innerW-displayWidth(first)-4)
-	// A continuation starts under the `·`, but never so far right that a name
-	// would be cut.
-	for _, s := range rest {
-		col = min(col, max(0, innerW-displayWidth(s)))
+// eventsBatchServicesCol is where the batch rows' services start: one gap after
+// the longest batch label, never past the cap.
+func eventsBatchServicesCol(merged []feedBatch, capCol int) int {
+	longest := 0
+	for i := range merged {
+		longest = max(longest, displayWidth(eventsBatchLabel(&merged[i])))
 	}
-	for len(rest) > 0 {
-		var chunk string
-		chunk, rest = packServices(rest, max(1, innerW-col))
-		cont = append(cont, chunk)
+	return min(eventsLabelCol+longest+2, capCol)
+}
+
+// eventsFilesServicesCol is where an expanded batch's file rows put their services:
+// one gap after the longest path, never past the cap.
+func eventsFilesServicesCol(rows []feedFile, capCol int) int {
+	longest := 0
+	for _, r := range rows {
+		if !r.dir {
+			longest = max(longest, r.indent+2+displayWidth(r.label))
+		}
 	}
-	return first, cont, col
+	return min(longest+2, capCol)
 }
 
 // packServices takes as many leading names as fit the budget, at least one.
@@ -404,7 +421,7 @@ func (m *tuiModel) eventsLine(w eventsRow, innerW int) string {
 			{text: " " + w.label},
 		}
 		if w.svc != "" {
-			gap := max(2, innerW-w.indent-2-displayWidth(w.label)-displayWidth(w.svc))
+			gap := max(2, w.svcCol-(w.indent+2+displayWidth(w.label)))
 			segs = append(segs, seg{text: strings.Repeat(" ", gap)}, seg{text: w.svc, color: colorGray})
 		}
 		return renderSegs(segs, base, innerW)
@@ -413,24 +430,18 @@ func (m *tuiModel) eventsLine(w eventsRow, innerW int) string {
 	b := w.batch
 	at := b.at.Local().Format("15:04:05")
 	label := eventsBatchLabel(b)
-	svc := fitServices(b.targets, innerW-10-displayWidth(label)-6)
-	if svc == "" && len(b.targets) > 0 {
-		// The path left no room: it takes the middle ellipsis, the services stay.
-		svc = fitServices(b.targets, innerW-10-6-12)
+	segs := []seg{{text: at, faint: true}}
+	if w.svc == "" {
+		segs = append(segs, seg{text: "  " + ellipsizeMiddle(label, max(1, innerW-eventsLabelCol-2))})
+		return renderSegs(segs, base, innerW)
 	}
-	svcText := ""
-	if svc != "" {
-		svcText = "· ↻ " + svc
-	}
-	label = ellipsizeMiddle(label, max(1, innerW-10-displayWidth(svcText)-2))
-	segs := []seg{
-		{text: at, faint: true},
-		{text: "  " + label},
-	}
-	if svcText != "" {
-		gap := max(2, innerW-10-displayWidth(label)-displayWidth(svcText))
-		segs = append(segs, seg{text: strings.Repeat(" ", gap)}, seg{text: svcText, color: colorGray})
-	}
+	label = ellipsizeMiddle(label, max(1, w.svcCol-eventsLabelCol-2))
+	gap := max(2, w.svcCol-eventsLabelCol-displayWidth(label))
+	segs = append(segs,
+		seg{text: "  " + label},
+		seg{text: strings.Repeat(" ", gap)},
+		seg{text: w.svc, color: colorGray},
+	)
 	return renderSegs(segs, base, innerW)
 }
 

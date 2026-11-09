@@ -118,7 +118,7 @@ func TestEventsModalRowsNewestFirstWithAbsoluteTime(t *testing.T) {
 }
 
 // A collapsed row is the time, the first file with +N, and the restarted
-// services right-aligned behind one middle dot — never op counts or a dot leader.
+// services one 2-space gap after the label, with the ↻ mark — never op counts or a dot leader.
 func TestEventsModalCollapsedRowLayout(t *testing.T) {
 	m := newTestModel(t, watchedTarget("omsx-api"), watchedTarget("files"))
 	m.width, m.height = 100, 30
@@ -136,15 +136,11 @@ func TestEventsModalCollapsedRowLayout(t *testing.T) {
 	if !strings.HasPrefix(row, want) {
 		t.Fatalf("row = %q, want it to start with %q", row, want)
 	}
-	if !strings.HasSuffix(row, "· ↻ omsx-api, files") {
-		t.Fatalf("row = %q, want the services right-aligned behind one · with the ↻ mark", row)
+	if !strings.HasPrefix(row, want+"  ↻ omsx-api, files") {
+		t.Fatalf("row = %q, want the services one 2-space gap after the label, with the ↻ mark", row)
 	}
-	if strings.Contains(row, "→") || strings.Contains(row, "~1") || strings.Contains(row, "none") {
-		t.Fatalf("row = %q, want no arrow, op counts or none", row)
-	}
-	between := row[len(want) : len(row)-len("· ↻ omsx-api, files")]
-	if strings.Contains(between, "·") {
-		t.Fatalf("row = %q, want a single middle dot, never a dot leader", row)
+	if strings.Contains(row, "→") || strings.Contains(row, "~1") || strings.Contains(row, "none") || strings.Contains(row, "·") {
+		t.Fatalf("row = %q, want no arrow, op counts, none or middle dot", row)
 	}
 }
 
@@ -284,10 +280,10 @@ func TestEventsModalExpandedRowsNamePerFileServices(t *testing.T) {
 			yRow = rowText(line)
 		}
 	}
-	if !strings.HasSuffix(xRow, "· ↻ web, api") {
+	if !strings.HasSuffix(xRow, "↻ web, api") {
 		t.Fatalf("x.go row = %q, want both watchers named", xRow)
 	}
-	if !strings.HasSuffix(yRow, "· ↻ web") {
+	if !strings.HasSuffix(yRow, "↻ web") {
 		t.Fatalf("y.go row = %q, want only web named", yRow)
 	}
 }
@@ -309,20 +305,20 @@ func TestEventsModalPerFileServicesAreRecordedNotInferred(t *testing.T) {
 		if strings.Contains(line, "debug.log") && strings.Contains(line, "web") {
 			t.Fatalf("debug.log row = %q, want only logger: services are recorded, not re-matched", rowText(line))
 		}
-		if strings.Contains(line, "~ debug.log") && !strings.HasSuffix(rowText(line), "· ↻ logger") {
+		if strings.Contains(line, "~ debug.log") && !strings.HasSuffix(rowText(line), "↻ logger") {
 			t.Fatalf("debug.log row = %q, want logger named", rowText(line))
 		}
-		if strings.Contains(line, "~ a.go") && !strings.HasSuffix(rowText(line), "· ↻ web") {
+		if strings.Contains(line, "~ a.go") && !strings.HasSuffix(rowText(line), "↻ web") {
 			t.Fatalf("a.go row = %q, want web named", rowText(line))
 		}
 	}
 }
 
 // At 80 columns an expanded file row ellipsizes a long path from its middle,
-// and services that do not fit continue on lines aligned under the row's ·,
+// and services that do not fit continue on lines aligned under the services' column,
 // clamped so every service name fits whole.
 func TestEventsModalExpandedRowEllipsizesPathAndClampsServices(t *testing.T) {
-	names := []string{"svc-one", "svc-two", "svc-three"}
+	names := []string{"svc-one-service", "svc-two-service", "svc-three-service"}
 	defs := make([]Target, 0, len(names))
 	for _, name := range names {
 		defs = append(defs, watchedTarget(name, "./"))
@@ -357,7 +353,7 @@ func TestEventsModalExpandedRowEllipsizesPathAndClampsServices(t *testing.T) {
 		t.Fatalf("no expanded file row:\n%s", joined)
 	}
 	row := rowText(fileRow)
-	if !strings.Contains(row, "…") || !strings.HasSuffix(row, "· ↻ svc-one") {
+	if !strings.Contains(row, "…") || !strings.Contains(row, "↻ svc-one") {
 		t.Fatalf("file row = %q, want the path middle-ellipsized with the first service kept", row)
 	}
 	if got := displayWidth(row); got > innerW {
@@ -371,10 +367,10 @@ func TestEventsModalExpandedRowEllipsizesPathAndClampsServices(t *testing.T) {
 	if len(conts) == 0 {
 		t.Fatalf("no continuation lines:\n%s", joined)
 	}
-	dot := displayWidth(fileRow[:strings.Index(fileRow, "·")]) // cells: the … shifts byte offsets
+	dot := displayWidth(fileRow[:strings.Index(fileRow, "↻")]) // cells: the … shifts byte offsets
 	for _, c := range conts {
 		if got := displayWidth(c[:strings.Index(c, "svc-")]); got != dot {
-			t.Fatalf("continuation = %q starts at cell %d, want aligned under the · at %d", c, got, dot)
+			t.Fatalf("continuation = %q starts at cell %d, want aligned under the ↻ at %d", c, got, dot)
 		}
 		if got := displayWidth(rowText(c)); got > innerW {
 			t.Fatalf("continuation = %d cells, want within the %d-cell modal: %q", got, innerW, c)
@@ -435,7 +431,7 @@ func TestEventsModalPerFileServicesMarkExited(t *testing.T) {
 	press(m, "e", "right")
 	for _, line := range eventsBody(m) {
 		if strings.Contains(line, "~ a.go") {
-			if got := rowText(line); !strings.HasSuffix(got, "· ↻ web, api ✗") {
+			if got := rowText(line); !strings.HasSuffix(got, "↻ web, api ✗") {
 				t.Fatalf("a.go row = %q, want api marked ✗", got)
 			}
 			return
@@ -444,7 +440,7 @@ func TestEventsModalPerFileServicesMarkExited(t *testing.T) {
 	t.Fatal("the expanded list has no a.go row")
 }
 
-// Services that do not fit wrap onto continuation lines aligned under the ·, never cut.
+// Services that do not fit wrap onto continuation lines aligned under the ↻ column, never cut.
 func TestEventsModalPerFileServicesWrap(t *testing.T) {
 	names := []string{"service-one", "service-two", "service-three", "service-four", "service-five", "service-six"}
 	defs := make([]Target, 0, len(names))
@@ -479,13 +475,13 @@ func TestEventsModalPerFileServicesWrap(t *testing.T) {
 	if len(conts) == 0 {
 		t.Fatalf("no continuation lines:\n%s", joined)
 	}
-	dot := strings.Index(fileRow, "·")
+	dot := strings.Index(fileRow, "↻")
 	if dot < 0 {
-		t.Fatalf("file row = %q, want its · marker", fileRow)
+		t.Fatalf("file row = %q, want its ↻ marker", fileRow)
 	}
 	for _, c := range conts {
 		if got := strings.Index(c, "service-"); got != dot {
-			t.Fatalf("continuation = %q starts at %d, want aligned under the · at %d", c, got, dot)
+			t.Fatalf("continuation = %q starts at %d, want aligned under the ↻ at %d", c, got, dot)
 		}
 	}
 }
@@ -519,7 +515,7 @@ func TestEventsModalMergesSameFileBatches(t *testing.T) {
 	if !strings.Contains(merged, spawnClock.Add(time.Second).Local().Format("15:04:05")) {
 		t.Fatalf("merged row = %q, want the newest of the merged times", merged)
 	}
-	if !strings.HasSuffix(merged, "· ↻ api, web") {
+	if !strings.HasSuffix(merged, "↻ api, web") {
 		t.Fatalf("merged row = %q, want both batches' services", merged)
 	}
 }
@@ -749,5 +745,61 @@ func TestEventsModalHeightIsFixed(t *testing.T) {
 	press(m2, "e")
 	if got := lipgloss.Height(m2.eventsView()); got != wantH {
 		t.Fatalf("height = %d for 30 batches, want the shared %d", got, wantH)
+	}
+}
+
+// Batch services start one 2-space gap after the longest path, at 80 and 120 columns.
+func TestEventsServicesStartAfterTheLongestPath(t *testing.T) {
+	const long = "apps/api/long/path/schema.svg"
+	for _, width := range []int{80, 120} {
+		m := newTestModel(t, watchedTarget("web"), watchedTarget("api"))
+		m.width, m.height = width, 30
+		m.now = spawnClock
+		changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+		changeAt(m, "api", spawnClock.Add(time.Second), map[string]fsnotify.Op{long: fsnotify.Write})
+		press(m, "e")
+
+		want := 10 + displayWidth(long) + 2 // time and two spaces, the path, then the gap
+		body := eventsBody(m)
+		if len(body) < 2 {
+			t.Fatalf("%d cols: body has %d rows, want 2", width, len(body))
+		}
+		for _, line := range body[:2] {
+			row := rowText(line)
+			at := strings.Index(row, "↻")
+			if at < 0 {
+				t.Fatalf("%d cols: row %q has no ↻ mark", width, row)
+			}
+			if got := displayWidth(row[:at]); got != want {
+				t.Fatalf("%d cols: services start at cell %d, want %d: %q", width, got, want, row)
+			}
+		}
+	}
+}
+
+// A path too long for the 60% cap ellipsizes in the middle, and the services stay at the cap.
+func TestEventsServicesCapAtSixtyPercent(t *testing.T) {
+	long := "apps/" + strings.Repeat("deep/", 24) + "schema.svg"
+	for _, width := range []int{80, 120} {
+		m := newTestModel(t, watchedTarget("web"))
+		m.width, m.height = width, 30
+		m.now = spawnClock
+		changeAt(m, "web", spawnClock, map[string]fsnotify.Op{long: fsnotify.Write})
+		press(m, "e")
+
+		outerW, _ := m.modalSize()
+		innerW := m.modalInnerW(outerW)
+		capCol := innerW * 60 / 100
+		row := rowText(eventsBody(m)[0])
+		at := strings.Index(row, "↻")
+		if at < 0 {
+			t.Fatalf("%d cols: row %q has no ↻ mark", width, row)
+		}
+		if got := displayWidth(row[:at]); got != capCol {
+			t.Fatalf("%d cols: services start at cell %d, want the cap %d: %q", width, got, capCol, row)
+		}
+		if !strings.Contains(row, "…") || !strings.Contains(row, "schema.svg") {
+			t.Fatalf("%d cols: row %q, want the path middle-ellipsized and the file name kept", width, row)
+		}
 	}
 }

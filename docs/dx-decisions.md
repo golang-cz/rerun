@@ -22,3 +22,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · modal size defaults (80%, 80–120 cols, 80% height, min 10 rows) live in `cmd/rerun/tui_modal.go`: every modal shares one box. Why: the modals drifted apart in size.
 - 2026-11-09 · `v` no longer opens the query bar; `g` opens go to like `ctrl+k`, outside text inputs. Why: `/` already opens the bar, and `g` is a one-key jump.
 - 2026-11-09 · go to lands in the pane, and a runnable row shows `▶` with `enter run`: the footer names what enter does. Why: a jump should show the log, and a run should not look like a jump.
+- 2026-11-09 · fs events services start one 2-space gap after the longest path, and no `·` separator: the `↻` names the restarts. Why: a right-aligned list drifted with every path length.

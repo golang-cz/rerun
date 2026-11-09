@@ -118,7 +118,7 @@ The fs events line above the bottom-left footer ages the newest change batch
 lands, and turns red `⚠ watch failed` after a watcher error; a click (or `e`)
 opens the fs events modal. The modal lists the last minute's batches (events
 within 150ms of each other), newest first: the time, the first changed file with
-`+N` for the rest, and the targets the batch restarted right-aligned behind a `·`.
+`+N` for the rest, and the targets the batch restarted after a 2-space gap and a `↻` mark.
 `→` expands a batch's files, each naming the services whose watch globs it
 matched; `c` copies every batch expanded. A created directory shows a trailing `/`
 and heads the files reported under it. The pane's top line
