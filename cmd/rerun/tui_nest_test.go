@@ -20,6 +20,10 @@ func nestedRows(m *tuiModel) []string {
 	var out []string
 	for _, r := range m.listRows() {
 		pad := strings.Repeat(" ", r.indent())
+		if r.more {
+			out = append(out, pad+r.label)
+			continue
+		}
 		if r.header {
 			glyph := "▾"
 			if r.collapsed {

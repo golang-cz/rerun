@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 )
 
 // ungrouped keys the trailing default header; NUL keeps it apart from any config name.
@@ -19,6 +20,9 @@ const allKeyPrefix = "\x00all:"
 // indentCells is the list pane indent per nesting level.
 const indentCells = 1
 
+// autoHideGrace is how long an auto-hide target that exited 0 stays listed.
+const autoHideGrace = 10 * time.Minute
+
 // playGlyph marks a header space would start; a collapsed header keeps its fold marker even so.
 const playGlyph = "▶"
 
@@ -32,6 +36,11 @@ type listRow struct {
 	depth   int    // indent level: header 0, sub-header and root-group target 1, sub-group target 2
 	// collapsed is a header folded shut, which hides every row below it at a deeper depth.
 	collapsed bool
+	// more is the (+) N hidden row that shows or hides a block's auto-hidden members.
+	more     bool
+	revealed bool // the block's hidden members are shown, so the row reads (−) hide N
+	// dim is an auto-hidden target the list shows because its group is revealed.
+	dim bool
 }
 
 // indent is the list cells in front of a row's name.
@@ -176,11 +185,13 @@ func (m *tuiModel) allRows() []listRow {
 	return rows
 }
 
-// listRows is the list as drawn: allRows without the rows under a collapsed header.
+// listRows is the list as drawn: allRows without the rows under a collapsed header, and without
+// auto-hidden targets unless their group is revealed. Each block ends in a (+)/(−) row when it hides any.
 func (m *tuiModel) listRows() []listRow {
 	var out []listRow
 	skip := -1
-	for _, r := range m.allRows() {
+	all := m.allRows()
+	for i, r := range all {
 		if skip >= 0 && r.depth > skip {
 			continue
 		}
@@ -189,9 +200,106 @@ func (m *tuiModel) listRows() []listRow {
 			r.collapsed = true
 			skip = r.depth
 		}
-		out = append(out, r)
+		if r.header {
+			out = append(out, r)
+			continue
+		}
+		if hidden := m.autoHidden(r.target); !hidden || m.revealed[r.schema] {
+			r.dim = hidden
+			out = append(out, r)
+		}
+		if i+1 < len(all) && !all[i+1].header && all[i+1].schema == r.schema {
+			continue
+		}
+		if n := m.hiddenCount(r.schema); n > 0 {
+			out = append(out, m.moreRow(r.schema, r.depth, n))
+		}
 	}
 	return out
+}
+
+// moreRow is the block's last row: `(+) N hidden`, or `(−) hide N` once its hidden members show.
+func (m *tuiModel) moreRow(schema string, depth, n int) listRow {
+	r := listRow{schema: schema, target: -1, depth: depth, more: true, revealed: m.revealed[schema]}
+	r.label = fmt.Sprintf("(+) %d hidden", n)
+	if r.revealed {
+		r.label = fmt.Sprintf("(−) hide %d", n)
+	}
+	return r
+}
+
+// autoHidden reports whether an auto-hide target is off the list: not running, starting, backing off,
+// or failed, and not the solo target, which never vanishes under the cursor.
+func (m *tuiModel) autoHidden(i int) bool {
+	t := m.targets[i]
+	if !t.spec.AutoHide || i == m.solo {
+		return false
+	}
+	switch t.state {
+	case stateRunning, stateStarting, stateBackoff:
+		return false
+	case stateExited:
+		return t.exitCode == 0 && m.now.Sub(t.exitedAt) > autoHideGrace
+	}
+	return true
+}
+
+// hiddenCount is how many members of a group key the list hides.
+func (m *tuiModel) hiddenCount(key string) int {
+	n := 0
+	for _, i := range m.schemaMembers(key) {
+		if m.autoHidden(i) {
+			n++
+		}
+	}
+	return n
+}
+
+// hiddenIn is how many of the given members the list hides.
+func (m *tuiModel) hiddenIn(members []int) int {
+	n := 0
+	for _, i := range members {
+		if m.autoHidden(i) {
+			n++
+		}
+	}
+	return n
+}
+
+// setRevealed shows or hides a group's auto-hidden members.
+func (m *tuiModel) setRevealed(key string, on bool) {
+	if m.revealed == nil {
+		m.revealed = map[string]bool{}
+	}
+	m.revealed[key] = on
+}
+
+// toggleHidden is h: shows or hides the cursor's group's auto-hidden members, from any row of the group.
+func (m *tuiModel) toggleHidden() {
+	r, ok := m.cursorRow()
+	if !ok || r.schema == "" || (!m.revealed[r.schema] && m.hiddenCount(r.schema) == 0) {
+		return
+	}
+	m.setRevealed(r.schema, !m.revealed[r.schema])
+}
+
+// keepCursor keeps the cursor on its row when rows above it appear or hide. A key that moved the cursor
+// keeps its place, and a row that left the list leaves the cursor on its nearest neighbour.
+func (m *tuiModel) keepCursor(idx int, key string) {
+	if m.cursor == idx && key != "" {
+		if i := m.indexOfKey(key); i >= 0 {
+			m.cursor = i
+		}
+	}
+	m.cursor = min(max(m.cursor, 0), max(0, m.listLen()-1))
+}
+
+// cursorKey names the row under the cursor, or "" when there is none.
+func (m *tuiModel) cursorKey() string {
+	if r, ok := m.cursorRow(); ok {
+		return m.rowKey(r)
+	}
+	return ""
 }
 
 // importRows is an import's section: its header, then one sub-header per group in file order, then `all`.
@@ -294,8 +402,11 @@ func (m *tuiModel) cursorTarget() int {
 
 // rowKey names a list row so the cursor can follow it across a reload.
 func (m *tuiModel) rowKey(r listRow) string {
-	if r.header {
+	switch {
+	case r.header:
 		return "schema:" + r.schema
+	case r.more:
+		return "more:" + r.schema
 	}
 	return "target:" + m.targets[r.target].spec.Name
 }
@@ -310,6 +421,10 @@ func (m *tuiModel) treeLeft() {
 		m.toggleCollapse(m.cursor)
 		return
 	}
+	if r.more && r.revealed {
+		m.setRevealed(r.schema, false)
+		return
+	}
 	if i := m.enclosingHeader(m.cursor); i >= 0 {
 		m.cursor = i
 		m.liveSelect()
@@ -319,6 +434,10 @@ func (m *tuiModel) treeLeft() {
 // treeRight is → on the list: unfold a folded header. It reports false on any other row.
 func (m *tuiModel) treeRight() bool {
 	r, ok := m.cursorRow()
+	if ok && r.more && !r.revealed {
+		m.setRevealed(r.schema, true)
+		return true
+	}
 	if !ok || !r.header || !r.collapsed {
 		return false
 	}
@@ -423,6 +542,9 @@ func (m *tuiModel) indexOfKey(keys ...string) int {
 
 // toggleRow is space: starts or stops a target, or a header's members.
 func (m *tuiModel) toggleRow(r listRow) {
+	if r.more {
+		return
+	}
 	if r.header {
 		m.toggleTargets(r.members)
 		return
@@ -432,6 +554,10 @@ func (m *tuiModel) toggleRow(r listRow) {
 
 // enterRow is enter on the list: focuses the pane, starting a stopped row first.
 func (m *tuiModel) enterRow() {
+	if r, ok := m.cursorRow(); ok && r.more {
+		m.setRevealed(r.schema, !r.revealed)
+		return
+	}
 	if r, ok := m.cursorRow(); ok {
 		switch {
 		case r.header && !m.anyRunning(r.members):
@@ -453,7 +579,7 @@ func (m *tuiModel) stopRow() {
 		}
 	}
 	r, ok := m.cursorRow()
-	if !ok {
+	if !ok || r.more {
 		return
 	}
 	if r.header {
@@ -488,6 +614,9 @@ func (m *tuiModel) paneScope() ([]int, bool) {
 
 // muteRow is `m`: mutes a target, or a header's members.
 func (m *tuiModel) muteRow(r listRow) {
+	if r.more {
+		return
+	}
 	if r.header {
 		m.muteTargets(r.members)
 		return
@@ -497,6 +626,9 @@ func (m *tuiModel) muteRow(r listRow) {
 
 // rebootRow is `r`: reboots a target, or a header's selected members.
 func (m *tuiModel) rebootRow(r listRow) {
+	if r.more {
+		return
+	}
 	if r.header {
 		m.rebootTargets(r.members)
 		return
@@ -552,6 +684,9 @@ func (m *tuiModel) liveSelect() {
 
 // applyRowScope scopes the pane to a header's group or to a target alone.
 func (m *tuiModel) applyRowScope(r listRow) {
+	if r.more {
+		return
+	}
 	if r.header {
 		if m.solo >= 0 || m.schemaSel != r.schema {
 			m.applyScope(-1, r.schema)
@@ -655,6 +790,7 @@ func (m *tuiModel) muteTargets(members []int) {
 }
 
 // schemaLine draws `▾ backend` with its running/total count and its unsaved-columns marker.
+// A folded header with hidden members trades its count for `· N hidden`, which fits the status cell.
 func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	running := 0
 	for _, i := range r.members {
@@ -671,15 +807,27 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	case m.startsOnSpace(r.members):
 		glyph = playGlyph
 	}
+	n := m.hiddenIn(r.members)
+	folded := r.collapsed && n > 0
+	suffix := fmt.Sprintf("· %d hidden", n)
+	name := ellipsizeMiddle(r.label, nameW)
+	if folded && m.leftMode != leftFull {
+		tail := truncate(" "+suffix, nameW)
+		name = ellipsizeMiddle(r.label, max(0, nameW-displayWidth(tail))) + tail
+	}
 	segs := []seg{
 		{text: strings.Repeat(" ", indent)},
 		{text: glyph, faint: glyph == playGlyph},
 		{text: " "},
-		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
+		{text: padRight(name, nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
 	}
 	if m.leftMode == leftFull {
-		segs = append(segs, seg{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)})
+		status := fmt.Sprintf("%d/%d", running, len(r.members))
+		if folded {
+			status = suffix
+		}
+		segs = append(segs, seg{text: padRight(truncate(status, statusW), statusW)})
 	}
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }

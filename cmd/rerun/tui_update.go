@@ -53,6 +53,7 @@ func (m *tuiModel) Init() tea.Cmd {
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer m.keepCursor(m.cursor, m.cursorKey())
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -216,6 +217,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "b":
 		m.cycleLeft()
+
+	case "h":
+		m.toggleHidden()
 
 	case "c":
 		m.copyKey()
@@ -566,6 +570,12 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// The arrow cell folds a header; its name cell selects it as before.
 	if r.header && e.X == r.indent() {
 		m.toggleCollapse(row)
+		return m, nil
+	}
+	if r.more {
+		m.cursor = row
+		m.setRevealed(r.schema, !r.revealed)
+		m.cursor = m.indexOfKey(m.rowKey(r))
 		return m, nil
 	}
 

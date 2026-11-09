@@ -138,6 +138,8 @@ type tuiTarget struct {
 	state     procState
 	exitCode  int
 	exitLabel string
+	// exitedAt is when the last run exited, which the auto-hide grace counts from.
+	exitedAt  time.Time
 	lastStart time.Time
 	// runStarted is set by a real start, so an exit without one shows no duration.
 	runStarted bool
@@ -303,6 +305,8 @@ type tuiModel struct {
 	schemaSel string
 	// collapsed holds the list headers folded shut, by group key; it lives in memory only.
 	collapsed map[string]bool
+	// revealed holds the groups whose auto-hidden members the list shows dim, by group key.
+	revealed map[string]bool
 	// finder is the Ctrl+K popup over targets and groups.
 	finder finderState
 	// eventsModal is the `e` fs events modal over the last minute's change batches.
@@ -884,6 +888,7 @@ func (m *tuiModel) applyEvent(ev event) {
 		t.lastRule = nil
 		t.state = stateExited
 		t.exitCode = ev.code
+		t.exitedAt = eventTime(ev, m.now)
 		t.exitLabel = exitLabel(ev.code, ev.err)
 		m.addRule(i, exitRule(t, ev, m.now))
 		t.runStarted = false

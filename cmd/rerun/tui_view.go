@@ -451,7 +451,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	nameW := 1
 	for _, r := range m.listRows() {
 		w := r.indent()
-		if r.header {
+		if r.header || r.more {
 			w += displayWidth(r.label)
 		} else {
 			w += displayWidth(m.targets[r.target].spec.localName())
@@ -656,7 +656,19 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	if r.header {
 		return m.schemaLine(m.layout.offset+y, r, leftW)
 	}
+	if r.more {
+		return m.moreLine(m.layout.offset+y, r, leftW)
+	}
 	return m.targetLine(m.layout.offset+y, r, leftW)
+}
+
+// moreLine draws a block's `(+) N hidden` row, which the cursor and the mouse can act on.
+func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
+	style := m.styles.muted
+	if row == m.cursor {
+		style = m.styles.cursor
+	}
+	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
 // feedHintCell is the left column's fs events line: the newest visible
@@ -761,6 +773,9 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		segs = append(segs, seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)})
 	}
 	style := m.rowStyle(row, r)
+	if r.dim && row != m.cursor {
+		style = m.styles.muted
+	}
 	if t.flashing(m.now) {
 		style = style.Reverse(true)
 	}
@@ -780,6 +795,9 @@ func opColor(op string) string {
 }
 
 func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
+	if r.more {
+		return m.styles.muted
+	}
 	// A focused pane dims every row it does not draw, so its own rows lead the eye.
 	if m.paneFocus && !m.rowInPaneScope(r) {
 		return m.styles.muted

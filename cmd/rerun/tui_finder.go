@@ -236,6 +236,10 @@ func (m *tuiModel) finderJump(idx int) {
 	m.paneFocus = false
 	rows := m.allRows()
 	m.revealRow(rows, idx)
+	// A hidden target is listed only with its group's hidden members shown.
+	if r := rows[idx]; !r.header && m.indexOfKey(m.rowKey(r)) < 0 {
+		m.setRevealed(r.schema, true)
+	}
 	m.cursor = m.indexOfKey(m.rowKey(rows[idx]))
 	if r, ok := m.cursorRow(); ok {
 		m.applyRowScope(r)
