@@ -184,6 +184,9 @@ func (m *tuiModel) frame() string {
 	if m.eventsModal.open {
 		frame = overlayCenter(frame, m.eventsView(), m.width, m.height)
 	}
+	if m.original.open {
+		frame = overlayCenter(frame, m.originalView(), m.width, m.height)
+	}
 	if m.help {
 		frame = overlayCenter(frame, m.helpView(), m.width, m.height)
 	}

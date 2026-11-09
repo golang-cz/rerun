@@ -124,7 +124,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ctrl+k opens the finder from the list, not over the bar, help or quit confirm.
-	if msg.String() == "ctrl+k" && !m.finder.open && !m.eventsModal.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+	if msg.String() == "ctrl+k" && !m.finder.open && !m.eventsModal.open && !m.original.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
 		m.finder = finderState{open: true}
 		return m, nil
 	}
@@ -135,6 +135,11 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// The fs events modal owns every key while it is up, the way the finder does.
 	if m.eventsModal.open {
 		return m.handleEventsKey(msg)
+	}
+
+	// The open-original modal owns every key while it is up, like the events modal.
+	if m.original.open {
+		return m.handleOriginalKey(msg)
 	}
 
 	// An open bar owns every key but Ctrl-C, so `q`, `?` and `/` are typed
@@ -362,8 +367,16 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.openEvents()
 
 	case "o":
-		if i := m.cursorTarget(); i >= 0 {
+		if m.paneFocus {
+			m.openOriginal()
+		} else if i := m.cursorTarget(); i >= 0 {
 			m.openTarget(i)
+		}
+
+	case "alt+i":
+		// The Ghostty cmd+a spelling; the query input keeps its own select-all.
+		if m.paneFocus {
+			m.selectAllPane()
 		}
 
 	case "pgup":
@@ -598,15 +611,15 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved, m.selKey = nil, false, false }
 
 // keepsSelection reports whether key acts on the selection instead of ending it:
-// c copies it, and shift+arrows in the pane grow it.
+// c copies it, o opens it, and shift+arrows in the pane grow it.
 func (m *tuiModel) keepsSelection(key string) bool {
-	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.eventsModal.open || m.inputMode != inputNone {
+	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.eventsModal.open || m.original.open || m.inputMode != inputNone {
 		return false
 	}
 	switch key {
 	case "c":
 		return true
-	case "shift+up", "shift+down":
+	case "o", "shift+up", "shift+down":
 		return m.paneFocus
 	}
 	return false
