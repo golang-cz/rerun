@@ -603,3 +603,23 @@ func makeTestTarget(name string) Target {
 	t.Start = startManual
 	return t
 }
+
+// Fuzzy matches take fzf's sage green on dark and a darker green on light, bold, never yellow.
+func TestFuzzyMatchStyleUsesFzfGreenPerTheme(t *testing.T) {
+	dark := newTUIStyles(true).chipFind
+	light := newTUIStyles(false).chipFind
+	if got := dark.GetForeground(); got != lipgloss.Color("108") {
+		t.Errorf("dark match foreground = %v, want ANSI 108", got)
+	}
+	if got := light.GetForeground(); got != lipgloss.Color("28") {
+		t.Errorf("light match foreground = %v, want ANSI 28", got)
+	}
+	for name, st := range map[string]lipgloss.Style{"dark": dark, "light": light} {
+		if st.GetForeground() == lipgloss.Color("3") {
+			t.Errorf("%s match foreground is yellow (ANSI 3)", name)
+		}
+		if !st.GetBold() {
+			t.Errorf("%s match style is not bold", name)
+		}
+	}
+}

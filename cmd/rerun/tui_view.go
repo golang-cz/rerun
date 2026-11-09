@@ -78,8 +78,9 @@ func newTUIStyles(isDark bool) tuiStyles {
 		key:          lipgloss.NewStyle().Bold(true),
 		paneCursor:   lipgloss.NewStyle().Reverse(true),
 		chip:         lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
-		chipFind:     lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Underline(true),
-		chipHi:       lipgloss.NewStyle().Faint(true),
+		// fzf's match green: sage on dark, darker on light.
+		chipFind: lipgloss.NewStyle().Bold(true).Foreground(lightDark(lipgloss.Color("28"), lipgloss.Color("108"))),
+		chipHi:   lipgloss.NewStyle().Faint(true),
 		// Reverse, not underline: v2 wraps an underlined string per rune, which ansi.Cut miscuts.
 		hit:     lipgloss.NewStyle().Reverse(true),
 		errText: lipgloss.NewStyle().Foreground(lipgloss.Color(colorRed)),
