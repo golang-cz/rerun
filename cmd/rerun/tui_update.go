@@ -392,6 +392,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.openOriginal()
 		} else if i := m.cursorTarget(); i >= 0 {
 			m.openTarget(i)
+		} else if r, ok := m.cursorRow(); ok && r.header {
+			m.showNotice("o opens a target's open: link", false)
 		}
 
 	case "alt+i":

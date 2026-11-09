@@ -1259,6 +1259,7 @@ var helpShortKeys = [][2]string{
 	{"enter", "list: focus the pane, starting a stopped row or group"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
+	{"o", "open the target's link · pane: original lines"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last minute)"},

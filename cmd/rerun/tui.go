@@ -551,14 +551,31 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.runner.control(ctrlReboot)
 }
 
+// openTarget is `o`: the target's url, else the newest local link it printed.
 func (m *tuiModel) openTarget(i int) {
 	t := m.targets[i]
-	if t.spec.URL == "" {
+	link := t.spec.URL
+	if link == "" {
+		link = localLink(m.targetLines(i))
+	}
+	if link == "" {
+		m.showNotice(t.spec.Name+" has nothing to open · add open: in rerun.yml", false)
 		return
 	}
-	if err := openURL(t.spec.URL); err != nil {
-		m.showNotice(fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err), true)
+	if err := openURL(link); err != nil {
+		m.showNotice(fmt.Sprintf("rerun: open %s: %v", link, err), true)
 	}
+}
+
+// targetLines is the target's stored output lines, oldest first.
+func (m *tuiModel) targetLines(i int) []string {
+	var out []string
+	for _, ml := range m.merged {
+		if ml.target == i {
+			out = append(out, ml.text)
+		}
+	}
+	return out
 }
 
 // addLine appends one line to a target's stream and to the merged view when

@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // captureURL reads a JSON object output line's top-level url/addr/listen/port
@@ -83,4 +86,20 @@ func portString(v any) (string, bool) {
 		return strconv.FormatInt(int64(f), 10), true
 	}
 	return "", false
+}
+
+// localhostLinkRE is a plain http link to this machine, with its port and path.
+var localhostLinkRE = regexp.MustCompile("http://(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0):\\d+[^\\s\"'<>`]*")
+
+// localLink is the newest local http link in lines, or "". A 0.0.0.0 bind opens as localhost.
+func localLink(lines []string) string {
+	for i := len(lines) - 1; i >= 0; i-- {
+		found := localhostLinkRE.FindAllString(ansi.Strip(lines[i]), -1)
+		if len(found) == 0 {
+			continue
+		}
+		link := strings.TrimRight(found[len(found)-1], ".,;:)]}")
+		return strings.Replace(link, "0.0.0.0", "localhost", 1)
+	}
+	return ""
 }
