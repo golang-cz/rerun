@@ -118,7 +118,7 @@ opens the fs events modal. The modal lists the last minute's batches (events
 within 150ms of each other), newest first: the time, the first changed file with
 `+N` for the rest, and the targets the batch restarted right-aligned behind a `·`.
 `→` expands a batch's files, each naming the services whose watch globs it
-matched; `y` copies every batch expanded. A created directory shows a trailing `/`
+matched; `c` copies every batch expanded. A created directory shows a trailing `/`
 and heads the files reported under it. The pane's top line
 names a muted row (`muted`). A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.

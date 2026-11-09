@@ -14,8 +14,8 @@ const eventsTitle = "fs events"
 
 // The footer names only the arrow the cursor batch can use right now.
 const (
-	eventsFooterExpand   = "j k move · → expand · y copy all · esc close"
-	eventsFooterCollapse = "j k move · ← collapse · y copy all · esc close"
+	eventsFooterExpand   = "j k move · → expand · c copy all · esc close"
+	eventsFooterCollapse = "j k move · ← collapse · c copy all · esc close"
 )
 
 // eventsMinH is the shortest the modal draws, so its chrome never crushes the body.
@@ -32,7 +32,7 @@ type eventsState struct {
 	cursor int // the batch the cursor sits on
 	openID int // the batch whose file list is expanded, 0 for none
 	top    int // the first body row drawn
-	// copiedN and copiedUntil show the `y` confirmation in the footer for 2s.
+	// copiedN and copiedUntil show the `c` confirmation in the footer for 2s.
 	copiedN     int
 	copiedUntil time.Time
 }
@@ -310,7 +310,7 @@ func (m *tuiModel) handleEventsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.expandEvents()
 	case "left":
 		m.collapseEvents()
-	case "y":
+	case "c":
 		text, n := m.eventsCopyText()
 		if text != "" {
 			m.eventsModal.copiedN = n
@@ -461,7 +461,7 @@ func eventsBatchLabel(b *feedBatch) string {
 	return label
 }
 
-// eventsCopyText is the `y` payload: every visible batch expanded, one line per
+// eventsCopyText is the `c` payload: every visible batch expanded, one line per
 // batch and per file, each naming its services. It returns the batch count too.
 func (m *tuiModel) eventsCopyText() (string, int) {
 	batches, _ := m.feedVisible()

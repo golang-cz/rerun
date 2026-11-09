@@ -119,7 +119,7 @@ after the target list shortens to `a, b +N more`. A created directory keeps a
 trailing `/` and heads the files reported under it. A watcher error is one red
 line above the batches, never a row. `→` lists a batch's files with
 `+`/`~`/`−` glyphs, each naming the services whose watch globs it matched,
-wrapping to continuation lines when they don't fit; `←` collapses. `y` copies
+wrapping to continuation lines when they don't fit; `←` collapses. `c` copies
 every batch expanded to the clipboard. A target whose row a batch restarted
 lights up for a second.
 

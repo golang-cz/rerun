@@ -88,7 +88,7 @@ func TestEventsModalOpensWithHeaderAndFooter(t *testing.T) {
 	if !strings.Contains(lines[1], "fs events") || !strings.Contains(lines[1], "last 1m · 1 batch") {
 		t.Fatalf("header = %q, want the title and the window count", lines[1])
 	}
-	if got := eventsFooterLine(m); !strings.Contains(got, "j k move · → expand · y copy all · esc close") {
+	if got := eventsFooterLine(m); !strings.Contains(got, "j k move · → expand · c copy all · esc close") {
 		t.Fatalf("footer = %q, want the expand key line on a collapsed cursor", got)
 	}
 	if strings.Contains(eventsFooterLine(m), "← collapse") {
@@ -397,7 +397,7 @@ func TestEventsModalCopyWithOnlyAnError(t *testing.T) {
 	if got := strings.Join(eventsBody(m), "\n"); !strings.Contains(got, "watch failed") {
 		t.Fatalf("body = %q, want the error line", got)
 	}
-	_, cmd := m.Update(keyMsg("y"))
+	_, cmd := m.Update(keyMsg("c"))
 	if cmd == nil {
 		t.Fatal("y on an error-only modal returned no clipboard command")
 	}
@@ -519,14 +519,14 @@ func TestEventsModalCopyAll(t *testing.T) {
 	changeAt(m, "web", spawnClock.Add(time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 
 	press(m, "e")
-	if _, cmd := m.Update(keyMsg("y")); cmd == nil {
+	if _, cmd := m.Update(keyMsg("c")); cmd == nil {
 		t.Fatal("y returned no clipboard command")
 	}
 	if got := eventsFooterLine(m); !strings.Contains(got, "copied 2 batches") {
 		t.Fatalf("footer = %q, want the copy confirmation", got)
 	}
 	m.now = spawnClock.Add(3 * time.Second)
-	if got := eventsFooterLine(m); !strings.Contains(got, "y copy all") {
+	if got := eventsFooterLine(m); !strings.Contains(got, "c copy all") {
 		t.Fatalf("footer after 3s = %q, want the key line back", got)
 	}
 
