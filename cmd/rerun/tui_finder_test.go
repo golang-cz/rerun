@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -522,5 +523,25 @@ func TestFinderJumpPlacesCursorOnNewPaneTail(t *testing.T) {
 	}
 	if got := clipboardText(t, press(m, "c")); got != "b9\n" {
 		t.Fatalf("c copied %q, want the cursor line b9", got)
+	}
+}
+
+// A finder jump to an auto-hidden target lists only that target; moving away hides it again.
+func TestFinderJumpToHiddenTargetDoesNotRevealGroup(t *testing.T) {
+	m := autoHideFixture(t)
+	press(m, "g", "s", "e", "r", "v", "e", "enter")
+
+	if got := listedNames(m); !slices.Contains(got, "serve") || slices.Contains(got, "lint") {
+		t.Fatalf("after the jump listed %v, want serve and not the other hidden lint", got)
+	}
+	if m.revealed["ops"] {
+		t.Fatal("the jump revealed the whole ops group")
+	}
+
+	press(m, "esc")
+	m.cursor = rowAtKey(t, m, "target:build")
+	m.liveSelect()
+	if got := listedNames(m); slices.Contains(got, "serve") {
+		t.Fatalf("after moving to build listed %v, want serve hidden again", got)
 	}
 }

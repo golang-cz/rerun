@@ -232,9 +232,9 @@ func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
 	rows := m.allRows()
 	m.revealRow(rows, idx)
-	// A hidden target is listed only with its group's hidden members shown.
-	if r := rows[idx]; !r.header && m.indexOfKey(m.rowKey(r)) < 0 {
-		m.setRevealed(r.schema, true)
+	// Solo is never hidden, so the target lists without revealing its group's hidden members.
+	if r := rows[idx]; !r.header {
+		m.applyScope(r.target, "")
 	}
 	m.cursor = m.indexOfKey(m.rowKey(rows[idx]))
 	m.cursorSet = true
