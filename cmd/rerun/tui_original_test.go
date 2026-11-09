@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -300,5 +301,26 @@ func TestOriginalCopyIsCapped(t *testing.T) {
 	}
 	if !strings.Contains(originalBody(m), "copied 1 line (truncated)") {
 		t.Fatalf("footer has no truncation notice:\n%s", originalBody(m))
+	}
+}
+
+// A resize that grows the modal re-clamps its scroll, so the body never sits past its last row.
+func TestOriginalResizeReclampsScroll(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 60).events)
+	m.frame()
+	m.focusPane()
+	press(m, "alt+i", "o")
+	press(m, "pgdown", "pgdown", "pgdown")
+	if m.original.top == 0 {
+		t.Fatal("setup: the modal did not scroll")
+	}
+
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 200})
+
+	outerW, outerH := m.modalSize()
+	rows := len(m.originalRows(m.modalInnerW(outerW)))
+	if want := max(0, rows-m.originalBodyRows(outerH)); m.original.top != want {
+		t.Fatalf("top = %d after the resize, want %d", m.original.top, want)
 	}
 }

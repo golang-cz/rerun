@@ -67,6 +67,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// A rule's cut and its expansion depend on the width, so the rows are redone too.
 		m.dispDirty = true
 		m.fitEvents()
+		m.fitOriginal()
 		return m, nil
 
 	case tea.BackgroundColorMsg:
