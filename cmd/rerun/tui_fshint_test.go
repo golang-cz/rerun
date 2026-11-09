@@ -157,3 +157,26 @@ func TestFsHintRowIsNotAListRow(t *testing.T) {
 		t.Fatalf("rowAt on the version row = %d, want no row", got)
 	}
 }
+
+// Hidden, a watch failure moves to the bottom line in red, beside the state chip.
+func TestHiddenListWatchFailureShowsOnBottomLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 20
+	m.now = spawnClock
+	m.applyEvent(event{
+		kind: evChanged, target: "web", count: 1, restarts: true, at: spawnClock,
+		change: changeWithError(map[string]fsnotify.Op{"a.go": fsnotify.Write}, errors.New("too many open files")),
+	})
+	m.now = spawnClock.Add(3 * time.Second)
+	press(m, "b", "b")
+
+	lines := paneOf(m)
+	bottom := lines[len(lines)-1]
+	if got := strings.TrimRight(ansi.Strip(bottom), " "); got != "⚠ fs · b list · ? help" {
+		t.Fatalf("bottom line = %q, want the watch failure with the chips", got)
+	}
+	red := m.styles.hint.Foreground(lipgloss.Color(colorRed)).Render("x")
+	if !strings.Contains(bottom, red[:strings.Index(red, "x")]) {
+		t.Fatalf("bottom line %q is not red", bottom)
+	}
+}

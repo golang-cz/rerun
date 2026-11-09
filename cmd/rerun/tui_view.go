@@ -971,6 +971,9 @@ func (m *tuiModel) rightLines(w int) []string {
 			out[last] = m.bottomLine(w, m.hint, chip)
 		case again != "":
 			out[last] = m.bottomLine(w, again, chip)
+		case !m.listShown() && m.watchFailed():
+			// The hidden list has no left column to show the fs failure, so the bottom line does.
+			out[last] = m.watchFailedLine(w, chip)
 		case !m.follow:
 			// A frozen pane with nothing else to say still names the state.
 			out[last] = m.bottomLine(w, "", chip)
@@ -1052,9 +1055,27 @@ func (m *tuiModel) stateChip() string {
 		parts = append(parts, "scrollback · esc live")
 	}
 	if !m.listShown() {
-		parts = append(parts, "b list")
+		// The hidden list has no left column to show its cue, so the chip carries it.
+		parts = append(parts, "b list", "? help")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// watchFailed reports whether the newest visible fs batch is a watch failure.
+func (m *tuiModel) watchFailed() bool {
+	batches, dim := m.feedVisible()
+	return !dim && len(batches) > 0 && batches[0].err != nil
+}
+
+// watchFailedLine is the hidden list's bottom line: a red ⚠ fs, then the state chip.
+func (m *tuiModel) watchFailedLine(w int, chip string) string {
+	const warn = "⚠ fs"
+	rest := ""
+	if chip != "" {
+		rest = truncate(" · "+chip, max(0, w-displayWidth(warn)))
+	}
+	red := m.styles.hint.Foreground(lipgloss.Color(colorRed))
+	return lipgloss.NewStyle().Width(w).Render(red.Render(warn) + m.styles.hint.Render(rest))
 }
 
 // copyHintActive reports whether the copy feedback still owns the bottom line.

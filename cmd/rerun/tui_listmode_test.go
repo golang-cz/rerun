@@ -123,3 +123,14 @@ func TestHiddenListEscRevealsListAndKeepsScope(t *testing.T) {
 		t.Fatalf("second esc with the list shown: solo=%d, want the scope cleared", m.solo)
 	}
 }
+
+// Hidden at 80 columns, the bottom line names the list and the help key.
+func TestHiddenListBottomLineCarriesHelpCue(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 20
+	press(m, "b", "b")
+	lines := paneOf(m)
+	if got := strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " "); got != "b list · ? help" {
+		t.Fatalf("bottom line = %q, want the list and help cues", got)
+	}
+}
