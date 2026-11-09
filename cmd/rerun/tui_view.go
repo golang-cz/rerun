@@ -1152,7 +1152,7 @@ func (m *tuiModel) runAgainHint() string {
 	if t.spec.Kind != makeKind || (t.state != stateExited && t.state != stateStopped) {
 		return ""
 	}
-	return "r run again · ctrl+l clear · ctrl+k find"
+	return "r run again · ctrl+l clear · ctrl+k go to"
 }
 
 // makeEmptyHint points at the finder before any target ran, since a Makefile's targets stay folded until found.
@@ -1160,9 +1160,9 @@ func (m *tuiModel) makeEmptyHint() string {
 	for _, t := range m.targets {
 		if t.spec.Kind == makeKind {
 			if t.spec.ImportHide {
-				return "ctrl+k find a target · → unfold make/"
+				return "ctrl+k go to a target · → unfold make/"
 			}
-			return "ctrl+k find a target"
+			return "ctrl+k go to a target"
 		}
 	}
 	return ""
@@ -1231,7 +1231,7 @@ var helpShortKeys = [][2]string{
 	{"pgup/pgdn", "scroll the pane; a full page while the pane is focused"},
 	{"ctrl+l", "clear the target's log (old lines stay in scrollback)"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
-	{"ctrl+k", "find a target or group; enter jumps, runs a make target"},
+	{"ctrl+k", "go to a target, or run a make target"},
 	{"q", "quit (asks first)"},
 }
 
@@ -1244,7 +1244,7 @@ var helpKeys = [][2]string{
 	{"m r", "mute the stream (group: its targets) · r reboots"},
 	{"e", "fs events (last minute)"},
 	{"esc [ ] b", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b list width"},
-	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
+	{"ctrl+k", "go to a target, or run a make target"},
 	{"o", "open the target's url"},
 	{"/ v ctrl+f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},
 	{"n/N ctrl+g", "jump pill hits · bar: ←/→ pick, x drop, enter edit, → expands @"},

@@ -295,7 +295,7 @@ func (m *tuiModel) finderView() string {
 	input := m.styles.chip.Render(inputPrompt)
 	m.layout.caretW = 0
 	if m.finder.query == "" {
-		input += " " + m.styles.hint.Render("find…")
+		input += " " + m.styles.hint.Render("go to target or run…")
 	} else {
 		tail := finderTail(m.finder.query, innerW-2-lipgloss.Width(count)-2)
 		input += tail

@@ -352,7 +352,7 @@ groups:
 - `targets:` fails the load when a listed target is gone from the Makefile.
 - Each target is a row that starts manually and does not watch files.
 - An import's `start:` overrides that default: `start: auto` brings every rule up at session start, and a target's or group's own `start:` still wins.
-- Enter in Ctrl+K runs a target. Enter on a running one focuses it.
+- Enter in Ctrl+K runs a target. Enter on a running one focuses it. `ctrl+k` opens the go-to finder, whose input reads `go to target or run…`.
 - A `.mk` file runs as `make -f <file>`.
 - A repo with only a Makefile opens rerun with the finder open.
 

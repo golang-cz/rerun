@@ -451,3 +451,22 @@ func BenchmarkFinderMatch(b *testing.B) {
 		_, _ = nameHits, descHits
 	}
 }
+
+// The ctrl+k finder is named "go to" in its input and in the help.
+func TestFinderIsNamedGoTo(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 100, 30
+	m.Update(ctrlK)
+	if view := m.View().Content; !strings.Contains(view, "go to target or run…") {
+		t.Fatalf("finder input lacks the go-to placeholder:\n%s", view)
+	}
+	found := false
+	for _, kv := range helpKeys {
+		if kv[0] == "ctrl+k" && kv[1] == "go to a target, or run a make target" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("help does not name ctrl+k as go to")
+	}
+}

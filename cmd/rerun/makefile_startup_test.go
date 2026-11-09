@@ -91,7 +91,7 @@ func TestMakeOnlyConfigOpensTheFinderOnFirstFrame(t *testing.T) {
 	if !m.finder.open {
 		t.Fatal("finder closed on the first frame")
 	}
-	if view := m.View().Content; !strings.Contains(view, "find…") {
+	if view := m.View().Content; !strings.Contains(view, "go to target or run…") {
 		t.Fatalf("first frame has no open finder:\n%s", view)
 	}
 }
@@ -330,7 +330,7 @@ func TestSaveColumnsMakeOnlyWritesNothing(t *testing.T) {
 
 func TestEmptyPaneOnAFreshMakeConfigPointsAtFinder(t *testing.T) {
 	m := newMakeTUI(t)
-	if got := m.emptyHint(); got != "ctrl+k find a target · → unfold make/" {
+	if got := m.emptyHint(); got != "ctrl+k go to a target · → unfold make/" {
 		t.Fatalf("emptyHint() = %q", got)
 	}
 }
@@ -360,7 +360,7 @@ func TestEmptyPaneHintDropsUnfoldWhenMakeIsUnfolded(t *testing.T) {
 	m := newConfigTUI(cfg.Targets, cfg)
 	m.finder = finderState{}
 	m.width, m.height = 100, 24
-	if got := m.emptyHint(); got != "ctrl+k find a target" {
+	if got := m.emptyHint(); got != "ctrl+k go to a target" {
 		t.Fatalf("emptyHint() = %q, want no unfold part", got)
 	}
 }
@@ -403,7 +403,7 @@ func TestStoppedMakeRowShowsRunAgainHint(t *testing.T) {
 	m.targets[i].state = stateExited
 	m.applyScope(i, "")
 	lines := m.rightLines(100)
-	if last := lines[len(lines)-1]; !strings.Contains(last, "r run again · ctrl+l clear · ctrl+k find") {
+	if last := lines[len(lines)-1]; !strings.Contains(last, "r run again · ctrl+l clear · ctrl+k go to") {
 		t.Fatalf("bottom line = %q, want the run-again hint", last)
 	}
 }
