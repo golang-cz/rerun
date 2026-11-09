@@ -277,10 +277,52 @@ func (m *tuiModel) setRevealed(key string, on bool) {
 // toggleHidden is h: shows or hides the cursor's group's auto-hidden members, from any row of the group.
 func (m *tuiModel) toggleHidden() {
 	r, ok := m.cursorRow()
-	if !ok || r.schema == "" || (!m.revealed[r.schema] && m.hiddenCount(r.schema) == 0) {
+	if !ok {
+		return
+	}
+	if subs := m.subGroupKeys(r); len(subs) > 0 {
+		m.toggleSubGroups(subs)
+		return
+	}
+	if r.schema == "" || (!m.revealed[r.schema] && m.hiddenCount(r.schema) == 0) {
 		return
 	}
 	m.setRevealed(r.schema, !m.revealed[r.schema])
+}
+
+// subGroupKeys is the sub-group keys under an import header, or nil for any other row.
+func (m *tuiModel) subGroupKeys(r listRow) []string {
+	if !r.header || !strings.HasPrefix(r.schema, importKeyPrefix) {
+		return nil
+	}
+	all := m.allRows()
+	at := slices.IndexFunc(all, func(s listRow) bool { return s.header && s.schema == r.schema })
+	if at < 0 {
+		return nil
+	}
+	var keys []string
+	for _, s := range all[at+1:] {
+		if s.header && s.depth == 0 {
+			break
+		}
+		if s.header {
+			keys = append(keys, s.schema)
+		}
+	}
+	return keys
+}
+
+// toggleSubGroups is h on an import header: reveals every sub-group if any still hides members, else hides all.
+func (m *tuiModel) toggleSubGroups(keys []string) {
+	reveal := false
+	for _, k := range keys {
+		if !m.revealed[k] && m.hiddenCount(k) > 0 {
+			reveal = true
+		}
+	}
+	for _, k := range keys {
+		m.setRevealed(k, reveal)
+	}
 }
 
 // keepCursor keeps the cursor on its row when rows above it appear or hide. A key that moved the cursor

@@ -251,3 +251,48 @@ func dimListed(m *tuiModel, name string) bool {
 	}
 	return false
 }
+
+// autoImport is an import's target that auto-hides when idle, in the sub-group sub.
+func autoImport(imp, name, sub string) Target {
+	tg := importTarget(imp, name, sub)
+	tg.Schema = sub
+	tg.AutoHide = true
+	return tg
+}
+
+// h on an import header toggles the hidden members of all its sub-groups together.
+func TestHOnImportHeaderTogglesEverySubGroup(t *testing.T) {
+	m := newTestModel(t, autoImport("omsx", "api", "omsx/backend"), autoImport("omsx", "web", "omsx/webapps"), target("lone"))
+	m.now = spawnClock
+	m.targets[0].state = stateStopped
+	m.targets[1].state = stateStopped
+	m.frame()
+	toggle := func() {
+		for i, r := range m.listRows() {
+			if r.header && r.schema == importKeyPrefix+"omsx" {
+				m.cursor = i
+			}
+		}
+		press(m, "h")
+	}
+	shown := func() []string { return listedNames(m) }
+
+	toggle()
+	if got := shown(); !slices.Contains(got, "omsx/api") || !slices.Contains(got, "omsx/web") {
+		t.Fatalf("h on the import header: listed %v, want both sub-groups revealed", got)
+	}
+	toggle()
+	if got := shown(); slices.Contains(got, "omsx/api") || slices.Contains(got, "omsx/web") {
+		t.Fatalf("h again: listed %v, want both sub-groups hidden", got)
+	}
+
+	m.setRevealed("omsx/backend", true)
+	toggle()
+	if got := shown(); !slices.Contains(got, "omsx/web") {
+		t.Fatalf("h with one sub-group still hiding: listed %v, want all revealed", got)
+	}
+	toggle()
+	if got := shown(); slices.Contains(got, "omsx/api") || slices.Contains(got, "omsx/web") {
+		t.Fatalf("h with all revealed: listed %v, want all hidden", got)
+	}
+}
