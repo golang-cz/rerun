@@ -18,9 +18,6 @@ const (
 	eventsFooterCollapse = "j k move · ← collapse · c copy all · esc close"
 )
 
-// eventsMinH is the shortest the modal draws, so its chrome never crushes the body.
-const eventsMinH = 8
-
 // eventsEmpty is the modal's placeholder while no batch sits in the window.
 const eventsEmpty = "no fs events in the last minute"
 
@@ -49,24 +46,9 @@ func (m *tuiModel) openEvents() {
 	m.fitEvents()
 }
 
-// eventsSize is the modal's outer box: the finder's width, and a height that
-// fits the content plus the header and the footer — at least eventsMinH rows,
-// never past the finder's 80% of the terminal.
-func (m *tuiModel) eventsSize() (int, int) {
-	outerW, maxH := m.finderSize()
-	batches, dim := m.feedVisible()
-	content := len(m.eventsRows(batches, dim, m.modalInnerW(outerW)))
-	if latestWatchErr(batches) != nil {
-		content++
-	}
-	content = max(content, 1) // the empty placeholder still takes a row
-	outerH := m.styles.box.GetVerticalFrameSize() + 3 + content
-	return outerW, min(max(outerH, eventsMinH), maxH)
-}
-
 // eventsBodyRows is how many body rows fit between the header, the rule and the footer.
 func (m *tuiModel) eventsBodyRows() int {
-	_, outerH := m.eventsSize()
+	_, outerH := m.modalSize()
 	innerH := max(1, outerH-m.styles.box.GetVerticalFrameSize())
 	return max(0, innerH-2-1)
 }
@@ -330,7 +312,7 @@ func (m *tuiModel) fitEvents() {
 		return
 	}
 	batches, dim := m.feedVisible()
-	outerW, _ := m.eventsSize()
+	outerW, _ := m.modalSize()
 	rows := m.eventsRows(batches, dim, m.modalInnerW(outerW))
 	body := m.eventsBodyRows()
 	if latestWatchErr(batches) != nil {
@@ -348,7 +330,7 @@ func (m *tuiModel) fitEvents() {
 
 // eventsView draws the modal: the batches, the open batch's files, and the key line.
 func (m *tuiModel) eventsView() string {
-	outerW, outerH := m.eventsSize()
+	outerW, outerH := m.modalSize()
 	innerW := m.modalInnerW(outerW)
 	batches, dim := m.feedVisible()
 	merged := mergeEventsBatches(batches)

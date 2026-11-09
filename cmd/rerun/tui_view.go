@@ -279,23 +279,6 @@ func overlayAt(frame, box string, x, y, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-// modalMinWidth is the narrowest a modal box shrinks to, terminal permitting.
-const modalMinWidth = 40
-
-// modalWidth is a modal box's outer width: 80% of the terminal, floored, never past it.
-func modalWidth(termW int) int {
-	return max(1, min(max(termW*4/5, min(modalMinWidth, termW)), termW))
-}
-
-// helpMaxW is a floor, not a cap: the help box is at least this wide when the terminal allows.
-const helpMaxW = 80
-
-// helpWidth is the help box's outer width: at least 80 columns when the terminal
-// allows it, so no description is cut on an 80-column screen.
-func helpWidth(termW int) int {
-	return max(modalWidth(termW), min(termW, helpMaxW))
-}
-
 // modalInnerW is the box's content width, border and padding excluded.
 func (m *tuiModel) modalInnerW(outerW int) int {
 	return max(1, outerW-m.styles.box.GetHorizontalFrameSize())
@@ -327,19 +310,29 @@ func (m *tuiModel) modalBox(header, footer string, body []string, outerW, outerH
 	for _, l := range body {
 		lines = append(lines, modalFit(l, innerW))
 	}
+	// The footer sits on the box's last inner row; short content leaves blank rows above it.
 	if footer != "" && len(lines) < innerH {
+		for len(lines) < innerH-1 {
+			lines = append(lines, "")
+		}
 		lines = append(lines, modalFit(m.styles.hint.Render(footer), innerW))
 	}
-	lines = lines[:min(len(lines), innerH)]
+	for len(lines) < innerH {
+		lines = append(lines, "")
+	}
+	lines = lines[:innerH]
 
 	// v2's Width and Height are the whole block, border included.
 	return box.Width(outerW).Height(outerH).Render(strings.Join(lines, "\n"))
 }
 
-// inputBoxW is the input box's outer width: the pane's width less two cells, floored at modalMinWidth.
+// inputMinWidth is the narrowest query bar, terminal permitting; the bar is not a modal.
+const inputMinWidth = 40
+
+// inputBoxW is the input box's outer width: the pane's width less two cells, floored at inputMinWidth.
 func (m *tuiModel) inputBoxW() int {
 	_, rightW := m.layoutWidths()
-	return max(1, min(rightW, max(modalMinWidth, rightW-2)))
+	return max(1, min(rightW, max(inputMinWidth, rightW-2)))
 }
 
 // inputPlaceholder is the faint hint an empty query box shows.
@@ -1308,14 +1301,13 @@ var helpMouse = []string{
 	"✓ ok  ✗ exit  ○ stopped  · off",
 }
 
-// helpView draws the help overlay: the short key list, or the full one when helpAll is set.
-// modalBox keeps it a popup, so the live frame stays visible around it.
-func (m *tuiModel) helpView() string {
-	keys, footer := helpShortKeys, "? m all keys  esc close"
+// helpBody is the help overlay's rows: the key list, and in the full view the mouse notes too.
+func (m *tuiModel) helpBody() []string {
+	keys := helpShortKeys
 	if m.helpAll {
-		keys, footer = helpKeys, "esc close"
+		keys = helpKeys
 	}
-	body := make([]string, 0, len(keys)+len(helpMouse)+1)
+	body := make([]string, 0, len(keys)+len(helpMouse))
 	for _, kv := range keys {
 		body = append(body, m.styles.key.Render(padRight(kv[0], 12))+" "+kv[1])
 	}
@@ -1324,11 +1316,35 @@ func (m *tuiModel) helpView() string {
 			body = append(body, m.styles.hint.Render(line))
 		}
 	}
-	// Content-sized, capped at two rows less than the terminal so the full list
-	// fits a 30-row screen; the header and the footer keep their rows, so the
-	// body gives up its last rows first.
-	outerH := m.styles.box.GetVerticalFrameSize() + 3 + len(body)
-	outerH = min(outerH, max(1, m.height-2))
-	body = body[:min(len(body), max(0, outerH-m.styles.box.GetVerticalFrameSize()-3))]
-	return m.modalBox(m.styles.title.Render("rerun keys"), footer, body, helpWidth(m.width), outerH)
+	return body
+}
+
+// helpRows is how many body rows the help box shows: its height less the header, rule and footer.
+func (m *tuiModel) helpRows() int {
+	_, outerH := m.modalSize()
+	return max(0, outerH-m.styles.box.GetVerticalFrameSize()-3)
+}
+
+// helpScroll moves the help body by delta rows, stopping once its last row is on screen.
+func (m *tuiModel) helpScroll(delta int) {
+	last := max(0, len(m.helpBody())-m.helpRows())
+	m.helpTop = min(max(m.helpTop+delta, 0), last)
+}
+
+// helpView draws the help overlay in the shared modal box. The body scrolls, and the
+// footer stays on the last row; a "↓ more" hint says rows are cut below.
+func (m *tuiModel) helpView() string {
+	outerW, outerH := m.modalSize()
+	body := m.helpBody()
+	rows := m.helpRows()
+	top := min(m.helpTop, max(0, len(body)-rows))
+	shown := body[top:min(len(body), top+rows)]
+	footer := "? m all keys  esc close"
+	if m.helpAll {
+		footer = "esc close"
+	}
+	if top+rows < len(body) {
+		footer += "  ↓ more"
+	}
+	return m.modalBox(m.styles.title.Render("rerun keys"), footer, shown, outerW, outerH)
 }

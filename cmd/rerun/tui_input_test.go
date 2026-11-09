@@ -39,7 +39,7 @@ func TestSearchBoxAtPaneTop(t *testing.T) {
 	}
 
 	_, rightW := m.layoutWidths()
-	if got, want := m.inputBoxW(), min(rightW, max(modalMinWidth, rightW-2)); got != want {
+	if got, want := m.inputBoxW(), min(rightW, max(inputMinWidth, rightW-2)); got != want {
 		t.Fatalf("box width = %d, want the pane's width less two: %d", got, want)
 	}
 }

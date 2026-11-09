@@ -102,15 +102,6 @@ func originalPretty(lines []string) ([]string, bool) {
 	return out, true
 }
 
-// Sized to the wrapped body, capped at the finder's height like the other popups.
-func (m *tuiModel) originalSize() (int, int) {
-	outerW, maxH := m.finderSize()
-	rows := len(m.originalRows(m.modalInnerW(outerW)))
-	// The header, its rule and the footer take three rows around the body.
-	outerH := m.styles.box.GetVerticalFrameSize() + 3 + rows
-	return outerW, min(outerH, maxH)
-}
-
 func (m *tuiModel) originalBodyRows(outerH int) int {
 	return max(1, outerH-m.styles.box.GetVerticalFrameSize()-3)
 }
@@ -171,7 +162,7 @@ func (m *tuiModel) fitOriginal() {
 	if !m.original.open {
 		return
 	}
-	outerW, outerH := m.originalSize()
+	outerW, outerH := m.modalSize()
 	rows := len(m.originalRows(m.modalInnerW(outerW)))
 	body := m.originalBodyRows(outerH)
 	m.original.top = min(max(m.original.top, 0), max(0, rows-body))
@@ -179,7 +170,7 @@ func (m *tuiModel) fitOriginal() {
 
 func (m *tuiModel) handleOriginalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	o := &m.original
-	_, outerH := m.originalSize()
+	_, outerH := m.modalSize()
 	page := m.originalBodyRows(outerH)
 	switch msg.String() {
 	case "ctrl+c":
@@ -247,7 +238,7 @@ func (m *tuiModel) originalFooter() string {
 }
 
 func (m *tuiModel) originalView() string {
-	outerW, outerH := m.originalSize()
+	outerW, outerH := m.modalSize()
 	innerW := m.modalInnerW(outerW)
 	rows := m.originalRows(innerW)
 	body := m.originalBodyRows(outerH)

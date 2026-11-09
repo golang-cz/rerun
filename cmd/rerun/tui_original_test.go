@@ -42,7 +42,7 @@ func TestOriginalWrapsWideRunesInsideTheModal(t *testing.T) {
 	m.frame()
 	openPaneOriginal(m)
 
-	outerW, _ := m.originalSize()
+	outerW, _ := m.modalSize()
 	rows := m.originalRows(m.modalInnerW(outerW))
 	if len(rows) < 2 {
 		t.Fatalf("rows = %d, want the long line wrapped", len(rows))

@@ -14,9 +14,7 @@ import (
 	"github.com/sahilm/fuzzy"
 )
 
-// The popup's outer box never shrinks below these, but the terminal still caps it.
 const (
-	finderMinHeight = 10
 	// finderChromeRows are the input, rule and footer lines around the match rows.
 	finderChromeRows = 3
 	// finderMinRows is the fewest match rows worth keeping when the footer is dropped to make room.
@@ -150,16 +148,9 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	return out
 }
 
-// finderSize is the popup's outer box, border included: 80% of the terminal, floored, never past it.
-func (m *tuiModel) finderSize() (int, int) {
-	w := modalWidth(m.width)
-	h := min(max(m.height*4/5, min(finderMinHeight, m.height)), m.height)
-	return max(1, w), max(1, h)
-}
-
 // finderInnerH is the box height inside its border; it depends only on the terminal.
 func (m *tuiModel) finderInnerH() int {
-	_, h := m.finderSize()
+	_, h := m.modalSize()
 	return max(0, h-m.styles.box.GetVerticalFrameSize())
 }
 
@@ -285,7 +276,7 @@ func finderTail(s string, width int) string {
 
 // finderView draws the popup at a fixed size: input and count, a rule, the ranked matches, then the footer.
 func (m *tuiModel) finderView() string {
-	outerW, outerH := m.finderSize()
+	outerW, outerH := m.modalSize()
 	innerW := m.modalInnerW(outerW)
 	res := m.finderResults(m.finder.query)
 	rows := m.finderListRows()

@@ -281,6 +281,7 @@ func TestHelpLegendLine(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 100, 30
 	m.help, m.helpAll = true, true
+	press(m, "pgdown", "pgdown")
 	view := m.View().Content
 	for _, want := range []string{"● run", "● starting", "○ stopped", "✓ ok", "✗ exit", "· off"} {
 		if !strings.Contains(view, want) {
@@ -679,10 +680,14 @@ func TestHelpOverlayToggles(t *testing.T) {
 	}
 	press(m, "?")
 	view := m.View().Content
-	for _, want := range []string{"mute", "scope", "shift-drag", "open the target's url"} {
+	for _, want := range []string{"mute", "scope", "open the target's url"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("full help overlay is missing %q", want)
 		}
+	}
+	press(m, "pgdown", "pgdown")
+	if view := m.View().Content; !strings.Contains(view, "shift-drag") {
+		t.Errorf("full help overlay did not scroll to the mouse notes:\n%s", view)
 	}
 	press(m, "?")
 	if m.help {

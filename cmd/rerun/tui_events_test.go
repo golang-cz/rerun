@@ -75,13 +75,12 @@ func TestEventsModalOpensWithHeaderAndFooter(t *testing.T) {
 	if !m.eventsModal.open {
 		t.Fatal("e did not open the fs events modal")
 	}
-	outerW, outerH := m.eventsSize()
-	if outerW != modalWidth(m.width) {
-		t.Fatalf("modal width = %d, want the finder's %d", outerW, modalWidth(m.width))
+	outerW, outerH := m.modalSize()
+	if got := lipgloss.Width(m.eventsView()); got != outerW {
+		t.Fatalf("modal width = %d, want the shared %d", got, outerW)
 	}
-	// One batch fits on one row: the box hugs its content, floored at 8 rows.
-	if outerH != 8 {
-		t.Fatalf("modal height = %d, want the 8-row floor for one batch", outerH)
+	if got := lipgloss.Height(m.eventsView()); got != outerH {
+		t.Fatalf("modal height = %d, want the shared %d", got, outerH)
 	}
 
 	lines := eventsLines(m)
@@ -198,7 +197,7 @@ func TestEventsModalRowShortensServicesAndPath(t *testing.T) {
 	if !strings.Contains(row, "…") || !strings.Contains(row, "schema.svg") {
 		t.Fatalf("row = %q, want the path cut with a middle ellipsis", row)
 	}
-	outerW, _ := long.eventsSize()
+	outerW, _ := long.modalSize()
 	if got := displayWidth(eventsBody(long)[0]); got > outerW {
 		t.Fatalf("row = %d cells, want within the %d-cell modal", got, outerW)
 	}
@@ -340,7 +339,7 @@ func TestEventsModalExpandedRowEllipsizesPathAndClampsServices(t *testing.T) {
 	}
 
 	press(m, "e", "right")
-	outerW, _ := m.eventsSize()
+	outerW, _ := m.modalSize()
 	innerW := m.modalInnerW(outerW)
 	body := eventsBody(m)
 	joined := strings.Join(body, "\n")
@@ -718,24 +717,21 @@ func TestEventsViewStaysPure(t *testing.T) {
 	}
 }
 
-// The modal hugs its content: header and footer plus the batch rows, floored
-// at 8 rows, capped at the finder's height. The footer offers ← collapse only
-// while the cursor batch is expanded.
-func TestEventsModalHeightFitsContent(t *testing.T) {
+// The modal keeps the shared size whatever the batch count, and the footer
+// offers ← collapse only while the cursor batch is expanded.
+func TestEventsModalHeightIsFixed(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.width, m.height = 100, 30
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write, "apps/b.go": fsnotify.Write})
 	m.now = spawnClock
+	_, wantH := m.modalSize()
 
 	press(m, "e")
-	if _, h := m.eventsSize(); h != 8 {
-		t.Fatalf("height = %d, want the 8-row floor for one collapsed batch", h)
+	if _, h := m.modalSize(); h != wantH {
+		t.Fatalf("height = %d, want the shared %d", h, wantH)
 	}
 
 	press(m, "right") // expand: a dir row and two file rows join the batch row
-	if _, h := m.eventsSize(); h != 2+3+4 {
-		t.Fatalf("height = %d expanded, want frame+chrome+4 content rows", h)
-	}
 	if got := eventsFooterLine(m); !strings.Contains(got, "← collapse") || strings.Contains(got, "→ expand") {
 		t.Fatalf("footer = %q, want ← collapse only while expanded", got)
 	}
@@ -751,7 +747,7 @@ func TestEventsModalHeightFitsContent(t *testing.T) {
 	}
 	m2.now = spawnClock.Add(30 * time.Second)
 	press(m2, "e")
-	if _, h := m2.eventsSize(); h != 30*4/5 {
-		t.Fatalf("height = %d for 30 batches, want the finder cap %d", h, 30*4/5)
+	if got := lipgloss.Height(m2.eventsView()); got != wantH {
+		t.Fatalf("height = %d for 30 batches, want the shared %d", got, wantH)
 	}
 }

@@ -162,8 +162,18 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.help = false
 			}
 			m.helpAll = true
+			m.helpTop = 0
 		case "m":
 			m.helpAll = true
+			m.helpTop = 0
+		case "j", "down":
+			m.helpScroll(1)
+		case "k", "up":
+			m.helpScroll(-1)
+		case "pgdown":
+			m.helpScroll(m.helpRows())
+		case "pgup":
+			m.helpScroll(-m.helpRows())
 		case "esc", "ctrl+[", "enter", "ctrl+m", "space":
 			m.help = false
 		}
@@ -192,6 +202,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "?", "shift+?", "shift+/":
 		m.help = true
 		m.helpAll = false
+		m.helpTop = 0
 
 	case "/", "v", "ctrl+f":
 		m.openBar()

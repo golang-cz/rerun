@@ -45,3 +45,43 @@ func TestModalBoxDropsFooterWhenTooShort(t *testing.T) {
 		t.Fatalf("body row dropped before the footer:\n%s", box)
 	}
 }
+
+// Every centered modal draws the same outer box at each terminal size.
+func TestModalsShareOneOuterSize(t *testing.T) {
+	for _, size := range [][2]int{{80, 24}, {120, 40}, {60, 15}} {
+		m := newTestModel(t, target("web"))
+		m.width, m.height = size[0], size[1]
+		addLines(m, "web", "one")
+		m.frame()
+		wantW, wantH := m.modalSize()
+
+		views := map[string]func() string{
+			"finder": func() string { press(m, "ctrl+k"); return m.finderView() },
+			"events": func() string { press(m, "esc"); press(m, "e"); return m.eventsView() },
+			"original": func() string {
+				press(m, "esc")
+				openPaneOriginal(m)
+				return m.originalView()
+			},
+			"help": func() string { press(m, "esc"); press(m, "?"); return m.helpView() },
+		}
+		for name, view := range views {
+			box := view()
+			if w := lipgloss.Width(box); w != wantW {
+				t.Errorf("%s at %dx%d is %d wide, want the shared %d", name, size[0], size[1], w, wantW)
+			}
+			if h := lipgloss.Height(box); h != wantH {
+				t.Errorf("%s at %dx%d is %d tall, want the shared %d", name, size[0], size[1], h, wantH)
+			}
+		}
+	}
+}
+
+// On a wide terminal the modal stops at the width cap and keeps 80% of the height.
+func TestModalSizeCapsWidthOnWideTerminals(t *testing.T) {
+	m := newTestModel(t)
+	m.width, m.height = 200, 60
+	if w, h := m.modalSize(); w != 120 || h != 48 {
+		t.Fatalf("modalSize at 200x60 = %dx%d, want 120x48", w, h)
+	}
+}

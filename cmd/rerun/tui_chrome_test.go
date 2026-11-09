@@ -65,17 +65,21 @@ func TestMuteNamesTheTargetInTheFooter(t *testing.T) {
 	}
 }
 
-// The short help fits a 30-row screen, and the full help fits it too.
+// The help box is the shared modal size; the short help fits it whole.
 func TestHelpFitsThirtyRows(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 90, 30
+	_, wantH := m.modalSize()
 
 	press(m, "?")
 	short := ansi.Strip(m.View().Content)
 	if !strings.Contains(short, "ctrl+s") || strings.Contains(short, "backspace") {
 		t.Errorf("short help should list the core keys only:\n%s", short)
 	}
-	assertBoxRows(t, short, 30, "short help")
+	assertBoxRows(t, short, wantH, "short help")
+	if strings.Contains(short, "↓ more") {
+		t.Errorf("short help scrolls, but it fits:\n%s", short)
+	}
 
 	press(m, "?")
 	full := ansi.Strip(m.View().Content)
@@ -84,13 +88,25 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 			t.Errorf("full help is missing %q", want)
 		}
 	}
-	// The last legend row and the footer prove no row was clipped off the bottom.
+	assertBoxRows(t, full, wantH, "full help")
+	if !strings.Contains(full, "↓ more") {
+		t.Errorf("full help does not show more rows below:\n%s", full)
+	}
+
+	// Paging to the end reaches the last legend row, and the footer never leaves.
+	for range 3 {
+		press(m, "pgdown")
+	}
+	end := ansi.Strip(m.View().Content)
 	for _, want := range []string{"· off", "esc close"} {
-		if !strings.Contains(full, want) {
-			t.Errorf("full help is clipped: missing %q", want)
+		if !strings.Contains(end, want) {
+			t.Errorf("scrolled full help is missing %q:\n%s", want, end)
 		}
 	}
-	assertBoxRows(t, full, 30, "full help")
+	if strings.Contains(end, "↓ more") {
+		t.Errorf("full help still says more rows below at the end:\n%s", end)
+	}
+	assertBoxRows(t, end, wantH, "scrolled full help")
 }
 
 // On an 80-column screen no full-help row is cut: every row fits the box and
@@ -100,7 +116,8 @@ func TestFullHelpRowsFitEightyColumns(t *testing.T) {
 	m.width, m.height = 80, 30
 	m.help, m.helpAll = true, true
 
-	innerW := m.modalInnerW(helpWidth(m.width))
+	outerW, _ := m.modalSize()
+	innerW := m.modalInnerW(outerW)
 	for _, line := range strings.Split(ansi.Strip(m.helpView()), "\n") {
 		if strings.Contains(line, "…") {
 			t.Fatalf("full help row is cut at 80 columns: %q", line)

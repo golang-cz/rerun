@@ -192,6 +192,7 @@ type tuiModel struct {
 	cursor  int // highlighted list row, an index into listRows
 	help    bool
 	helpAll bool // the help overlay shows every key, not the short list
+	helpTop int  // the help overlay's first body row, scrolled by j/k and pgup/pgdn
 	// confirmQuit is the `q` modal: the frame keeps running behind it, and
 	// only enter quits.
 	confirmQuit bool
