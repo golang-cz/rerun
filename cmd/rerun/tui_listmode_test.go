@@ -77,3 +77,28 @@ func TestHiddenListKeepsFocusOnLeftArrow(t *testing.T) {
 		t.Fatal("← moved the focus to the hidden list")
 	}
 }
+
+// Hidden, ctrl+k's jump keeps the keys on the pane, not the unseen list.
+func TestHiddenListFinderJumpKeepsKeysOnPane(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"), target("worker"))
+	m.frame()
+	press(m, "b", "b")
+	m.Update(ctrlK)
+	press(m, "w", "r", "k", "enter")
+	if !m.paneFocus || m.listFocused() {
+		t.Fatalf("after the jump: paneFocus=%v listFocused=%v, want the pane", m.paneFocus, m.listFocused())
+	}
+
+	cursor := m.cursor
+	press(m, "up")
+	if m.cursor != cursor {
+		t.Fatalf("up moved the hidden list's cursor from %d to %d", cursor, m.cursor)
+	}
+
+	idx := targetIndex(m, "worker")
+	state := m.targets[idx].state
+	press(m, " ")
+	if m.targets[idx].state != state {
+		t.Fatal("space on the pane started or stopped the jumped-to target")
+	}
+}

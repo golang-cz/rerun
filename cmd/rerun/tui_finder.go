@@ -233,7 +233,8 @@ func dropControl(r rune) rune {
 // finderJump unfolds the rows hiding allRows()[idx] and the group itself when it is one, then moves the cursor to it.
 func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
-	m.paneFocus = false
+	// A hidden list cannot show its cursor, so the keys stay on the pane.
+	m.paneFocus = !m.listShown()
 	rows := m.allRows()
 	m.revealRow(rows, idx)
 	// A hidden target is listed only with its group's hidden members shown.

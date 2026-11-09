@@ -461,7 +461,7 @@ func (m *tuiModel) scopeState() scopeState {
 
 // listFocused reports whether the list, not the pane, owns the keys.
 func (m *tuiModel) listFocused() bool {
-	return !m.paneFocus
+	return !m.paneFocus && m.listShown()
 }
 
 // escList backs the scope out one level; pills are never touched.
