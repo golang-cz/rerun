@@ -245,6 +245,8 @@ type tuiModel struct {
 	selCellX, selCellY int
 	selSeq, selSub     int
 	selExp             bool
+	// selKey marks a selection grown by shift+arrows, which no pointer motion may drag.
+	selKey bool
 
 	// merged is every line in arrival order; visible is the pane's
 	// materialized view of it, which muting and soloing filter.

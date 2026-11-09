@@ -1194,7 +1194,7 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move rows; home/end first/last, pane top-left / live tail"},
+	{"↑/↓ j/k", "move rows; ⇧↑⇧↓ select pane lines; home/end first/last"},
 	{"←/→ enter", "group: fold or unfold · row: to its group · pane: focus, expand"},
 	{"space", "start or stop · pane: jump to live · ▶ starts its auto targets"},
 	{"s", "stop the row · pane: stop what the pane shows"},

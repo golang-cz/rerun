@@ -553,3 +553,46 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 		t.Fatal("the release kept the selection")
 	}
 }
+
+// shift+up/down in the focused pane grow a line selection from the pane cursor.
+func TestShiftArrowsExtendALineSelectionInThePane(t *testing.T) {
+	m := frozenPane(t)
+	press(m, "right", "up", "up")
+	anchor := m.paneCursorRow()
+
+	press(m, "shift+up", "shift+up")
+	lo, hi, ok := m.selectionRange()
+	if !ok || lo != anchor-2 || hi != anchor {
+		t.Fatalf("selection = %d..%d ok=%v, want %d..%d", lo, hi, ok, anchor-2, anchor)
+	}
+
+	press(m, "shift+down")
+	if lo, hi, _ := m.selectionRange(); lo != anchor-1 || hi != anchor {
+		t.Fatalf("shift+down selection = %d..%d, want %d..%d", lo, hi, anchor-1, anchor)
+	}
+
+	press(m, "down")
+	if m.selAnchor != nil {
+		t.Fatal("a plain arrow kept the selection")
+	}
+}
+
+// shift+up/down in the left list keep jumping between groups, with no selection.
+func TestShiftArrowsInTheListDoNotSelectLines(t *testing.T) {
+	m := frozenPane(t)
+	press(m, "shift+down")
+	if m.selAnchor != nil {
+		t.Fatal("shift+down in the list started a pane selection")
+	}
+}
+
+// A hover after a keyboard selection must not drag it.
+func TestHoverDoesNotDragAKeyboardSelection(t *testing.T) {
+	m := frozenPane(t)
+	press(m, "right", "shift+down")
+	end := m.selEnd
+	m.handleMouse(motion(paneX(m), 9))
+	if m.selEnd != end {
+		t.Fatalf("hover moved the keyboard selection end from %d to %d", end, m.selEnd)
+	}
+}

@@ -99,8 +99,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Any key ends a frozen selection; copy feedback survives its 3s window.
-	m.clearSelection()
+	// Any key ends a frozen selection, except the shift+arrows that grow it; copy feedback survives its 3s window.
+	if !m.growsSelection(msg.String()) {
+		m.clearSelection()
+	}
 
 	// The quit confirm is routed first, so enter after q quits instead of closing the modal.
 	if m.cfgErr != "" && !m.confirmQuit {
@@ -201,11 +203,15 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "[", "shift+up":
 		if m.listFocused() {
 			m.jumpGroup(-1)
+		} else if msg.String() == "shift+up" {
+			m.extendSelection(-1)
 		}
 
 	case "]", "shift+down":
 		if m.listFocused() {
 			m.jumpGroup(1)
+		} else if msg.String() == "shift+down" {
+			m.extendSelection(1)
 		}
 
 	case "c":
@@ -497,7 +503,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		// Motion only drags an existing selection: a bare hover never starts one.
-		if m.selAnchor != nil {
+		if m.selAnchor != nil && !m.selKey {
 			// One moved cell makes the press a drag, so its release never clicks;
 			// a motion report on the press cell itself is not a gesture.
 			if e.X != m.selCellX || e.Y != m.selCellY {
@@ -573,7 +579,28 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 // clearSelection drops the frozen selection highlight and the press state.
-func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved = nil, false }
+func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved, m.selKey = nil, false, false }
+
+// growsSelection reports whether key extends the pane's selection rather than ending it.
+func (m *tuiModel) growsSelection(key string) bool {
+	return m.paneFocus && (key == "shift+up" || key == "shift+down") &&
+		m.cfgErr == "" && !m.confirmQuit && !m.help && !m.finder.open &&
+		!m.eventsModal.open && m.inputMode == inputNone
+}
+
+// extendSelection moves the pane cursor by delta rows and stretches the selection to it.
+func (m *tuiModel) extendSelection(delta int) {
+	if m.paneLen() == 0 {
+		return
+	}
+	if m.selAnchor == nil {
+		anchor := m.paneCursorRow()
+		m.selAnchor = &anchor
+		m.selKey = true
+	}
+	m.moveCursorRow(delta)
+	m.selEnd = m.paneCursorRow()
+}
 
 // titleHeight is the pane's fixed header height, above the viewport.
 func (m *tuiModel) titleHeight() int { return m.headerRows() }
