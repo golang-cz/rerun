@@ -110,6 +110,8 @@ type Target struct {
 	GroupHide bool
 	// ImportHide is set when the target's import is `hide: true`: the import section folds, not its sub-group.
 	ImportHide bool
+	// AutoHide lists the target only while it runs, starts, restarts or fails; see tui_list.go.
+	AutoHide bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
 	Dir string
 	// Kind is "compose" for a docker-compose service, or "" for a process.
@@ -439,6 +441,9 @@ type groupDef struct {
 	hide    bool
 	// hideSet tells `hide: false` apart from no hide key, which Makefile groups read differently.
 	hideSet bool
+	// autoHide and autoHideSet are the group's `auto-hide:`, which hides idle members from the list.
+	autoHide    bool
+	autoHideSet bool
 	// start and startSet carry the group's `start:` default to its members.
 	start    startMode
 	startSet bool
@@ -728,7 +733,7 @@ const migrateNoticeText = "uses top-level targets; run rerun -migrate"
 const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "queries", "muted", "hide", "start"}
+var schemaFields = []string{"columns", "queries", "muted", "hide", "auto-hide", "start"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
@@ -826,6 +831,13 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 				return groupDef{}, err
 			}
 			def.hide, def.hideSet = b, true
+
+		case "auto-hide":
+			b, err := boolField(src, name, field, deref(node.Content[i+1]))
+			if err != nil {
+				return groupDef{}, err
+			}
+			def.autoHide, def.autoHideSet = b, true
 
 		case "start":
 			m, err := parseStartMode(src, owner, field, deref(node.Content[i+1]))
@@ -1012,6 +1024,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			target.Muted = &muted
 		}
 		target.GroupHide = group.hide
+		if group.autoHideSet {
+			target.AutoHide = group.autoHide
+		}
 		if !target.startSet && group.startSet {
 			target.Start, target.startSet = group.start, true
 		}

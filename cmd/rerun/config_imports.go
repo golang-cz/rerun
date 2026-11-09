@@ -20,7 +20,7 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "hide", "start", "groups", "services", "profiles", "targets"}
+var importFields = []string{"path", "group", "optional", "hide", "auto-hide", "start", "groups", "services", "profiles", "targets"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
@@ -28,6 +28,8 @@ type importSpec struct {
 	group    string
 	optional bool
 	hide     bool
+	// autoHide is the import's `auto-hide:`; nil leaves it to the root group or the Makefile default.
+	autoHide *bool
 	groups   []string
 	services []string
 	profiles []string
@@ -289,6 +291,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			if !t.startSet && spec.startSet {
 				t.Start, t.startSet = spec.start, true
 			}
+			t.AutoHide = autoHideOf(spec, rootSchemas[spec.group], t.Kind == makeKind)
 			if spec.hide || (t.Kind == makeKind && !unfolded) {
 				t.GroupHide, t.ImportHide = true, true
 			}
@@ -312,6 +315,17 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		}
 	}
 	return nil
+}
+
+// autoHideOf is an import's auto-hide: its own, else its root group's, else on for a Makefile.
+func autoHideOf(spec importSpec, root groupDef, makefile bool) bool {
+	switch {
+	case spec.autoHide != nil:
+		return *spec.autoHide
+	case root.autoHideSet:
+		return root.autoHide
+	}
+	return makefile
 }
 
 // rootOwnsGroup reports whether rerun.yml itself defines group, by a groups: entry or by its own targets.
@@ -432,6 +446,16 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			} else {
 				spec.group, spec.groupNode = strings.TrimSpace(value.Value), value
 			}
+
+		case "auto-hide":
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
+				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
+			}
+			b, err := strconv.ParseBool(value.Value)
+			if err != nil {
+				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
+			}
+			spec.autoHide = &b
 
 		case "optional", "hide":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
