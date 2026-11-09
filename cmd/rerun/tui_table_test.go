@@ -21,7 +21,7 @@ const (
 	jsonPost = `{"request":{"method":"DELETE"},"response":{"status":500}}`
 )
 
-func TestTableToggleAlignsColumnValues(t *testing.T) {
+func TestTableAlignsColumnValues(t *testing.T) {
 	m := newTestModel(t, tableTarget("web"))
 	addLines(m, "web", jsonGet, jsonPost)
 	m.frame()
@@ -36,14 +36,6 @@ func TestTableToggleAlignsColumnValues(t *testing.T) {
 	}
 	if strings.Index(row0, "200") != strings.Index(row1, "500") {
 		t.Fatalf("status values start at %d and %d, want the same column", strings.Index(row0, "200"), strings.Index(row1, "500"))
-	}
-
-	press(m, "t")
-	if m.tableOn() {
-		t.Fatal("c did not turn table mode off")
-	}
-	if got := dropMarker(paneOf(m)[m.titleHeight()]); got != "web  "+jsonGet {
-		t.Fatalf("raw row = %q, want the untouched JSON line", got)
 	}
 }
 
@@ -87,12 +79,14 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 // A row with no columns, or one whose line is not a JSON object, keeps its
 // raw text, so the merged view can mix both kinds.
 func TestTableMixesRawAndColumnRows(t *testing.T) {
-	m := newTestModel(t, tableTarget("web"), target("api"))
+	web, api := tableTarget("web"), target("api")
+	web.Schema, api.Schema = "backend", "backend"
+	m := newTestModel(t, web, api)
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", "plain log line")
+	m.applyScope(-1, "backend")
 	m.frame()
 
-	press(m, "t")
 	lines := paneOf(m)[m.titleHeight():]
 	if got := strings.TrimRight(lines[0], " "); !strings.Contains(got, "GET") || strings.Contains(got, jsonGet) {
 		t.Fatalf("web row = %q, want a table row", got)
@@ -110,28 +104,12 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 	addLines(m, "bad", jsonGet, "not json at all")
 	m.frame()
 
-	press(m, "t")
 	lines := paneOf(m)[m.titleHeight():]
 	if got := dropMarker(lines[0]); got != "bad  "+jsonGet {
 		t.Fatalf("bad-expr row = %q, want raw text", got)
 	}
 	if got := strings.TrimRight(lines[1], " "); got != "bad  not json at all" {
 		t.Fatalf("non-JSON row = %q, want raw text", got)
-	}
-}
-
-// c without any columns to show says so instead of toggling.
-func TestTableHintsWithoutColumns(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	addLines(m, "web", "hi")
-	m.frame()
-
-	press(m, "t")
-	if m.tableOn() {
-		t.Fatal("c turned table mode on without any columns")
-	}
-	if got := bottomPaneLine(m); !strings.Contains(got, tableHint) {
-		t.Fatalf("bottom line = %q, want the table hint", got)
 	}
 }
 
@@ -174,8 +152,6 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	addLines(m, "web", jsonGet)
 	addLines(m, "api", jsonPost)
 	m.frame()
-	press(m, "t")
-	m.frame()
 	before := m.cellEvals
 
 	m.cursor = 1 // web
@@ -183,17 +159,6 @@ func TestTableCellsReusedOnSoloFlip(t *testing.T) {
 	m.frame()
 	if got := m.cellEvals; got != before {
 		t.Fatalf("cellEvals = %d after a solo flip, want %d: cached cells were re-decoded", got, before)
-	}
-}
-
-// The hint is transient, like the m/s one.
-func TestTableHintExpires(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	m.frame()
-	press(m, "t")
-	m.now = m.hintUntil
-	if got := bottomPaneLine(m); strings.Contains(got, tableHint) {
-		t.Fatalf("the table hint outlived its window: %q", got)
 	}
 }
 

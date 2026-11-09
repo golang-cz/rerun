@@ -35,8 +35,8 @@ scopes the pane to its row; `esc` backs the scope out (a target to its group, a 
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/`, `v` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
-`esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; `t` toggles the columns
-table for the selection, which starts as a table when it has `columns`. A JSON output line's top-level `url`,
+`esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
+always shows them as a table. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
 
 More keys: `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.

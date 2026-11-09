@@ -531,7 +531,7 @@ func TestEnterOnListRowFocusesPane(t *testing.T) {
 
 func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	press(m, "t") // arms the table hint, which has no columns to show
+	m.showHint("target hint")
 	m.follow = false
 	m.pending = 2
 
@@ -539,8 +539,8 @@ func TestNewLinesMarkerBeatsAllRowHint(t *testing.T) {
 	if !strings.Contains(view, "↓ 2 new") {
 		t.Fatalf("the new-lines marker is not in the view:\n%s", view)
 	}
-	if strings.Contains(view, tableHint) {
-		t.Fatalf("the table hint took the marker's line:\n%s", view)
+	if strings.Contains(view, "target hint") {
+		t.Fatalf("the hint took the marker's line:\n%s", view)
 	}
 }
 

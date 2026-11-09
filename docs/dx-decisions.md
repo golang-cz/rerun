@@ -18,3 +18,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · with a rerun.yml, imports are explicit: only `imports:` loads, and `rerun -migrate` writes the entries. Why: no surprise targets appear from a file nobody listed.
 - 2026-11-09 · `o` in the pane opens the original lines, already filtered by the pills: raw logs with search. Why: the reader wants the exact text, not columns.
 - 2026-11-09 · `c` is the only copy key: no `y` anywhere, and the fs events modal moved from `y` to `c`. Why: one copy key across every modal.
+- 2026-11-09 · `t` removed: `→` expands a line's fields and `o` shows the raw lines. Why: a whole-pane raw toggle was redundant.

@@ -167,7 +167,7 @@ func TestMuteOnSchemaRowTogglesAllMembers(t *testing.T) {
 	}
 }
 
-func TestSchemaSelectionTablesByDefaultAndCTogglesRaw(t *testing.T) {
+func TestSchemaSelectionTablesByDefault(t *testing.T) {
 	api := tableTarget("api")
 	api.Schema = "backend"
 	m := newTestModel(t, api)
@@ -177,16 +177,6 @@ func TestSchemaSelectionTablesByDefaultAndCTogglesRaw(t *testing.T) {
 	if !m.tableOn() {
 		t.Fatal("a schema with columns did not start in table mode")
 	}
-	press(m, "t")
-	if m.tableOn() {
-		t.Fatal("c did not switch the schema to raw")
-	}
-
-	// Leaving the selection drops the flip, so the nothing-selected default returns.
-	press(m, "esc")
-	if !m.tableOn() {
-		t.Fatal("esc kept the raw flip from the schema selection")
-	}
 }
 
 // With nothing selected, the table starts only when every target shares its columns.
@@ -194,10 +184,6 @@ func TestNothingSelectedTablesOnlyWhenColumnsAreShared(t *testing.T) {
 	m := newTestModel(t, tableTarget("api"), target("web"))
 	if m.tableOn() {
 		t.Fatal("mixed columns started in table mode with nothing selected")
-	}
-	press(m, "t")
-	if !m.tableOn() {
-		t.Fatal("c did not turn the table on for mixed columns")
 	}
 
 	shared := newTestModel(t, tableTarget("api"), tableTarget("web"))

@@ -746,7 +746,6 @@ func (m *tuiModel) applyScope(solo int, schema string) {
 	m.solo = solo
 	m.schemaSel = schema
 	m.refreshNames()
-	m.tableFlip = false
 	m.group.setSoloGuard(solo >= 0 || schema != "")
 	m.mergedDirty = true
 	m.vpDirty = true

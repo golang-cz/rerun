@@ -327,9 +327,9 @@ func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	seq := m.copySeq
 
 	// Let the copy feedback expire, then press t on a row without columns: that
-	// arms the table hint window, which used to bring the stale copy back.
+	// arms a hint window, which used to bring the stale copy back.
 	m.now = m.copyUntil
-	press(m, "t")
+	m.showHint("target hint")
 
 	lines := paneOf(m)[m.titleHeight():]
 	last := lines[len(lines)-1]
@@ -339,8 +339,8 @@ func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	if strings.Contains(last, seq) {
 		t.Fatalf("the old copy sequence re-fired: %q", last)
 	}
-	if !strings.Contains(last, tableHint) {
-		t.Fatalf("bottom line = %q, want the table hint", last)
+	if !strings.Contains(last, "target hint") {
+		t.Fatalf("bottom line = %q, want the target hint", last)
 	}
 }
 

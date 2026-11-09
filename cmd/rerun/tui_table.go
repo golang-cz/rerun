@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// tableHint is shown when `t` has no columns to work with.
-const tableHint = "t needs a target with columns"
-
 const columnCapW = 24
 
 const sampleValues = 100
@@ -34,30 +31,14 @@ type cellEntry struct {
 	gen  int
 }
 
-// toggleTable flips the selection between raw lines and the columns table. A
-// selection with nothing to tabulate says so instead of toggling.
-func (m *tuiModel) toggleTable() {
-	if !m.columnsAvailable() {
-		m.showHint(tableHint)
-		return
-	}
-	m.tableFlip = !m.tableFlip
-	m.vpDirty = true
-}
-
-// tableOn is the selection's default layout, flipped by c.
-func (m *tuiModel) tableOn() bool { return m.tableDefault() != m.tableFlip }
-
-// tableDefault is the layout a selection starts in; nothing selected needs shared columns.
-func (m *tuiModel) tableDefault() bool {
+// tableOn is whether the pane shows the columns table. With nothing selected it
+// needs columns every target shares, so mixed columns stay raw.
+func (m *tuiModel) tableOn() bool {
 	if m.solo < 0 && m.schemaSel == "" {
 		return m.sharedColumns()
 	}
 	return m.anyColumns(m.scopeMembers())
 }
-
-// columnsAvailable reports whether c has a table to offer the selection.
-func (m *tuiModel) columnsAvailable() bool { return m.anyColumns(m.scopeMembers()) }
 
 // scopeMembers is the target indices the selection shows.
 func (m *tuiModel) scopeMembers() []int {

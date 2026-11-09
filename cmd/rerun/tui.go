@@ -300,9 +300,6 @@ type tuiModel struct {
 	// edits are the unsaved column picks, one per schema or target node.
 	edits []colEdit
 
-	// tableFlip is c's raw/table flip for the current selection.
-	tableFlip bool
-
 	// schemaSel is the group whose members the pane merges, or "" for none.
 	schemaSel string
 	// collapsed holds the list headers folded shut, by group key; it lives in memory only.

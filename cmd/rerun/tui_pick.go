@@ -111,7 +111,6 @@ func (m *tuiModel) setEdit(node colNode, cols []Column) {
 		m.edits = append(m.edits, colEdit{node: node, cols: cols})
 	}
 	m.applyEdits()
-	m.tableFlip = m.columnsAvailable() != m.tableDefault()
 	m.mergedDirty = true
 	m.vpDirty = true
 	m.dispDirty = true

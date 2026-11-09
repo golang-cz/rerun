@@ -229,9 +229,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c":
 		m.copyKey()
 
-	case "t":
-		m.toggleTable()
-
 	case "n":
 		m.searchJump(1)
 
