@@ -67,9 +67,14 @@ func (m *tuiModel) originalLines() []string {
 		row := m.lineRow(m.rowInfo(m.paneCursorRow()).raw)
 		lo, hi = row, row
 	}
-	raw := m.copyLines(lo, hi)
-	for i := range raw {
-		raw[i] = printable(ansi.Strip(raw[i]), false)
+	var raw []string
+	for row := lo; row <= hi; row++ {
+		r := m.rowInfo(row)
+		// rerun's own rules and expansion rows are not service output.
+		if r.sub >= 0 || m.visibleSep[r.raw].isSep() {
+			continue
+		}
+		raw = append(raw, printable(ansi.Strip(m.visibleRaw[r.raw]), false))
 	}
 	return raw
 }

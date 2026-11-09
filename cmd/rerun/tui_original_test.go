@@ -217,3 +217,17 @@ func TestOriginalListFocusedOKeepsOpeningTheTarget(t *testing.T) {
 		t.Fatal("o with the list focused opened the original modal")
 	}
 }
+
+// alt+i over the whole pane keeps only service lines: rerun's exit rule is not output.
+func TestOriginalAltISkipsRerunRules(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
+	m.frame()
+	m.focusPane()
+	press(m, "alt+i", "o")
+
+	if want := []string{"one", "two"}; !reflect.DeepEqual(m.original.lines, want) {
+		t.Fatalf("lines = %q, want only the service lines %q", m.original.lines, want)
+	}
+}
