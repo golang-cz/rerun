@@ -67,7 +67,7 @@ Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 schema's targets (`esc` backs out), and that row is bold. On a schema header, `space`, `r`, and `m` act on its
 targets. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
-the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `hide: true` also folds its header. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. Folding is a start state; a reload keeps your fold for groups already shown. The pane's top line is
+the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `collapsed: true` also collapses its header. A target's own `hide: false` overrides a group's `collapsed: true`. A target's `hide: false` unmutes it, but the group header still starts collapsed. A root group named after an import collapses that import's section. Folding is a start state; a reload keeps your collapse for groups already shown. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
@@ -83,8 +83,8 @@ between hits. `@` lists the pane scope's saved queries from the `queries:` keys 
 most specific wins a name clash). `esc` keeps the pills; `backspace` on an empty input removes the last one.
 
 Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it
-becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click anywhere on
-the rule line, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
+becomes `built <duration>` or `✗ build failed`. Its output collapses under the rule: click anywhere on
+the rule line, or press `enter`. A failed build opens itself, and a `▶` rule collapses its command when the
 pane cuts it short; a click on a cut rule expands it to the full command.
 
 With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift+↑/↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
@@ -132,8 +132,8 @@ Stopped, never-run, manual and off targets hide. A target that exits 0 hides ten
 A target that exits non-zero stays visible.
 
 - A target the pane shows stays listed, so it never vanishes under the cursor.
-- A group's last row counts its hidden members: `(+) 12 hidden`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) hide 12`.
-- `h` shows or hides the cursor's group's hidden members from any row of that group. A folded header reads `▸ make · 2 running · 12 hidden`.
+- A group's last row counts its hidden members: `(+) 12 more`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) collapse`.
+- `h` shows or hides the cursor's group's hidden members from any row of that group. A collapsed header reads `▸ make · 2 running · 12 hidden`.
 - `ctrl+k` still finds hidden targets. Running one makes it visible.
 - A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
 
@@ -155,13 +155,13 @@ imports:
   - path: ../bpn-api/rerun.yml   # relative to this file
     group: bpn-api               # section name and target prefix; default: the dir name
     optional: true               # skip the file while it is missing
-    hide: true                   # start its targets muted and its section folded
+    hide: true                   # start its targets muted and its section collapsed
     start: auto                  # first run for its targets; a target's own wins
     groups: [backend]            # only these groups of that file
 ```
 
 Imported targets run from their own dir, and their names read `bpn-api/api`.
-An import's `hide: true` mutes its targets and folds its section. Its own `muted` or `hide` and a group's still win.
+An import's `hide: true` mutes its targets and collapses its section. Its own `muted` or `hide` and a group's still win.
 An import's `start:` is the outermost level too: a target's own `start` and a group's `start` win.
 A rerun.yml import's targets default to `auto`; a Makefile or compose import's to `manual`.
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
@@ -181,9 +181,9 @@ imports:
     targets: [lint, gen]           # keep only these
 ```
 
-- A `Makefile` next to `rerun.yml` loads as a folded `make` group by default. With a `rerun.yml`, it loads only when listed under `imports:`.
+- A `Makefile` next to `rerun.yml` loads as a collapsed `make` group by default. With a `rerun.yml`, it loads only when listed under `imports:`.
 - Subfolder Makefiles load only when imported. rerun never scans subfolders.
-- `groups: make: hide: false` unfolds a Makefile group.
+- `groups: make: collapsed: false` expands a Makefile group.
 - Descriptions come from a trailing `## text` or the comment above the target.
 - Targets start manually and do not watch files. Enter in Ctrl+K runs one.
 - An import's `start: auto` overrides that default; a target's or group's own `start:` still wins.

@@ -1228,7 +1228,7 @@ func (m *tuiModel) makeEmptyHint() string {
 	for _, t := range m.targets {
 		if t.spec.Kind == makeKind {
 			if t.spec.ImportHide {
-				return "ctrl+k go to a target · → unfold make/"
+				return "ctrl+k go to a target · → expand make/"
 			}
 			return "ctrl+k go to a target"
 		}
@@ -1290,7 +1290,7 @@ var helpShortKeys = [][2]string{
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
 	{"o", "open the target's open: · pane: original lines"},
-	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
+	{"← →", "expand or collapse a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last minute)"},
 	{"enter → a =", "pane: → expand · ← collapse · a adds key, = filters value"},
@@ -1307,7 +1307,7 @@ var helpShortKeys = [][2]string{
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move rows; ⇧↑⇧↓ select pane lines; home/end first/last"},
-	{"←/→ enter", "group: fold or unfold · row: to its group · pane: focus, expand"},
+	{"←/→ enter", "group: expand or collapse · row: its group · pane: focus"},
 	{"space", "start or stop · pane: jump to live · ▶ starts its auto targets"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r h", "mute (group: its targets) · r reboots · h shows idle targets"},

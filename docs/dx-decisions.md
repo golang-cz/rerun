@@ -30,3 +30,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · the pills row takes focus with `↑`, and `←`/`→` stay in the input: arrows keep one job per focus. Why: the input jump to pills fired when the cursor merely reached the start.
 - 2026-11-09 · `f` opens search and `=` filters by the cursor value: `f` is the one search key, and `ctrl+f` goes. Why: the old `f` filter label hid the search key.
 - 2026-11-09 · the row whose logs the pane shows is bold, focus or not: the scope reads at a glance. Why: the cursor band alone did not say which target the pane was showing.
+- 2026-11-09 · groups are expanded or collapsed (`collapsed:`), and idle targets are auto-hidden (`auto-hide:`): two separate ideas, two names. Why: `hide:` on a group read as hiding targets, when it only folded the header.

@@ -218,12 +218,12 @@ func (m *tuiModel) listRows() []listRow {
 	return out
 }
 
-// moreRow is the block's last row: `(+) N hidden`, or `(−) hide N` once its hidden members show.
+// moreRow is the block's last row: `(+) N more`, or `(−) collapse` once its auto-hidden members show.
 func (m *tuiModel) moreRow(schema string, depth, n int) listRow {
 	r := listRow{schema: schema, target: -1, depth: depth, more: true, revealed: m.revealed[schema]}
-	r.label = fmt.Sprintf("(+) %d hidden", n)
+	r.label = fmt.Sprintf("(+) %d more", n)
 	if r.revealed {
-		r.label = fmt.Sprintf("(−) hide %d", n)
+		r.label = "(−) collapse"
 	}
 	return r
 }

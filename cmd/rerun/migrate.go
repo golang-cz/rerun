@@ -68,6 +68,46 @@ func renameOpenKeys(target *yaml.Node, name string) (bool, error) {
 	return true, nil
 }
 
+// migrateCollapsed renames each group's hide: to collapsed:, in place. It reports
+// whether any key changed, and names a group that sets both.
+func migrateCollapsed(root *yaml.Node) (bool, error) {
+	changed := false
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		key := deref(root.Content[i])
+		if key.Kind != yaml.ScalarNode || (key.Value != groupsBlock.block && key.Value != schemasBlock.block) {
+			continue
+		}
+		block := deref(root.Content[i+1])
+		if block.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(block.Content); j += 2 {
+			group := deref(block.Content[j+1])
+			if group.Kind != yaml.MappingNode {
+				continue
+			}
+			hideAt, collapsedAt := -1, -1
+			for k := 0; k+1 < len(group.Content); k += 2 {
+				switch group.Content[k].Value {
+				case "hide":
+					hideAt = k
+				case "collapsed":
+					collapsedAt = k
+				}
+			}
+			if hideAt < 0 {
+				continue
+			}
+			if collapsedAt >= 0 {
+				return false, fmt.Errorf("%s %q: both \"hide\" and \"collapsed\" are set; use collapsed:", key.Value, deref(block.Content[j]).Value)
+			}
+			group.Content[hideAt].Value = "collapsed"
+			changed = true
+		}
+	}
+	return changed, nil
+}
+
 // writeYAML writes a node to path, keeping its comments.
 func writeYAML(path string, node *yaml.Node) error {
 	var buf bytes.Buffer
@@ -190,6 +230,10 @@ func migrateConfig(path string) (migrateStatus, error) {
 	if root.Kind != yaml.MappingNode {
 		return migrateNoTargets, fmt.Errorf("%s: expected a mapping of target names", real)
 	}
+	groupsRenamed, err := migrateCollapsed(root)
+	if err != nil {
+		return migrateNoTargets, fmt.Errorf("%s: %v", real, err)
+	}
 	if value := mappingValue(root, targetsKey); value != nil {
 		if looksLikeTarget(value) {
 			return migrateNoTargets, fmt.Errorf("%s: %s", real, errTargetsReserved)
@@ -198,7 +242,7 @@ func migrateConfig(path string) (migrateStatus, error) {
 		if err != nil {
 			return migrateNoTargets, fmt.Errorf("%s: %v", real, err)
 		}
-		if !renamed {
+		if !renamed && !groupsRenamed {
 			return migrateAlready, nil
 		}
 		if err := writeYAML(real, &doc); err != nil {
@@ -224,6 +268,12 @@ func migrateConfig(path string) (migrateStatus, error) {
 		targets.Content = append(targets.Content, key, value)
 	}
 	if len(targets.Content) == 0 {
+		if groupsRenamed {
+			if err := writeYAML(real, &doc); err != nil {
+				return migrateNoTargets, err
+			}
+			return migrateRenamed, nil
+		}
 		return migrateNoTargets, nil
 	}
 	if _, err := migrateOpenKeys(targets); err != nil {

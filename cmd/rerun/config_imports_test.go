@@ -740,7 +740,7 @@ func TestMakefileImports(t *testing.T) {
 			},
 		},
 		{
-			name:     "groups entry hide false unfolds one make group",
+			name:     "groups entry hide false expands one make group",
 			root:     "groups:\n  make/tools:\n    hide: false\n\nimports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
 			files:    map[string]string{"tools/Makefile": tools},
 			wantNext: []string{"local", "make/tools/build", "make/tools/test"},

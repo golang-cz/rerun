@@ -162,7 +162,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field inside a schema",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
-			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, queries, muted, hide, auto-hide, start"},
+			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, queries, muted, collapsed, auto-hide, start"},
 		},
 		{
 			name:    "schemas with no targets",
@@ -332,7 +332,7 @@ func TestParseConfigErrorPositions(t *testing.T) {
 			name:    "unknown field inside a schema points at the key",
 			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
 			head:    `:4:5: schema "backend": unknown field "bogus"`,
-			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, muted, hide, auto-hide, start"},
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, muted, collapsed, auto-hide, start"},
 		},
 		{
 			name:    "cmd is required points at the target",

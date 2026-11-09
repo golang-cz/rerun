@@ -469,12 +469,12 @@ type groupDef struct {
 // parseFileBody reads a file's groups and targets in the form the file writes:
 // under `targets:`, or, for a file with no such key, at the top level.
 func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile, error) {
-	schemas, err := parseSchemas(src, root)
+	notes := &oldFormNotes{file: file}
+	schemas, err := parseSchemas(src, root, notes)
 	if err != nil {
 		return parsedFile{}, err
 	}
 	out := parsedFile{schemas: schemas}
-	notes := &oldFormNotes{file: file}
 	if _, block := mappingEntry(root, queriesKey); block != nil {
 		out.queries, err = parseQueries(src, queriesKey, block, nil)
 		if err != nil {
@@ -753,12 +753,12 @@ const migrateNoticeText = "uses top-level targets; run rerun -migrate"
 const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "queries", "muted", "hide", "auto-hide", "start"}
+var schemaFields = []string{"columns", "queries", "muted", "collapsed", "auto-hide", "start"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
 // and a group with no columns, null or `{}`, is valid.
-func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, error) {
+func parseSchemas(src *configSource, root *yaml.Node, notes *oldFormNotes) (map[string]groupDef, error) {
 	schemas := make(map[string]groupDef)
 	var kw groupBlock
 	found := false
@@ -795,7 +795,7 @@ func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, erro
 			if _, ok := schemas[name]; ok {
 				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate %s %q", kw.field, name))
 			}
-			def, err := parseSchema(src, kw, name, value)
+			def, err := parseSchema(src, kw, name, value, notes)
 			if err != nil {
 				return nil, err
 			}
@@ -805,7 +805,7 @@ func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, erro
 	return schemas, nil
 }
 
-func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node) (groupDef, error) {
+func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node, notes *oldFormNotes) (groupDef, error) {
 	node = deref(node)
 	owner := fmt.Sprintf("%s %q", kw.field, name)
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
@@ -845,7 +845,17 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 			}
 			def.muted = &b
 
-		case "hide":
+		case "collapsed", "hide":
+			if field == "hide" {
+				// Retired: collapsed: took the name, with the same values and default.
+				if seen["collapsed"] {
+					return groupDef{}, src.at(key, len(field), fmt.Sprintf("%s: both \"hide\" and \"collapsed\" are set; use collapsed:", owner))
+				}
+				notes.once("hide: is now collapsed:")
+			}
+			if field == "collapsed" && seen["hide"] {
+				return groupDef{}, src.at(key, len(field), fmt.Sprintf("%s: both \"hide\" and \"collapsed\" are set; use collapsed:", owner))
+			}
 			b, err := boolField(src, name, field, deref(node.Content[i+1]))
 			if err != nil {
 				return groupDef{}, err

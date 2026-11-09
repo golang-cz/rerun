@@ -103,12 +103,12 @@ func TestNonAutoHideTargetsAreAlwaysListed(t *testing.T) {
 
 func TestMoreRowCountsAndRevealsHiddenMembers(t *testing.T) {
 	m := autoHideFixture(t)
-	if got, want := nestedRows(m), []string{"▾ops", " build", " (+) 2 hidden"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾ops", " build", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 	m.cursor = rowAtKey(t, m, "more:ops")
 	press(m, "right")
-	if got, want := nestedRows(m), []string{"▾ops", " build", " serve", " lint", " (−) hide 2"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾ops", " build", " serve", " lint", " (−) collapse"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after →: rows = %v, want %v", got, want)
 	}
 	if !dimListed(m, "serve") {
@@ -116,7 +116,7 @@ func TestMoreRowCountsAndRevealsHiddenMembers(t *testing.T) {
 	}
 	m.cursor = rowAtKey(t, m, "more:ops")
 	press(m, "left")
-	if got, want := nestedRows(m), []string{"▾ops", " build", " (+) 2 hidden"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾ops", " build", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after ← on the (−) row: rows = %v, want %v", got, want)
 	}
 }
@@ -125,7 +125,7 @@ func TestMoreRowEnterTogglesWithoutFocusingThePane(t *testing.T) {
 	m := autoHideFixture(t)
 	m.cursor = rowAtKey(t, m, "more:ops")
 	press(m, "enter")
-	if got, want := nestedRows(m), []string{"▾ops", " build", " serve", " lint", " (−) hide 2"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾ops", " build", " serve", " lint", " (−) collapse"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("enter on (+): rows = %v, want %v", got, want)
 	}
 	if m.paneFocus {

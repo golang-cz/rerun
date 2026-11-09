@@ -339,7 +339,7 @@ func TestSaveColumnsMakeOnlyWritesNothing(t *testing.T) {
 
 func TestEmptyPaneOnAFreshMakeConfigPointsAtFinder(t *testing.T) {
 	m := newMakeTUI(t)
-	if got := m.emptyHint(); got != "ctrl+k go to a target · → unfold make/" {
+	if got := m.emptyHint(); got != "ctrl+k go to a target · → expand make/" {
 		t.Fatalf("emptyHint() = %q", got)
 	}
 }
