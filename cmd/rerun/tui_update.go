@@ -240,7 +240,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.cycleLeft()
 
 	case "h":
-		m.toggleHidden()
+		if m.listFocused() {
+			m.toggleHidden()
+		}
 
 	case "c":
 		return m, m.copyKey()

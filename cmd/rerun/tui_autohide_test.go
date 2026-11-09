@@ -162,6 +162,16 @@ func TestHTogglesTheCursorsGroupFromAnyRow(t *testing.T) {
 	}
 }
 
+// h is the list's key: with the pane focused it must not reveal the cursor's group.
+func TestHDoesNothingInThePane(t *testing.T) {
+	m := autoHideFixture(t)
+	m.focusPane()
+	press(m, "h")
+	if m.revealed["ops"] {
+		t.Fatal("h in the focused pane revealed the group")
+	}
+}
+
 func TestHDoesNothingWithoutHiddenMembers(t *testing.T) {
 	m := autoHideFixture(t)
 	m.targets[1].state, m.targets[2].state = stateRunning, stateRunning
