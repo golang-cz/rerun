@@ -50,7 +50,7 @@ func TestSearchCounterIsIncremental(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want inputQuery", m.inputMode)
 	}
@@ -81,7 +81,7 @@ func TestSearchRecomputesOnNewLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "fresh")
 	press(m, "enter")
 	m.frame()
@@ -109,7 +109,7 @@ func TestSearchJumpWrapsAndFreezes(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "line")
 	press(m, "enter")
 	if !m.follow {
@@ -183,14 +183,14 @@ func TestSearchEscInBoxKeepsThePill(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 20).events)
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "line")
 	press(m, "enter")
 	if len(m.pills) != 1 || m.pills[0].raw != "line" || m.inputMode != inputNone {
 		t.Fatalf("enter did not commit: mode=%d pills=%v", m.inputMode, m.pills)
 	}
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	if m.input != "" {
 		t.Fatalf("reopening seeded input = %q, want empty", m.input)
 	}
@@ -207,7 +207,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "line")
 	press(m, "enter")
 	m.scrollUp(5)
@@ -219,7 +219,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 		t.Fatal("the marker was not recorded while a search was active")
 	}
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	if got := ansi.Strip(m.inputBoxView()); !strings.Contains(got, "enter add pill") {
 		t.Fatalf("the input box did not open: %q", got)
 	}
@@ -545,7 +545,7 @@ func TestSearchCounterUpdatesOnMute(t *testing.T) {
 	addLines(m, "api", "alpha")
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "alpha")
 	press(m, "enter")
 	m.frame()

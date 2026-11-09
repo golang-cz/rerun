@@ -201,7 +201,7 @@ func TestInputSelectAllTypingReplaces(t *testing.T) {
 func TestInputSelectAllWithKeyText(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "alpha")
 
 	m.Update(tea.KeyPressMsg{Code: 'i', Mod: tea.ModAlt, Text: "i"})
@@ -329,12 +329,12 @@ func TestInputReopenStartsEmpty(t *testing.T) {
 	addLines(m, "web", "alpha beta")
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "alpha")
 	press(m, "home")
 	press(m, "enter")
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	if m.input != "" || m.inputCursor != 0 {
 		t.Fatalf("input=%q cursor=%d, want a fresh empty input", m.input, m.inputCursor)
 	}
@@ -414,7 +414,7 @@ func TestInputWideRuneCaret(t *testing.T) {
 func TestInputWindowKeepsWideRunesWhole(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 
 	m.input, m.inputCursor = "世ab", 1
 	if text, caret := m.inputWindow(2); text != "世" || caret != 2 {

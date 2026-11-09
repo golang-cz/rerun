@@ -134,7 +134,7 @@ func TestCtrlHRemovesTheFocusedChip(t *testing.T) {
 func TestEscLadderNeverClearsFilters(t *testing.T) {
 	m := groupedModel(t)
 	commitText(m, "/", "keep")
-	commitText(m, "ctrl+f", "keep")
+	commitText(m, "f", "keep")
 	m.cursor = 2 // worker, a backend member
 	m.liveSelect()
 
@@ -201,7 +201,7 @@ func TestSlashAndCtrlFFocusTheBarFromEveryFocus(t *testing.T) {
 		{"pane", func() { press(m, "right") }},
 	}
 	for _, c := range cases {
-		for _, key := range []string{"/", "ctrl+f"} {
+		for _, key := range []string{"/", "f"} {
 			m.barFocus, m.inputMode, m.paneFocus = false, inputNone, false
 			c.setup()
 			wasPane := m.paneFocus

@@ -43,7 +43,7 @@ func TestFindAndFilterKeysWorkFromEveryFocus(t *testing.T) {
 		"pane": func() { m.paneFocus = true },
 	}
 	for name, focus := range focuses {
-		for _, key := range []string{"/", "ctrl+f"} {
+		for _, key := range []string{"/", "f"} {
 			focus()
 			press(m, key)
 			if m.inputMode != inputQuery {
@@ -67,13 +67,32 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 100, 40
 	press(m, "?")
-	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "pill") {
+	if view := m.View().Content; !strings.Contains(view, "f") || !strings.Contains(view, "pill") {
 		t.Errorf("short help should name ctrl+f and the pills:\n%s", view)
 	}
 	press(m, "?")
-	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ ctrl+f") {
-		t.Errorf("full help should name / and ctrl+f:\n%s", view)
+	if view := m.View().Content; !strings.Contains(view, "/ f") {
+		t.Errorf("full help should name / and f:\n%s", view)
 	}
+}
+
+// ctrl+f is no longer a search key; f is.
+func TestCtrlFDoesNotOpenSearch(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.Update(tea.KeyPressMsg{Code: 'f', Mod: tea.ModCtrl})
+	if m.inputMode != inputNone {
+		t.Fatal("ctrl+f opened the query bar")
+	}
+}
+
+// f opens search from the pane too, where = is the value filter.
+func TestFOpensSearchWithPaneFocus(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	press(m, "f")
+	if m.inputMode != inputQuery {
+		t.Fatal("f did not open the query bar")
+	}
+	press(m, "esc")
 }
 
 // The kitty decoder reports some keys with a spelling legacy bytes cannot
@@ -85,7 +104,7 @@ func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
 	armedSearch := func(m *tuiModel) {
 		m.applyEvents(streamEvents("web", "line", 60).events)
 		m.frame()
-		press(m, "ctrl+f")
+		press(m, "f")
 		typeString(m, "line")
 		press(m, "enter")
 	}
@@ -135,7 +154,7 @@ func TestEnhancedKeySpellingsKeepTheirActions(t *testing.T) {
 		box := newTestModel(t, target("web"))
 		box.applyEvents(streamEvents("web", "line", 10).events)
 		box.frame()
-		press(box, "ctrl+f")
+		press(box, "f")
 		typeString(box, "line")
 		return box
 	}

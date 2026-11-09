@@ -73,7 +73,7 @@ stream, double-click to stop/start like `space`, and a click on a schema header 
 
 More keys: `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
-`/` or `ctrl+f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
+`/` or `f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
 (`!=`, `>`, `>=`, `<`, `<=`, `~` contains, `~/re/` regex, `=*` exists, `!=*` missing; `level=error|fatal` is any-of),
 `.expr` raw yq. A field name is a yq path without the leading dot; a scope column name resolves to its expression.
@@ -103,7 +103,7 @@ values tinted. The first expansion of a session shows the click hint.
 In an expanded block, a click on a key adds it as a column of the selection (a selected
 schema, else the target the pane shows), and a click on a scalar adds a `path=value` pill
 (ANDed with the other pills; `×` or `backspace` removes it). With the pane focused and the cursor on
-an expanded key or scalar row, `a` adds the key and `f` adds the value pill, as the
+an expanded key or scalar row, `a` adds the key and `=` adds the value pill, as the
 clicks do. A table header column name is inert; only the `×` after it removes that
 column. A schema or target whose columns are unsaved shows a `*` in its marker column, two cells after its name. Picks are
 unsaved until `ctrl+s` writes them with the rerun.yml column writer; the footer shows

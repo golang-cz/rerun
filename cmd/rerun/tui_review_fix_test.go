@@ -156,7 +156,7 @@ func TestEscThatChangesNothingHintsAtChips(t *testing.T) {
 func TestPaneBackspaceRemovesLastChipOfAnyKind(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
-	commitText(m, "ctrl+f", "delta")
+	commitText(m, "f", "delta")
 	press(m, "right")
 	press(m, "backspace")
 	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {

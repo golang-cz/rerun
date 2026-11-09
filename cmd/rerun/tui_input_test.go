@@ -22,7 +22,7 @@ func TestSearchBoxAtPaneTop(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "alpha", "beta")
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 
 	box := ansi.Strip(m.inputBoxView())
 	if !strings.Contains(box, "level=error") {
@@ -65,7 +65,7 @@ func TestSearchBoxTypesN(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 5).events)
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "naN")
 
 	if m.input != "naN" {
@@ -84,7 +84,7 @@ func TestSearchBoxCtrlGJumpsNext(t *testing.T) {
 	commitPill(m, "line")
 	before := m.searchRow
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	press(m, "ctrl+g")
 	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want ctrl+g to keep the box open", m.inputMode)
@@ -102,7 +102,7 @@ func TestSearchCtrlShiftGJumpsPrevious(t *testing.T) {
 
 	commitPill(m, "line")
 	start := m.searchRow
-	press(m, "ctrl+f")
+	press(m, "f")
 	press(m, "ctrl+g")
 	if m.searchRow <= start {
 		t.Fatalf("ctrl+g did not advance from %d", start)
@@ -132,7 +132,7 @@ func TestSearchBoxEnterKeepsQueryThenNJJumps(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "line")
 	press(m, "enter")
 
@@ -158,7 +158,7 @@ func TestSearchBoxEscKeepsHits(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 10).events)
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "line")
 
 	press(m, "esc")
@@ -173,7 +173,7 @@ func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 	m := alphaModel(t)
 	m.frame()
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "alpha")
 	if m.barRows() != 0 {
 		t.Fatalf("pills row shown with no pills while the draft types")
@@ -187,7 +187,7 @@ func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 // Kitty's disambiguation spells backspace as ctrl+h; the input must delete on both.
 func TestCtrlHDeletesLikeBackspaceInInput(t *testing.T) {
 	m := alphaModel(t)
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "alpha")
 	press(m, "ctrl+h")
 	if m.input != "alph" {
@@ -214,7 +214,7 @@ func TestCtrlHOnEmptyInputRemovesLastChip(t *testing.T) {
 func TestInputBoxFootersPerMode(t *testing.T) {
 	m := alphaModel(t)
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	if box := ansi.Strip(m.inputBoxView()); !strings.Contains(box, "enter add pill · esc close") {
 		t.Fatalf("box = %q, want its footer", box)
 	}

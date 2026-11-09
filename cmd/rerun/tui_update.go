@@ -218,7 +218,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.helpAll = false
 		m.helpTop = 0
 
-	case "/", "ctrl+f":
+	case "/", "f":
 		m.openBar()
 
 	case "ctrl+g":
@@ -357,7 +357,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.pickCursorKey()
 		}
 
-	case "f":
+	case "=":
 		if m.paneFocus {
 			m.pickCursorValue()
 		}

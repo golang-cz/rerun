@@ -104,13 +104,13 @@ func TestKeyboardPicksMatchTheClicks(t *testing.T) {
 	}
 
 	cursorTo(t, m, "status")
-	press(m, "f")
+	press(m, "=")
 	if len(m.pills) != 1 || m.pills[0].raw != "status=403" {
 		t.Fatalf("pills = %+v, want status=403", m.pills)
 	}
 }
 
-// a and f on a row that cannot take them say what to do instead.
+// a and = on a row that cannot take them say what to do instead.
 func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
@@ -119,7 +119,7 @@ func TestKeyboardPicksNeedAKeyOrScalar(t *testing.T) {
 	press(m, "right", "enter")
 
 	cursorTo(t, m, "request")
-	press(m, "f")
+	press(m, "=")
 	if want := "move the cursor onto a scalar value in an expanded line"; m.hint != want {
 		t.Fatalf("hint = %q, want %q", m.hint, want)
 	}

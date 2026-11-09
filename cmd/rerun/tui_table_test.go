@@ -53,7 +53,7 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 		t.Fatalf("visibleRaw = %q, want the raw JSON line", got)
 	}
 
-	press(m, "ctrl+f")
+	press(m, "f")
 	typeString(m, "method")
 	press(m, "enter")
 	if len(m.searchMatches) != 1 {

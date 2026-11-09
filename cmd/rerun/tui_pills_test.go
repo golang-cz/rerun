@@ -22,7 +22,7 @@ func commitPill(m *tuiModel, text string) {
 
 // Every opener lands on the same bar: one input mode, the bar focused.
 func TestQueryBarOpensWithEveryKey(t *testing.T) {
-	for _, key := range []string{"/", "ctrl+f"} {
+	for _, key := range []string{"/", "f"} {
 		m := pillModel(t)
 		press(m, key)
 		if m.inputMode != inputQuery || !m.barFocus {

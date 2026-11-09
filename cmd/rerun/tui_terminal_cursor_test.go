@@ -60,7 +60,7 @@ func TestSearchBoxCursorSitsAtTheCaret(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "alpha", "beta")
 	m.frame()
-	press(m, "ctrl+f")
+	press(m, "f")
 
 	view := m.View()
 	if view.Cursor == nil {
@@ -93,7 +93,7 @@ func TestNoInputDrawsNoTerminalCursor(t *testing.T) {
 	}
 
 	// The config-error modal owns the keys over an open input, so the caret goes with them.
-	press(m, "ctrl+f")
+	press(m, "f")
 	m.cfgErr = "boom"
 	if m.View().Cursor != nil {
 		t.Fatal("a config-error modal left the input's terminal cursor drawn")

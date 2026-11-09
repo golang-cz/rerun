@@ -34,7 +34,7 @@ live tail; `esc` goes back to the live tail first, then backs out of the list), 
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
-`/` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
+`/` or `f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
 always shows them as a table. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
@@ -73,7 +73,7 @@ expandable line toggles it the same way, and a click on a row of an open expansi
 collapses it. Opening a block scrolls only as far as needed to show it. A click means press and release on one cell: a press that moves is a drag,
 which selects text and never toggles. Moving the cursor off the
 newest line pauses the tail. Expanded keys are underlined and values tinted. With the
-cursor on an expanded key, `a` adds it as a column; on a scalar, `f` adds a `path=value`
+cursor on an expanded key, `a` adds it as a column; on a scalar, `=` adds a `path=value`
 pill. In an expanded block, click a key to add it as a column of the
 selection: the selected schema, else the target the pane shows, else a hint says to select one.
 Build output shows inline: each build is one `⚙` rule in the stream, rewritten in place as it

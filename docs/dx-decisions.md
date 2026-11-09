@@ -28,3 +28,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · `o` falls back to the newest localhost link the target printed, and says so when it has none. Why: a silent `o` looked broken.
 - 2026-11-09 · `open:` is the target's link or command, and `open-on-start:` runs it at startup: one field for what `o` does, one for when. Why: a `url:` that could not run a command, and a boolean `open:` that did not open anything, misled readers.
 - 2026-11-09 · the pills row takes focus with `↑`, and `←`/`→` stay in the input: arrows keep one job per focus. Why: the input jump to pills fired when the cursor merely reached the start.
+- 2026-11-09 · `f` opens search and `=` filters by the cursor value: `f` is the one search key, and `ctrl+f` goes. Why: the old `f` filter label hid the search key.
