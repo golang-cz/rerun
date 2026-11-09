@@ -787,6 +787,9 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	if t.flashing(m.now) {
 		style = style.Reverse(true)
 	}
+	if m.scopedRow(r) {
+		style = style.Bold(true)
+	}
 	return renderSegs(segs, style, leftW)
 }
 
@@ -802,7 +805,27 @@ func opColor(op string) string {
 	return colorYellow
 }
 
+// scopedRow is the row whose logs the pane shows: the solo target or the scoped group header.
+func (m *tuiModel) scopedRow(r listRow) bool {
+	if r.more {
+		return false
+	}
+	if r.header {
+		return m.schemaSel != "" && r.schema == m.schemaSel
+	}
+	return m.solo >= 0 && m.solo == r.target
+}
+
+// rowStyle is the row's style; the scoped row is bold on top of it, whatever has focus.
 func (m *tuiModel) rowStyle(row int, r listRow) lipgloss.Style {
+	style := m.plainRowStyle(row, r)
+	if m.scopedRow(r) {
+		style = style.Bold(true)
+	}
+	return style
+}
+
+func (m *tuiModel) plainRowStyle(row int, r listRow) lipgloss.Style {
 	if r.more {
 		return m.styles.muted
 	}

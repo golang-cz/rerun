@@ -220,3 +220,28 @@ func TestGOpensGoToOutsideTextInputs(t *testing.T) {
 		t.Fatalf("query input = %q, want g typed", m.input)
 	}
 }
+
+// The solo target's row is bold, with the pane focused or the list focused; the cursor band keeps its background.
+func TestScopedRowIsBold(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.frame()
+	m.applyScope(0, "")
+	leftW, _ := m.layoutWidths()
+	for _, paneFocus := range []bool{false, true} {
+		m.paneFocus = paneFocus
+		row, _ := m.listRowAt(0)
+		line := m.targetLine(0, row, leftW)
+		if !hasBoldSGR(line) {
+			t.Fatalf("paneFocus=%v: scoped row not bold: %q", paneFocus, line)
+		}
+		other, _ := m.listRowAt(1)
+		if hasBoldSGR(m.targetLine(1, other, leftW)) {
+			t.Fatalf("paneFocus=%v: unscoped row is bold", paneFocus)
+		}
+	}
+}
+
+// hasBoldSGR reports whether a styled line sets the bold attribute in any SGR sequence.
+func hasBoldSGR(line string) bool {
+	return strings.Contains(line, "\x1b[1m") || strings.Contains(line, "\x1b[1;") || strings.Contains(line, ";1m") || strings.Contains(line, ";1;")
+}

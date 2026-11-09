@@ -64,7 +64,7 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
-schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
+schema's targets (`esc` backs out), and that row is bold. On a schema header, `space`, `r`, and `m` act on its
 targets. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `hide: true` also folds its header. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. Folding is a start state; a reload keeps your fold for groups already shown. The pane's top line is
