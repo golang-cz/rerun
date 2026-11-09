@@ -148,7 +148,7 @@ $ find . -name '*.go' | rerun -- go test ./...
 -cooldown <dur>   minimum time between restarts (default 0s)
 -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
 -no-gitignore     do not filter watched files through .gitignore
--migrate          move rerun.yml's top-level targets under targets:
+-migrate          move rerun.yml's top-level targets under targets:, and list a Makefile under imports:
 -h, -help         show this help
 -version          show version
 ```
@@ -223,7 +223,7 @@ targets:
 
 - The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:`, `targets:` and `queries:`. Any other top-level key is an error, so a typo surfaces.
 - A file without a `targets:` key is read the old way, with its targets at the top level. rerun shows one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
-- `rerun -migrate` rewrites the nearest rerun.yml in place, so its targets move under `targets:`. It keeps comments and key order, and drops blank lines.
+- `rerun -migrate` rewrites the nearest rerun.yml in place, so its targets move under `targets:`. It keeps comments and key order, and drops blank lines. It also adds an `imports:` entry, with `optional: true`, for a Makefile beside it that loaded without one.
 - A target under `targets:` may be called `imports` or `groups`, because it no longer collides with those reserved top-level keys.
 
 #### Groups
