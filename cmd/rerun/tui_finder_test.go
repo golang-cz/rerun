@@ -504,3 +504,23 @@ func TestFinderJumpUnfoldKeepsJumpedRow(t *testing.T) {
 		t.Fatalf("cursor on %q, want target:alpha1", m.rowKey(r))
 	}
 }
+
+// A jump from a focused pane lands the placed cursor on the new pane's last line, not the old pane's line index.
+func TestFinderJumpPlacesCursorOnNewPaneTail(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	addLines(m, "web", "w0", "w1")
+	addLines(m, "api", "b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9")
+	m.frame()
+	m.liveSelect() // scope the pane to web, so its placed line is web's
+	m.focusPane()
+
+	press(m, "g", "a", "p", "i", "enter")
+
+	row := m.paneCursorRow()
+	if got := m.rowInfo(row).raw; got != 9 {
+		t.Fatalf("cursor on raw line %d, want api's last line 9", got)
+	}
+	if got := clipboardText(t, press(m, "c")); got != "b9\n" {
+		t.Fatalf("c copied %q, want the cursor line b9", got)
+	}
+}

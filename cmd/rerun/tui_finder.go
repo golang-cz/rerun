@@ -230,8 +230,6 @@ func dropControl(r rune) rune {
 // finderJump unfolds the rows hiding allRows()[idx] and the group itself when it is one, then moves the cursor to it.
 func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
-	// The jump lands in the pane, where the target's log is.
-	m.paneFocus = true
 	rows := m.allRows()
 	m.revealRow(rows, idx)
 	// A hidden target is listed only with its group's hidden members shown.
@@ -243,6 +241,8 @@ func (m *tuiModel) finderJump(idx int) {
 	if r, ok := m.cursorRow(); ok {
 		m.applyRowScope(r)
 	}
+	// The jump lands in the pane, where the target's log is.
+	m.focusPane()
 }
 
 // finderRun is enter on a make row: it jumps there, then starts it unless it is already up.

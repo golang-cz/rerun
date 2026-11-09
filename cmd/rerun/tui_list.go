@@ -700,6 +700,7 @@ func (m *tuiModel) clearKey() {
 
 // A clear must not add or drop lines, so it only moves the pin.
 func (m *tuiModel) clearTargets() {
+	m.paneCurPlaced = false
 	if !m.follow {
 		m.goLive()
 	}
@@ -752,6 +753,8 @@ func (m *tuiModel) applyRowScope(r listRow) {
 func (m *tuiModel) applyScope(solo int, schema string) {
 	m.solo = solo
 	m.schemaSel = schema
+	// A placed cursor names a line of the old pane, which the new scope replaces.
+	m.paneCurPlaced = false
 	m.refreshNames()
 	m.group.setSoloGuard(solo >= 0 || schema != "")
 	m.mergedDirty = true

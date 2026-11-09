@@ -455,6 +455,7 @@ func (m *tuiModel) toggleTarget(i int) {
 func (m *tuiModel) goLive() {
 	m.follow = true
 	m.pending = 0
+	m.paneCurPlaced = false
 	m.vp.GotoBottom()
 }
 
