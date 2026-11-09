@@ -324,3 +324,25 @@ func TestOriginalResizeReclampsScroll(t *testing.T) {
 		t.Fatalf("top = %d after the resize, want %d", m.original.top, want)
 	}
 }
+
+// o on rerun's own rule line says why it opened nothing, instead of doing nothing.
+func TestOriginalOnARuleShowsHint(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one")
+	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
+	m.frame()
+	m.focusPane()
+	press(m, "down")
+	if !m.visibleSep[m.rowInfo(m.paneCursorRow()).raw].isSep() {
+		t.Fatal("setup: the cursor is not on a rule line")
+	}
+
+	press(m, "o")
+
+	if m.original.open {
+		t.Fatal("o on a rule opened the modal")
+	}
+	if m.hint != "no service line here" {
+		t.Fatalf("hint = %q, want %q", m.hint, "no service line here")
+	}
+}

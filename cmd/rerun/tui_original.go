@@ -44,6 +44,7 @@ func (o *originalState) text() []string {
 func (m *tuiModel) openOriginal() {
 	lines := m.originalLines()
 	if len(lines) == 0 {
+		m.showHint("no service line here")
 		return
 	}
 	o := originalState{open: true, scope: m.scopeName(), lines: lines}

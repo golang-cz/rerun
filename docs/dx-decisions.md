@@ -3,7 +3,7 @@
 This file logs product and developer-experience decisions, each with a short why.
 
 - 2026-11-09 · `c` copies everywhere: the selection or pane cursor line, and the fs events modal. Why: one copy key to learn.
-- 2026-11-09 · `t` toggles columns: the columns table moved off `c`, which now copies. Why: each key does one job.
+- 2026-11-09 · `t` toggles columns: the columns table moved off `c`, which now copies. Why: each key does one job. (superseded: t removed, see below)
 - 2026-11-09 · `→` lands on the last service line: focusing the pane skips rerun's own rules. Why: the newest service output is what the reader wants.
 - 2026-11-09 · `b` cycles full, names, hidden: the left list gives its width back to the log. Why: a long log needs the room more than the list.
 - 2026-11-09 · expand scrolls minimally: opening a line moves the pane only as far as the block needs. Why: an expansion should not lose the reader's place.
