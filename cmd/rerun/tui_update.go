@@ -227,7 +227,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleHidden()
 
 	case "c":
-		m.copyKey()
+		return m, m.copyKey()
 
 	case "n":
 		m.searchJump(1)
@@ -496,10 +496,9 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Any release ends the press; only a left one acts on it. Otherwise a
 		// right-button release would leave the anchor armed for a stray copy.
 		if rel.Button == tea.MouseLeft {
-			m.releasePane(rel.X, rel.Y)
-		} else {
-			m.clearSelection()
+			return m, m.releasePane(rel.X, rel.Y)
 		}
+		m.clearSelection()
 		return m, nil
 	}
 	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open {
@@ -630,18 +629,17 @@ func (m *tuiModel) keepsSelection(key string) bool {
 }
 
 // copyKey copies the selected lines, else the pane cursor's line.
-func (m *tuiModel) copyKey() {
+func (m *tuiModel) copyKey() tea.Cmd {
 	if m.selAnchor != nil {
-		m.copySelection()
-		return
+		return m.copySelection()
 	}
 	if m.paneLen() == 0 {
-		return
+		return nil
 	}
 	// An expansion row copies the line it belongs to, as a click on it would.
 	row := m.lineRow(m.rowInfo(m.paneCursorRow()).raw)
 	m.selAnchor, m.selEnd, m.selKey = &row, row, false
-	m.copySelection()
+	return m.copySelection()
 }
 
 // extendSelection moves the pane cursor by delta rows and stretches the selection to it.
@@ -715,11 +713,11 @@ func (m *tuiModel) dragSelection(y int) {
 	}
 }
 
-// copySelection sends the selection to the clipboard as one OSC 52
-// sequence and clears the highlight. A click without a drag copies one line.
-func (m *tuiModel) copySelection() {
+// copySelection sends the selection to the clipboard and clears the highlight.
+// A click without a drag copies one line.
+func (m *tuiModel) copySelection() tea.Cmd {
 	if m.selAnchor == nil {
-		return
+		return nil
 	}
 	anchor := *m.selAnchor
 	m.selAnchor = nil
@@ -731,25 +729,23 @@ func (m *tuiModel) copySelection() {
 	lo = max(lo, 0)
 	hi = min(hi, m.paneLen()-1)
 	if lo > hi {
-		return
+		return nil
 	}
 
 	raw := m.copyLines(lo, hi)
 	if len(raw) == 0 {
-		return
+		return nil
 	}
 	payload, n, truncated := copyPayload(raw)
 	if payload == "" {
-		// Non-empty selection with nothing copied means one line is over the
-		// cap. Say so, and drop the previous sequence so it cannot re-fire.
-		m.copySeq = ""
+		// Non-empty selection with nothing copied means one line is over the cap.
 		m.copyHint = "line too long — not copied"
 		m.copyUntil = m.now.Add(hintDuration)
-		return
+		return nil
 	}
-	m.copySeq = osc52(payload)
 	m.copyHint = copyMessage(n, truncated)
 	m.copyUntil = m.now.Add(hintDuration)
+	return copyToClipboard(payload)
 }
 
 // rowAt resolves a screen cell to a list row index, or -1 for none. The fs

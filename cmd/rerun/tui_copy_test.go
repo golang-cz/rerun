@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/base64"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,19 +12,25 @@ func release(x, y int) tea.MouseMsg {
 	return tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft}
 }
 
-// decodeCopy unwraps an OSC 52 sequence back to its payload.
-func decodeCopy(t *testing.T, seq string) string {
+// clipboardText runs cmd and returns the text it sends to the clipboard, or "" when it sends none.
+func clipboardText(t *testing.T, cmd tea.Cmd) string {
 	t.Helper()
-	const prefix = "\x1b]52;c;"
-	const suffix = "\x1b\\"
-	if !strings.HasPrefix(seq, prefix) || !strings.HasSuffix(seq, suffix) {
-		t.Fatalf("copy sequence is not OSC 52: %q", seq)
+	if cmd == nil {
+		return ""
 	}
-	raw, err := base64.StdEncoding.DecodeString(seq[len(prefix) : len(seq)-len(suffix)])
-	if err != nil {
-		t.Fatalf("copy sequence payload is not base64: %v", err)
+	msg := cmd()
+	typ := reflect.TypeOf(msg)
+	if typ == nil || typ.Name() != "setClipboardMsg" {
+		return ""
 	}
-	return string(raw)
+	return reflect.ValueOf(msg).String()
+}
+
+// mouseCopy sends one mouse message and returns the clipboard text it produced.
+func mouseCopy(t *testing.T, m *tuiModel, msg tea.MouseMsg) string {
+	t.Helper()
+	_, cmd := m.handleMouse(msg)
+	return clipboardText(t, cmd)
 }
 
 // frozenPane streams 60 lines, draws a frame, and freezes with f.
@@ -89,16 +95,13 @@ func TestFrozenClickCopiesOneRawLine(t *testing.T) {
 	if m.selAnchor == nil {
 		t.Fatal("the press did not anchor a selection")
 	}
-	m.handleMouse(release(x, y))
+	payload := mouseCopy(t, m, release(x, y))
 
 	if m.selAnchor != nil {
 		t.Fatal("the release kept the selection")
 	}
-	if m.copySeq == "" {
-		t.Fatal("the click did not set a copy sequence")
-	}
-	if got := decodeCopy(t, m.copySeq); got != want+"\n" {
-		t.Fatalf("payload = %q, want %q", got, want+"\n")
+	if payload != want+"\n" {
+		t.Fatalf("payload = %q, want %q", payload, want+"\n")
 	}
 	if strings.HasPrefix(want, "web  ") {
 		t.Fatalf("the raw line kept the target prefix: %q", want)
@@ -124,16 +127,13 @@ func TestFrozenDragOneCellCopiesOneRawLine(t *testing.T) {
 
 	m.handleMouse(mouse(x, y, false))
 	m.handleMouse(motion(x+1, y))
-	m.handleMouse(release(x+1, y))
+	payload := mouseCopy(t, m, release(x+1, y))
 
 	if m.selAnchor != nil {
 		t.Fatal("the release kept the selection")
 	}
-	if m.copySeq == "" {
-		t.Fatal("the drag did not set a copy sequence")
-	}
-	if got := decodeCopy(t, m.copySeq); got != want+"\n" {
-		t.Fatalf("payload = %q, want %q", got, want+"\n")
+	if payload != want+"\n" {
+		t.Fatalf("payload = %q, want %q", payload, want+"\n")
 	}
 	if strings.HasPrefix(want, "web  ") {
 		t.Fatalf("the raw line kept the target prefix: %q", want)
@@ -156,13 +156,13 @@ func TestFrozenDragCopiesTheRange(t *testing.T) {
 
 	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(motion(x, 5))
-	m.handleMouse(release(x, 5))
+	payload := mouseCopy(t, m, release(x, 5))
 
 	lo := m.vp.YOffset() + 2
 	hi := m.vp.YOffset() + 5
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 	if m.copyHint != "copied 4 lines" {
 		t.Fatalf("hint = %q, want copied 4 lines", m.copyHint)
@@ -179,13 +179,13 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 
 	m.handleMouse(mouse(x, 5, false))
 	m.handleMouse(motion(x, 2))
-	m.handleMouse(release(x, 2))
+	payload := mouseCopy(t, m, release(x, 2))
 
 	lo := m.vp.YOffset() + 2
 	hi := m.vp.YOffset() + 5
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 }
 
@@ -202,13 +202,13 @@ func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 	x := paneX(m)
 	want := m.visibleRaw[m.vp.YOffset()+2] + "\n"
 	m.handleMouse(mouse(x, 2, false))
-	m.handleMouse(release(x, 2))
+	payload := mouseCopy(t, m, release(x, 2))
 
 	if !m.follow {
 		t.Fatal("the live-pane click froze the pane")
 	}
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 	if m.selAnchor != nil {
 		t.Fatal("the release kept the selection")
@@ -227,9 +227,8 @@ func TestFrozenClickPastContentCopiesNothing(t *testing.T) {
 	if m.selAnchor != nil {
 		t.Fatal("the press anchored a selection past the content")
 	}
-	m.handleMouse(release(x, 10))
-	if m.copySeq != "" {
-		t.Fatalf("a click past the content copied: %q", m.copySeq)
+	if payload := mouseCopy(t, m, release(x, 10)); payload != "" {
+		t.Fatalf("a click past the content copied: %q", payload)
 	}
 }
 
@@ -255,12 +254,11 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
-	m.handleMouse(release(x, 2))
-	m.frame()
-
-	if m.copySeq == "" {
+	if mouseCopy(t, m, release(x, 2)) == "" {
 		t.Fatal("the click did not copy")
 	}
+	m.frame()
+
 	if !m.layout.marker.contains(marker.x, marker.y) {
 		t.Fatal("the marker rect was lost while the copy hint showed")
 	}
@@ -282,7 +280,7 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
-	m.handleMouse(release(x, 2))
+	mouseCopy(t, m, release(x, 2))
 
 	lines := paneOf(m)[m.titleHeight():]
 	last := lines[len(lines)-1]
@@ -292,10 +290,7 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 	if strings.Contains(last, "↓ 3 new") {
 		t.Fatalf("the marker took the copy hint's line: %q", last)
 	}
-	if !strings.Contains(last, m.copySeq) {
-		t.Fatal("the copy sequence is not on the hint line")
-	}
-	// The OSC 52 sequence must not widen the frame.
+	// The copy hint must not widen the frame.
 	for i, line := range strings.Split(m.View().Content, "\n") {
 		if got := displayWidth(line); got != m.width {
 			t.Fatalf("line %d width = %d, want %d while the copy hint shows", i, got, m.width)
@@ -315,16 +310,14 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 }
 
 // The copy window is its own: re-arming the m/s hint must not resurrect a
-// stale copy hint or re-fire its OSC 52 sequence.
+// stale copy hint.
 func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
-	m.handleMouse(release(x, 2))
-	if m.copySeq == "" {
+	if mouseCopy(t, m, release(x, 2)) == "" {
 		t.Fatal("the click did not copy")
 	}
-	seq := m.copySeq
 
 	// Let the copy feedback expire, then press t on a row without columns: that
 	// arms a hint window, which used to bring the stale copy back.
@@ -335,9 +328,6 @@ func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	last := lines[len(lines)-1]
 	if strings.Contains(last, "copied 1 line") {
 		t.Fatalf("the stale copy hint came back: %q", last)
-	}
-	if strings.Contains(last, seq) {
-		t.Fatalf("the old copy sequence re-fired: %q", last)
 	}
 	if !strings.Contains(last, "target hint") {
 		t.Fatalf("bottom line = %q, want the target hint", last)
@@ -358,31 +348,27 @@ func TestFrozenDragOntoMarkerRowStopsAtVisibleContent(t *testing.T) {
 	x := paneX(m)
 	m.handleMouse(mouse(x, 2, false))
 	m.handleMouse(motion(x, marker.y))
-	m.handleMouse(release(x, marker.y))
+	payload := mouseCopy(t, m, release(x, marker.y))
 
 	lo := m.vp.YOffset() + 2
 	hi := m.vp.YOffset() + m.vp.Height() - 2 // the marker row is not content
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 }
 
-// One line over the cap reports instead of copying silently, and clears any
-// previous sequence so it cannot re-fire.
+// One line over the cap reports instead of copying silently.
 func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evOutput, target: "web", line: strings.Repeat("a", copyCap+1)}})
 	m.frame()
 	m.pauseTail()
 
-	m.copySeq = "stale"
 	x := paneX(m)
 	m.handleMouse(mouse(x, 0, false))
-	m.handleMouse(release(x, 0))
-
-	if m.copySeq != "" {
-		t.Fatalf("copySeq = %q, want cleared", m.copySeq)
+	if payload := mouseCopy(t, m, release(x, 0)); payload != "" {
+		t.Fatalf("an over-cap line copied: %q", payload)
 	}
 	if m.copyHint != "line too long — not copied" {
 		t.Fatalf("hint = %q, want the too-long message", m.copyHint)
@@ -409,9 +395,8 @@ func TestNonLeftReleaseClearsTheSelection(t *testing.T) {
 		t.Fatal("the right-button release kept the selection")
 	}
 
-	m.handleMouse(release(x, 4))
-	if m.copySeq != "" {
-		t.Fatalf("a stray left release copied: %q", m.copySeq)
+	if payload := mouseCopy(t, m, release(x, 4)); payload != "" {
+		t.Fatalf("a stray left release copied: %q", payload)
 	}
 }
 
@@ -424,12 +409,11 @@ func TestSelectionClearsOnKeypress(t *testing.T) {
 		t.Fatal("the press did not anchor a selection")
 	}
 
-	press(m, "j") // any other key
+	if payload := clipboardText(t, press(m, "j")); payload != "" { // any other key
+		t.Fatal("the keypress copied without a release")
+	}
 	if m.selAnchor != nil {
 		t.Fatal("the keypress kept the selection")
-	}
-	if m.copySeq != "" {
-		t.Fatal("the keypress copied without a release")
 	}
 }
 
@@ -448,12 +432,11 @@ func TestCopyTruncatesAtTheCap(t *testing.T) {
 	x := paneX(m)
 	m.handleMouse(mouse(x, 0, false))
 	m.handleMouse(motion(x, 19))
-	m.handleMouse(release(x, 19))
+	payload := mouseCopy(t, m, release(x, 19))
 
-	if m.copySeq == "" {
+	if payload == "" {
 		t.Fatal("the drag did not copy")
 	}
-	payload := decodeCopy(t, m.copySeq)
 	if !strings.HasSuffix(payload, "\n") {
 		t.Fatal("the payload is missing its trailing newline")
 	}
@@ -479,11 +462,11 @@ func TestCopyKeepsEmptyLines(t *testing.T) {
 	x := paneX(m)
 	m.handleMouse(mouse(x, 0, false))
 	m.handleMouse(motion(x, 2))
-	m.handleMouse(release(x, 2))
+	payload := mouseCopy(t, m, release(x, 2))
 
 	want := "one\n\nthree\n"
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 }
 
@@ -497,9 +480,7 @@ func TestCopyStripsANSIFromThePayload(t *testing.T) {
 
 	x := paneX(m)
 	m.handleMouse(mouse(x, 0, false))
-	m.handleMouse(release(x, 0))
-
-	got := decodeCopy(t, m.copySeq)
+	got := mouseCopy(t, m, release(x, 0))
 	if got != "cyan text\n" {
 		t.Fatalf("payload = %q, want %q", got, "cyan text\n")
 	}
@@ -539,12 +520,12 @@ func TestLivePaneDragFreezesOnFirstMotion(t *testing.T) {
 		t.Fatalf("the frame moved on freeze: %d -> %d", yOff, m.vp.YOffset())
 	}
 
-	m.handleMouse(release(x, 5))
+	payload := mouseCopy(t, m, release(x, 5))
 
 	lo := yOff + 2
 	hi := yOff + 5
-	if got, want := decodeCopy(t, m.copySeq), strings.Join(m.visibleRaw[lo:hi+1], "\n")+"\n"; got != want {
-		t.Fatalf("payload = %q, want %q", got, want)
+	if want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"; payload != want {
+		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 	if m.copyHint != "copied 4 lines" {
 		t.Fatalf("hint = %q, want copied 4 lines", m.copyHint)
@@ -603,8 +584,7 @@ func TestCKeyCopiesTheCursorLine(t *testing.T) {
 	press(m, "right", "up", "up")
 	want := m.visibleRaw[m.paneCursorRow()] + "\n"
 
-	press(m, "c")
-	if got := decodeCopy(t, m.copySeq); got != want {
+	if got := clipboardText(t, press(m, "c")); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
 	}
 	if m.copyHint != "copied 1 line" {
@@ -622,8 +602,7 @@ func TestCKeyCopiesTheSelection(t *testing.T) {
 	}
 	want := strings.Join(m.visibleRaw[lo:hi+1], "\n") + "\n"
 
-	press(m, "c")
-	if got := decodeCopy(t, m.copySeq); got != want {
+	if got := clipboardText(t, press(m, "c")); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
 	}
 	if m.copyHint != "copied 3 lines" {

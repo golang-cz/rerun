@@ -407,6 +407,23 @@ func TestEventsModalCopyWithOnlyAnError(t *testing.T) {
 	}
 }
 
+// c in the fs events modal sends the batches' text to the clipboard as one payload.
+func TestEventsCopySendsItsTextToTheClipboard(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.width, m.height = 80, 24
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.now = spawnClock
+	press(m, "e")
+
+	text, _ := m.eventsCopyText()
+	if text == "" {
+		t.Fatal("setup: the modal has nothing to copy")
+	}
+	if got := clipboardText(t, press(m, "c")); got != text {
+		t.Fatalf("clipboard = %q, want %q", got, text)
+	}
+}
+
 // A service whose current state is exited gets a ✗ after its name.
 func TestEventsModalPerFileServicesMarkExited(t *testing.T) {
 	m := newTestModel(t, watchedTarget("web", "./"), watchedTarget("api", "./"))

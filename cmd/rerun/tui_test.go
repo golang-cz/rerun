@@ -118,10 +118,15 @@ func keyMsg(s string) tea.Msg {
 	return tea.PasteMsg{Content: s}
 }
 
-func press(m *tuiModel, keys ...string) {
+// press sends keys and returns the last command they produced, if any.
+func press(m *tuiModel, keys ...string) tea.Cmd {
+	var cmd tea.Cmd
 	for _, k := range keys {
-		m.Update(keyMsg(k))
+		if _, c := m.Update(keyMsg(k)); c != nil {
+			cmd = c
+		}
 	}
+	return cmd
 }
 
 func mouse(x, y int, shift bool) tea.MouseMsg {
@@ -136,10 +141,11 @@ func motion(x, y int) tea.MouseMsg {
 	return tea.MouseMotionMsg{X: x, Y: y}
 }
 
-// click is a press and a release on the same cell, with no motion between.
-func click(m *tuiModel, x, y int) {
+// click is a press and a release on the same cell, with no motion between. It returns the release's command.
+func click(m *tuiModel, x, y int) tea.Cmd {
 	m.handleMouse(mouse(x, y, false))
-	m.handleMouse(release(x, y))
+	_, cmd := m.handleMouse(release(x, y))
+	return cmd
 }
 
 // slowClick expires the double-click window, so the next click reads as a

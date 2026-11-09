@@ -340,11 +340,11 @@ func TestCopyUnderFilterMapsToKeptRawLines(t *testing.T) {
 	anchor := 0
 	m.selAnchor = &anchor
 	m.selEnd = 1
-	m.copySelection()
+	copied := clipboardText(t, m.copySelection())
 
 	want := "keep-0\nkeep-1\n"
-	if got := decodeCopy(t, m.copySeq); got != want {
-		t.Fatalf("filtered copy = %q, want %q", got, want)
+	if copied != want {
+		t.Fatalf("filtered copy = %q, want %q", copied, want)
 	}
 	if m.copyHint != "copied 2 lines" {
 		t.Fatalf("hint = %q, want copied 2 lines", m.copyHint)

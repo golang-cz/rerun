@@ -1,5 +1,7 @@
 package main
 
+import tea "charm.land/bubbletea/v2"
+
 // markW is the pane cells the (+) and (−) cell takes: a space, then the glyph.
 const markW = 4
 
@@ -450,23 +452,21 @@ func (m *tuiModel) pressRow() int {
 // click toggles an expandable line — or collapses it on a row of its
 // expansion — and any other release copies the pressed line, as a click
 // always did.
-func (m *tuiModel) releasePane(x, y int) {
+func (m *tuiModel) releasePane(x, y int) tea.Cmd {
 	if m.selAnchor == nil {
-		return
+		return nil
 	}
 	if m.selMoved {
-		m.copySelection()
-		return
+		return m.copySelection()
 	}
 	if x != m.selCellX || y != m.selCellY {
 		// A release off the press cell is no click; it still copies the line.
-		m.copySelection()
-		return
+		return m.copySelection()
 	}
 	row := m.pressRow()
 	if row < 0 {
 		m.clearSelection()
-		return
+		return nil
 	}
 	r := m.rowInfo(row)
 	// Table mode shows the line as columns, so its click copies, but the (+) cell still toggles.
@@ -474,10 +474,10 @@ func (m *tuiModel) releasePane(x, y int) {
 	if r.sub >= 0 || (m.selExp && (!m.tableHeaderOn() || onMarker)) {
 		m.clearSelection()
 		m.toggleExpand(r.raw)
-		return
+		return nil
 	}
 	// A line that cannot expand keeps the old click: it copies.
-	m.copySelection()
+	return m.copySelection()
 }
 
 func inSpan(span [2]int, x int) bool {

@@ -180,11 +180,11 @@ func TestClickingTheMarkerTogglesInTableMode(t *testing.T) {
 	}
 	x, y := m.width-2, m.titleHeight()
 
-	click(m, x, y)
+	copied := clipboardText(t, click(m, x, y))
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatalf("clicking (+) in table mode did not expand the line:\n%s", plainPane(m))
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("clicking (+) in table mode copied the line")
 	}
 	click(m, x, y)
@@ -201,14 +201,14 @@ func TestClickTogglesAJSONLine(t *testing.T) {
 	m.frame()
 	x, y := paneX(m), m.titleHeight()
 
-	click(m, x, y)
+	copied := clipboardText(t, click(m, x, y))
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatalf("the click did not expand the line:\n%s", plainPane(m))
 	}
 	if !m.paneFocus {
 		t.Fatal("the click did not focus the pane")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("the click copied the line it expanded")
 	}
 
@@ -244,13 +244,13 @@ func TestOneCellDragSelectsAndNeverToggles(t *testing.T) {
 
 	m.handleMouse(mouse(x, y, false))
 	m.handleMouse(motion(x+1, y))
-	m.handleMouse(release(x+1, y))
+	copied := mouseCopy(t, m, release(x+1, y))
 
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the one-cell drag expanded the line")
 	}
-	if got := decodeCopy(t, m.copySeq); got != m.visibleRaw[0]+"\n" {
-		t.Fatalf("payload = %q, want the dragged line", got)
+	if copied != m.visibleRaw[0]+"\n" {
+		t.Fatalf("payload = %q, want the dragged line", copied)
 	}
 }
 
@@ -538,7 +538,7 @@ func TestReleaseAfterThePressedLineLeftThePane(t *testing.T) {
 	m.handleMouse(mouse(x, y, false))
 	m.solo = 1
 	m.mergedDirty = true
-	m.handleMouse(release(x, y))
+	copied := mouseCopy(t, m, release(x, y))
 
 	if m.selAnchor != nil {
 		t.Fatal("the release kept a press whose line is gone")
@@ -546,7 +546,7 @@ func TestReleaseAfterThePressedLineLeftThePane(t *testing.T) {
 	if len(m.expanded) != 0 {
 		t.Fatal("the release toggled a line that replaced the pressed one")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("the release copied a line that replaced the pressed one")
 	}
 }
@@ -563,11 +563,11 @@ func TestBlurClearsAnArmedPress(t *testing.T) {
 	if m.selAnchor != nil {
 		t.Fatal("the blur kept the press armed")
 	}
-	m.handleMouse(release(x, y))
+	copied := mouseCopy(t, m, release(x, y))
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the late release toggled the line")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("the late release copied the line")
 	}
 }
@@ -596,12 +596,12 @@ func TestMovedWheelClearsThePress(t *testing.T) {
 
 	m.handleMouse(mouse(x, y, false))
 	m.handleMouse(wheelUp(x, y))
-	m.handleMouse(release(x, y))
+	copied := mouseCopy(t, m, release(x, y))
 
 	if m.selAnchor != nil {
 		t.Fatal("the scrolled wheel kept the press armed")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("the release copied after a scroll")
 	}
 	if m.expanded[m.visibleSeq[row]] {
@@ -618,13 +618,13 @@ func TestReleaseOnADifferentCellCopies(t *testing.T) {
 	x, y := paneX(m), m.titleHeight()
 
 	m.handleMouse(mouse(x, y, false))
-	m.handleMouse(release(x+1, y))
+	copied := mouseCopy(t, m, release(x+1, y))
 
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the off-cell release expanded the line")
 	}
-	if got := decodeCopy(t, m.copySeq); got != m.visibleRaw[0]+"\n" {
-		t.Fatalf("payload = %q, want the pressed line", got)
+	if copied != m.visibleRaw[0]+"\n" {
+		t.Fatalf("payload = %q, want the pressed line", copied)
 	}
 }
 
@@ -637,12 +637,12 @@ func TestSameCellMotionStaysAClick(t *testing.T) {
 
 	m.handleMouse(mouse(x, y, false))
 	m.handleMouse(motion(x, y))
-	m.handleMouse(release(x, y))
+	copied := mouseCopy(t, m, release(x, y))
 
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatal("a same-cell motion turned the click into a drag")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("a same-cell motion made the release copy")
 	}
 }

@@ -316,7 +316,7 @@ func (m *tuiModel) handleEventsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.eventsModal.copiedN = n
 			m.eventsModal.copiedUntil = m.now.Add(2 * time.Second)
 			m.fitEvents()
-			return m, tea.SetClipboard(text)
+			return m, copyToClipboard(text)
 		}
 	}
 	m.fitEvents()

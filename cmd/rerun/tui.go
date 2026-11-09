@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"os"
 	"slices"
@@ -233,10 +232,8 @@ type tuiModel struct {
 	// keepNoticeUntil holds the saved-columns notice against a config reload notice.
 	keepNoticeUntil time.Time
 
-	// copySeq is the last copy's OSC 52 sequence and copyHint its message.
-	// Both render only while m.now is before copyUntil, which is kept apart
-	// from hintUntil so the m/s hint cannot resurrect a stale copy.
-	copySeq   string
+	// copyHint is the last copy's message. It renders only while m.now is before
+	// copyUntil, which is kept apart from hintUntil so the m/s hint cannot resurrect a stale copy.
 	copyHint  string
 	copyUntil time.Time
 
@@ -1538,10 +1535,9 @@ func osc8(url, text string) string {
 	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
 }
 
-// osc52 wraps a payload in the OSC 52 clipboard sequence. Terminals that
-// support it copy remotely, so it works over ssh; others ignore it.
-func osc52(payload string) string {
-	return "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(payload)) + "\x1b\\"
+// copyToClipboard is the one path every copy takes: the terminal's OSC 52 clipboard.
+func copyToClipboard(payload string) tea.Cmd {
+	return tea.SetClipboard(payload)
 }
 
 // copyCap bounds one clipboard payload, so a huge selection cannot stall the

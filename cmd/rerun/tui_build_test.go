@@ -394,11 +394,11 @@ func TestClickOnARuleLineTogglesIt(t *testing.T) {
 	m.frame()
 	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
 
-	click(m, paneX(m), y)
+	copied := clipboardText(t, click(m, paneX(m), y))
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the rule line did not open it")
 	}
-	if m.copySeq != "" {
+	if copied != "" {
 		t.Fatal("the click copied the rule it opened")
 	}
 

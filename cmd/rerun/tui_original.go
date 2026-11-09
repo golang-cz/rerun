@@ -204,7 +204,7 @@ func (m *tuiModel) handleOriginalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		o.copiedN = len(o.lines) // the source lines, not the indented rows
 		o.copiedUntil = m.now.Add(2 * time.Second)
 		m.fitOriginal()
-		return m, tea.SetClipboard(strings.Join(o.text(), "\n"))
+		return m, copyToClipboard(strings.Join(o.text(), "\n"))
 	}
 	m.fitOriginal()
 	return m, nil

@@ -957,7 +957,7 @@ func (m *tuiModel) rightLines(w int) []string {
 		case m.copyHintActive():
 			// The OSC 52 sequence rides the hint line, so the renderer writes it
 			// once and the terminal executes the copy.
-			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip))) + m.copySeq
+			out[last] = lipgloss.NewStyle().Width(w).Render(m.styles.hint.Render(m.bottomText(w, m.copyHint, chip)))
 		case m.noticeLive():
 			// A notice outranks the marker: a hidden error reads as no error.
 			// The notice names the mute itself, so the state chip waits.
