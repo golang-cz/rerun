@@ -169,6 +169,29 @@ func TestClickingTheMarkerExpandsAndCollapses(t *testing.T) {
 	}
 }
 
+// The (+) cell toggles in table mode too; only the rest of a table line copies.
+func TestClickingTheMarkerTogglesInTableMode(t *testing.T) {
+	m := newTestModel(t, tableTarget("web"))
+	addLines(m, "web", jsonGet)
+	m.frame()
+	if !m.tableHeaderOn() {
+		t.Fatal("the target did not start as a table")
+	}
+	x, y := m.width-2, m.titleHeight()
+
+	click(m, x, y)
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatalf("clicking (+) in table mode did not expand the line:\n%s", plainPane(m))
+	}
+	if m.copySeq != "" {
+		t.Fatal("clicking (+) in table mode copied the line")
+	}
+	click(m, x, y)
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("clicking (−) in table mode did not collapse the line")
+	}
+}
+
 // A click — press and release on one cell, no motion — on a line that can
 // expand toggles it like →/enter and focuses the pane; it never copies.
 func TestClickTogglesAJSONLine(t *testing.T) {

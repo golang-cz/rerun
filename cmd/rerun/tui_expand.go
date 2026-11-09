@@ -389,8 +389,9 @@ func (m *tuiModel) releasePane(x, y int) {
 		return
 	}
 	r := m.rowInfo(row)
-	// Table mode shows the line as columns, so its click keeps copying.
-	if r.sub >= 0 || (m.selExp && !m.tableHeaderOn()) {
+	// Table mode shows the line as columns, so its click copies, but the (+) cell still toggles.
+	onMarker := r.obj && x-m.layout.leftW-1 >= m.vp.Width()-markW
+	if r.sub >= 0 || (m.selExp && (!m.tableHeaderOn() || onMarker)) {
 		m.clearSelection()
 		m.toggleExpand(r.raw)
 		return
