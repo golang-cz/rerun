@@ -663,7 +663,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		}
 	}
 	indent := r.indent()
-	nameW := max(0, nameWidth(leftW)-indent)
+	nameW := max(0, m.nameWidth(leftW)-indent)
 	glyph := "▾"
 	switch {
 	case r.collapsed:
@@ -677,7 +677,9 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		{text: " "},
 		{text: padRight(ellipsizeMiddle(r.label, nameW), nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
-		{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)},
+	}
+	if m.leftMode == leftFull {
+		segs = append(segs, seg{text: padRight(fmt.Sprintf("%d/%d", running, len(r.members)), statusW)})
 	}
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }

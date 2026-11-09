@@ -18,7 +18,7 @@ func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m.frame()
 
 	leftW, _ := m.layoutWidths()
-	nameW := nameWidth(leftW)
+	nameW := m.nameWidth(leftW)
 	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y, leftW))) }
 
 	if got := string(cells(0)[2+nameW : 4+nameW]); got != "  " {

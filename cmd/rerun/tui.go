@@ -199,7 +199,9 @@ type tuiModel struct {
 	// paneFocus puts the arrow keys on the log pane: up/down scroll it,
 	// left/right pan its columns. False means the left list owns them.
 	paneFocus bool
-	paneCol   int // horizontal column offset of the pane
+	// leftMode is the left column's width, cycled by b.
+	leftMode leftMode
+	paneCol  int // horizontal column offset of the pane
 
 	// feed is the change batches the fs events modal lists, oldest first.
 	feed    []feedBatch

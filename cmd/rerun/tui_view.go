@@ -160,8 +160,10 @@ func (m *tuiModel) frame() string {
 
 	var b strings.Builder
 	for y := 0; y < m.height; y++ {
-		b.WriteString(m.leftLine(y, leftW))
-		b.WriteString(divider.Render(glyph))
+		if m.listShown() {
+			b.WriteString(m.leftLine(y, leftW))
+			b.WriteString(divider.Render(glyph))
+		}
 		b.WriteString(right[y])
 		if y < m.height-1 {
 			b.WriteByte('\n')
@@ -442,6 +444,10 @@ func (m *tuiModel) pickLines(innerW int) []string {
 
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
+	if m.leftMode == leftHidden {
+		// -1 puts the pane's first cell in column 0, with no divider in front of it.
+		return -1, max(1, m.width)
+	}
 	nameW := 1
 	for _, r := range m.listRows() {
 		w := r.indent()
@@ -456,10 +462,10 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 		nameW = max(nameW, displayWidth(groupLabel(ungrouped)))
 	}
 	nameW = min(nameW, maxNameW)
-	leftW = nameW + statusW + 4
+	leftW = nameW + m.nameMargin()
 	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
-	// the version; a narrow one shrinks to the names, down to 16.
-	if m.width < narrowW {
+	// the version; a narrow one shrinks to the names, down to 16. Names-only keeps 16 at any width.
+	if m.leftMode == leftNames || m.width < narrowW {
 		leftW = max(16, leftW)
 	} else {
 		leftW = max(24, leftW)
@@ -473,8 +479,36 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	return leftW, max(1, m.width-leftW-1)
 }
 
+// leftMode is the left column's width: full, names only, or hidden for a full-width log.
+type leftMode uint8
+
+const (
+	leftFull leftMode = iota
+	leftNames
+	leftHidden
+)
+
+// cycleLeft is `b`: full, then names, then hidden, then full again.
+func (m *tuiModel) cycleLeft() {
+	m.leftMode = (m.leftMode + 1) % 3
+	// Hidden, the list cannot show its cursor, so the keys go to the pane.
+	if !m.listShown() {
+		m.paneFocus = true
+	}
+}
+
+func (m *tuiModel) listShown() bool { return m.leftMode != leftHidden }
+
+// nameMargin is the cells a row keeps beside its name: glyph, space, marker, and the status cell when shown.
+func (m *tuiModel) nameMargin() int {
+	if m.leftMode == leftFull {
+		return statusW + 4
+	}
+	return 4
+}
+
 // nameWidth is the name cell's width for a given left column width.
-func nameWidth(leftW int) int { return max(0, leftW-statusW-4) }
+func (m *tuiModel) nameWidth(leftW int) int { return max(0, leftW-m.nameMargin()) }
 
 // marker is the two cells after a name: `*` when its columns await ctrl+s, else blank,
 // so the status never shifts.
@@ -712,7 +746,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
 
 	indent := r.indent()
-	nameW := max(0, nameWidth(leftW)-indent)
+	nameW := max(0, m.nameWidth(leftW)-indent)
 	var segs []seg
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
@@ -722,8 +756,10 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		seg{text: " "},
 		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.URL},
 		seg{text: marker(m.targetDirty(t))},
-		seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)},
 	)
+	if m.leftMode == leftFull {
+		segs = append(segs, seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)})
+	}
 	style := m.rowStyle(row, r)
 	if t.flashing(m.now) {
 		style = style.Reverse(true)
@@ -917,6 +953,9 @@ func (m *tuiModel) rightLines(w int) []string {
 		case !m.follow:
 			// A frozen pane with nothing else to say still names the state.
 			out[last] = m.bottomLine(w, "", chip)
+		case !m.listShown():
+			// The hidden list has no left column to show its cue, so the bottom line does.
+			out[last] = m.bottomLine(w, "", chip)
 		}
 	}
 
@@ -987,10 +1026,14 @@ func (m *tuiModel) markerLine(w int, marker string, chip string) string {
 // stateChip is the bottom line's frozen suffix. Scope needs no chip: the list
 // selection already shows it.
 func (m *tuiModel) stateChip() string {
-	if m.follow {
-		return ""
+	var parts []string
+	if !m.follow {
+		parts = append(parts, "scrollback · esc live")
 	}
-	return "scrollback · esc live"
+	if !m.listShown() {
+		parts = append(parts, "b list")
+	}
+	return strings.Join(parts, " · ")
 }
 
 // copyHintActive reports whether the copy feedback still owns the bottom line.
@@ -1200,7 +1243,7 @@ var helpKeys = [][2]string{
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r", "mute the stream (group: its targets) · r reboots"},
 	{"e", "fs events (last minute)"},
-	{"esc [ ]", "list: esc backs out · [ ] ⇧↑⇧↓ jump groups"},
+	{"esc [ ] b", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b list width"},
 	{"ctrl+k", "find a target or group; enter jumps or runs a make target"},
 	{"o", "open the target's url"},
 	{"/ v ctrl+f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},

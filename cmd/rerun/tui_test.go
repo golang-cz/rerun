@@ -482,7 +482,7 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	leftW, _ := m.layoutWidths()
 
 	wantName := len("backoffice-webapp")
-	if got := nameWidth(leftW); got != wantName {
+	if got := m.nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
 	if leftW != wantName+15 {

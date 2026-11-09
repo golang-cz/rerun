@@ -214,6 +214,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.extendSelection(1)
 		}
 
+	case "b":
+		m.cycleLeft()
+
 	case "c":
 		m.copyKey()
 
@@ -228,7 +231,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case "esc", "ctrl+[":
 		switch {
-		case m.paneFocus:
+		case m.paneFocus && m.listShown():
 			m.paneFocus = false
 		default:
 			if !m.follow {
@@ -262,7 +265,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.paneCol > 0 {
 				m.paneCol--
 				m.vpDirty = true
-			} else {
+			} else if m.listShown() {
 				m.paneFocus = false
 			}
 		} else if m.listFocused() {
