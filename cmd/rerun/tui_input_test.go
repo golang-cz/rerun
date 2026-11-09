@@ -204,7 +204,7 @@ func TestCtrlHOnEmptyInputRemovesLastChip(t *testing.T) {
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	press(m, "v", "ctrl+h")
+	press(m, "/", "ctrl+h")
 	if len(m.pills) != 1 || m.pills[0].raw != "alpha" || m.inputMode != inputQuery {
 		t.Fatalf("pills = %+v mode = %d after ctrl+h, want alpha kept and the input open", m.pills, m.inputMode)
 	}

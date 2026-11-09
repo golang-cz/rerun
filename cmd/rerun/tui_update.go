@@ -123,8 +123,8 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// ctrl+k opens the finder from the list, not over the bar, help or quit confirm.
-	if msg.String() == "ctrl+k" && !m.finder.open && !m.eventsModal.open && !m.original.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+	// ctrl+k and g open the finder from the list, not over the bar, help or quit confirm.
+	if (msg.String() == "ctrl+k" || msg.String() == "g") && !m.finder.open && !m.eventsModal.open && !m.original.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
 		m.finder = finderState{open: true}
 		return m, nil
 	}
@@ -204,7 +204,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.helpAll = false
 		m.helpTop = 0
 
-	case "/", "v", "ctrl+f":
+	case "/", "ctrl+f":
 		m.openBar()
 
 	case "ctrl+g":

@@ -34,7 +34,7 @@ live tail; `esc` goes back to the live tail first, then backs out of the list), 
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
-`/`, `v` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
+`/` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
 always shows them as a table. A JSON output line's top-level `url`,
 `addr`, `listen`, or `port` updates the row's url live.
@@ -378,7 +378,7 @@ groups:
 - `targets:` fails the load when a listed target is gone from the Makefile.
 - Each target is a row that starts manually and does not watch files.
 - An import's `start:` overrides that default: `start: auto` brings every rule up at session start, and a target's or group's own `start:` still wins.
-- Enter in Ctrl+K runs a target. Enter on a running one focuses it. `ctrl+k` opens the go-to finder, whose input reads `go to target or run…`.
+- Enter in Ctrl+K runs a target. Enter on a running one focuses it. `ctrl+k` or `g` opens the go-to finder, whose input reads `go to target or run…`.
 - A `.mk` file runs as `make -f <file>`.
 - A repo with only a Makefile opens rerun with the finder open.
 

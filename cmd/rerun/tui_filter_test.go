@@ -249,7 +249,7 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
 	m.frame()
 
-	press(m, "v")
+	press(m, "/")
 	if m.inputMode != inputQuery {
 		t.Fatalf("inputMode = %d, want inputQuery", m.inputMode)
 	}
@@ -269,7 +269,7 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	if !m.filterOn() {
 		t.Fatal("esc in the list cleared the filter")
 	}
-	press(m, "v", "backspace", "esc")
+	press(m, "/", "backspace", "esc")
 	if m.filterOn() || m.paneSelDirty {
 		t.Fatalf("backspace on the empty input left the filter: pills=%d dirty=%v", len(m.pills), m.paneSelDirty)
 	}
@@ -283,7 +283,7 @@ func TestFilterZeroMatchHint(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-1")
 	m.frame()
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "nomatch")
 	press(m, "enter")
 	m.frame()
@@ -309,7 +309,7 @@ func TestYQFilterKeepsTruthyJSONOnly(t *testing.T) {
 	)
 	m.frame()
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, ".response.status >= 400")
 	press(m, "enter")
 	m.frame()
@@ -332,7 +332,7 @@ func TestCopyUnderFilterMapsToKeptRawLines(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
 	m.frame()
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "keep")
 	press(m, "enter")
 	m.frame()
@@ -357,7 +357,7 @@ func TestSoloMuteRebuildsTheFilteredSubset(t *testing.T) {
 	addLines(m, "web", "keep-web", "drop-web")
 	addLines(m, "api", "keep-api", "drop-api")
 	m.frame()
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "keep")
 	press(m, "enter")
 	m.frame()
@@ -386,7 +386,7 @@ func TestNewLinesCollectWhileFiltered(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "line")
 	press(m, "enter")
 	m.frame()
@@ -460,7 +460,7 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 	addLines(m, "web", "keep-0", "drop-0", "keep-1", "drop-1", "keep-2")
 	m.frame()
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "keep")
 	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "drop-0") {
@@ -471,7 +471,7 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 	press(m, "enter")
 
 	// Reopen, swap the query, and check the rendered body follows.
-	press(m, "v")
+	press(m, "/")
 	for range len("keep") {
 		press(m, "backspace")
 	}
@@ -490,11 +490,11 @@ func TestFilterEscKeepsTypedChip(t *testing.T) {
 	addLines(m, "web", "keep-0", "drop-0", "keep-1")
 	m.frame()
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "keep")
 	press(m, "enter")
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "junk")
 	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {
@@ -526,7 +526,7 @@ func TestFilterShrinkClampsFrozenYOffset(t *testing.T) {
 		t.Fatalf("YOffset = %d, want 15 before the shrink", m.vp.YOffset())
 	}
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, "aa")
 	m.frame()
 
@@ -568,7 +568,7 @@ func TestBadYQExpressionShowsErrorAndKeepsPane(t *testing.T) {
 	addLines(m, "web", `{"a":1}`, `not json`, `{"a":2}`)
 	m.frame()
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, ".a >")
 	m.frame()
 	if m.inputMode != inputQuery {

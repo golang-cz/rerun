@@ -73,7 +73,7 @@ stream, double-click to stop/start like `space`, and a click on a schema header 
 
 More keys: `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
-`/`, `v` or `ctrl+f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
+`/` or `ctrl+f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
 (`!=`, `>`, `>=`, `<`, `<=`, `~` contains, `~/re/` regex, `=*` exists, `!=*` missing; `level=error|fatal` is any-of),
 `.expr` raw yq. A field name is a yq path without the leading dot; a scope column name resolves to its expression.

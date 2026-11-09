@@ -61,7 +61,7 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 		t.Fatal("a yq filter hid the run rule")
 	}
 
-	press(m, "v", "backspace", "backspace", "esc")
+	press(m, "/", "backspace", "backspace", "esc")
 	press(m, "ctrl+f")
 	typeString(m, "started")
 	press(m, "enter")

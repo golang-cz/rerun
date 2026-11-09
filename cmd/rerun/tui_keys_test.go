@@ -30,7 +30,7 @@ func TestSlashOpensTheQueryBar(t *testing.T) {
 	}
 	press(m, "esc")
 
-	press(m, "v")
+	press(m, "/")
 	if m.inputMode != inputQuery {
 		t.Fatalf("v inputMode = %d, want the query bar", m.inputMode)
 	}
@@ -71,8 +71,8 @@ func TestHelpNamesFindAndFilter(t *testing.T) {
 		t.Errorf("short help should name ctrl+f and the pills:\n%s", view)
 	}
 	press(m, "?")
-	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ v") {
-		t.Errorf("full help should name ctrl+f and / v:\n%s", view)
+	if view := m.View().Content; !strings.Contains(view, "ctrl+f") || !strings.Contains(view, "/ ctrl+f") {
+		t.Errorf("full help should name / and ctrl+f:\n%s", view)
 	}
 }
 
@@ -171,5 +171,33 @@ func TestHelpNamesThePlayGlyph(t *testing.T) {
 	press(m, "?")
 	if view := m.View().Content; !strings.Contains(view, "▶ starts its auto targets") {
 		t.Errorf("full help should explain the play glyph:\n%s", view)
+	}
+}
+
+// v is no longer a query-bar key: only / and ctrl+f open it.
+func TestVDoesNotOpenTheQueryBar(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	press(m, "v")
+	if m.inputMode != inputNone {
+		t.Fatal("v opened the query bar")
+	}
+}
+
+// g opens go to like ctrl+k, but inside the query bar it types.
+func TestGOpensGoToOutsideTextInputs(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	press(m, "g")
+	if !m.finder.open {
+		t.Fatal("g did not open go to")
+	}
+	press(m, "esc")
+
+	press(m, "/")
+	press(m, "g")
+	if m.finder.open {
+		t.Fatal("g opened go to from the query bar")
+	}
+	if m.input != "g" {
+		t.Fatalf("query input = %q, want g typed", m.input)
 	}
 }

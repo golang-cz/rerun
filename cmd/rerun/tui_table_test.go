@@ -61,7 +61,7 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	}
 	press(m, "esc")
 
-	press(m, "v")
+	press(m, "/")
 	typeString(m, ".request.method")
 	press(m, "enter")
 	if m.paneLen() != 1 {

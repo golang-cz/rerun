@@ -462,7 +462,7 @@ func TestFinderIsNamedGoTo(t *testing.T) {
 	}
 	found := false
 	for _, kv := range helpKeys {
-		if kv[0] == "ctrl+k" && kv[1] == "go to a target, or run a make target" {
+		if kv[0] == "ctrl+k g" && kv[1] == "go to a target, or run a make target" {
 			found = true
 		}
 	}
