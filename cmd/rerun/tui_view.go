@@ -53,6 +53,7 @@ type tuiStyles struct {
 	paneCursor   lipgloss.Style
 	chip         lipgloss.Style
 	chipFind     lipgloss.Style
+	sel          lipgloss.Style
 }
 
 func newTUIStyles(isDark bool) tuiStyles {
@@ -62,6 +63,7 @@ func newTUIStyles(isDark bool) tuiStyles {
 		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		dividerFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 		cursor:       lipgloss.NewStyle().Background(lightDark(lipgloss.Color("252"), lipgloss.Color("237"))),
+		sel:          lipgloss.NewStyle().Reverse(true),
 		hover:        lipgloss.NewStyle().Background(lightDark(lipgloss.Color("254"), lipgloss.Color("235"))),
 		muted:        lipgloss.NewStyle().Faint(true),
 		solo:         lipgloss.NewStyle().Background(lightDark(lipgloss.Color("253"), lipgloss.Color("234"))),
@@ -102,8 +104,8 @@ type tuiLayout struct {
 	// filter bar, and table column names on the column header row.
 	chips []chipHit
 	heads []cellSpan
-	// caretW is how many cells the open input's visible text takes; cursorX and
-	// cursorY are the frame cell its caret sits on, drawn as the terminal cursor.
+	// caretW is how many cells of the open input's visible text run before its
+	// cursor; cursorX and cursorY are the frame cell that cursor sits on.
 	caretW  int
 	cursorX int
 	cursorY int
@@ -366,9 +368,13 @@ func (m *tuiModel) inputBoxView() string {
 	if m.input == "" {
 		head += " " + m.styles.hint.Render(m.inputPlaceholder())
 	} else {
-		tail := finderTail(m.input, max(0, innerW-2-displayWidth(count)-2))
-		head += tail
-		m.layout.caretW = displayWidth(tail)
+		text, caret := m.inputWindow(max(0, innerW-2-displayWidth(count)-2))
+		if m.inputSel {
+			head += m.styles.sel.Render(text)
+		} else {
+			head += text
+		}
+		m.layout.caretW = caret
 	}
 	// Reserve the count's cells on a narrow pane: the query trims first, the count stays whole.
 	countW := displayWidth(count)

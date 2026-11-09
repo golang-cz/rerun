@@ -410,14 +410,19 @@ func (m *tuiModel) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	case m.finder.open:
 		m.finderPaste(msg.Content)
 	case m.inputMode != inputNone:
-		m.inputPaste(msg.Content)
+		m.inputInsert(msg.Content)
 	}
 	return m, nil
 }
 
 // handleInputKey routes keys into the bar's open input; only Ctrl-C escapes it.
 func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	// String() prefers Text, which drops the alt modifier that select-all rides on.
+	if msg.Mod.Contains(tea.ModAlt) && msg.Text != "" {
+		key = msg.Keystroke()
+	}
+	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "ctrl+[":
@@ -427,9 +432,11 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.leaveInput()
 	case "ctrl+g":
+		m.inputSel = false
 		m.searchJump(1)
 	// Mirror ctrl+g: the enhanced decoder keeps the shift distinct.
 	case "ctrl+shift+g":
+		m.inputSel = false
 		m.searchJump(-1)
 	case "enter", "ctrl+m":
 		if m.inputMode == inputFilter && m.filterErr != "" {
@@ -441,38 +448,47 @@ func (m *tuiModel) handleInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if chips := m.barChips(); m.input == "" && len(chips) > 0 {
 			m.inputMode = inputNone
 			m.barSel = len(chips) - 1
+			break
 		}
+		m.inputMoveRune(-1)
+	case "right":
+		m.inputMoveRune(1)
+	case "alt+left", "alt+b":
+		m.inputMoveWord(-1)
+	case "alt+right", "alt+f":
+		m.inputMoveWord(1)
+	case "home", "ctrl+a":
+		m.inputMoveTo(0)
+	case "end", "ctrl+e":
+		m.inputMoveTo(len([]rune(m.input)))
+	case "alt+i":
+		m.inputSelectAll()
 	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
 	case "backspace", "ctrl+h":
-		if m.input != "" {
-			r := []rune(m.input)
-			m.input = string(r[:len(r)-1])
-			m.inputChanged()
+		if m.inputSel || m.input != "" {
+			m.inputDeleteBefore()
 			break
 		}
 		if chips := m.barChips(); len(chips) > 0 {
 			m.removeBarChip(chips[len(chips)-1])
 		}
+	case "delete", "ctrl+d":
+		m.inputDeleteAfter()
+	case "ctrl+w", "alt+backspace":
+		m.inputDeleteWordBefore()
+	case "ctrl+u":
+		m.inputDeleteToStart()
 	default:
 		if msg.Text != "" {
-			m.inputPaste(msg.Text)
+			m.inputInsert(msg.Text)
 			break
 		}
 		// v1 handed an alt combo over as key runes, so a printable one typed its letter.
 		if msg.Mod.Contains(tea.ModAlt) && unicode.IsPrint(msg.Code) {
-			m.inputPaste(string(msg.Code))
+			m.inputInsert(string(msg.Code))
 		}
 	}
 	return m, nil
-}
-
-// inputPaste types pasted text into the bar, exactly as the keys would.
-func (m *tuiModel) inputPaste(s string) {
-	if s == "" {
-		return
-	}
-	m.input += s
-	m.inputChanged()
 }
 
 // openInput shows the bar's input; find starts from its query, a text filter empty.
@@ -480,11 +496,14 @@ func (m *tuiModel) openInput(mode int) {
 	m.inputMode = mode
 	m.filterErr = ""
 	m.draft = nil
+	m.inputSel = false
 	if mode == inputFilter {
 		m.input = ""
+		m.inputCursor = 0
 		return
 	}
 	m.input = m.search
+	m.inputCursor = len([]rune(m.input))
 }
 
 // inputChanged previews the typed text live; a yq query that does not parse is left out.
@@ -513,6 +532,8 @@ func (m *tuiModel) leaveInput() {
 	}
 	m.inputMode = inputNone
 	m.input = ""
+	m.inputCursor = 0
+	m.inputSel = false
 	m.draft = nil
 	m.filterErr = ""
 	m.blurBar()

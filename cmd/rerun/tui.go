@@ -319,6 +319,9 @@ type tuiModel struct {
 	// inputMode is the bar's open input and input its text; an open input owns every key.
 	inputMode int
 	input     string
+	// inputCursor is the text cursor as a rune index into input; inputSel selects the whole input.
+	inputCursor int
+	inputSel    bool
 
 	// search is the query; while inputSearch is open it tracks input live.
 	// searchMatches holds the pane rows it hits, searchRow the current hit.
