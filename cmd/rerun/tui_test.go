@@ -429,7 +429,7 @@ func TestSoloPaneDropsPrefix(t *testing.T) {
 func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "a-very-long-command-that-will-not-fit"
-	web.URL = "http://localhost:5173/very/long/path"
+	web.Open = "http://localhost:5173/very/long/path"
 	m := newTestModel(t, web, target("api"))
 	m.width = 30
 	m.cursor = 0
@@ -680,7 +680,7 @@ func TestHelpOverlayToggles(t *testing.T) {
 	}
 	press(m, "?")
 	view := m.View().Content
-	for _, want := range []string{"mute", "scope", "open the target's url"} {
+	for _, want := range []string{"mute", "scope", "open the target's open:"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("full help overlay is missing %q", want)
 		}
@@ -1108,13 +1108,13 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 	defer func() { openURL = old }()
 
 	web := target("web")
-	web.URL = "http://localhost:5173"
-	web.Open = true
+	web.Open = "http://localhost:5173"
+	web.OpenOnStart = true
 	m := newTestModel(t, web, target("api"))
 
 	m.applyEvent(event{kind: evStarted, target: "web"})
 	m.applyEvent(event{kind: evStarted, target: "web"}) // a restart must not re-open
-	if len(opened) != 1 || opened[0] != web.URL {
+	if len(opened) != 1 || opened[0] != web.Open {
 		t.Fatalf("opened = %q, want the url exactly once", opened)
 	}
 

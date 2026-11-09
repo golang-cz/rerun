@@ -65,7 +65,7 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
-targets. `o` opens the target's url, else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
+targets. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `hide: true` also folds its header. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. Folding is a start state; a reload keeps your fold for groups already shown. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
@@ -224,8 +224,8 @@ targets:
     run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
     build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
     health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
-    url: http://localhost:5173     # o opens it; the row links to it
-    open: true                     # open the url once at startup
+    open: http://localhost:5173    # o opens it; the row links to it (or a shell command to run)
+    open-on-start: true            # open (or run) it once at startup
     delay: 200ms                  # batch file events before restarting
     cooldown: 2s                  # min time between restarts (event storms)
     grace: 5s                     # SIGTERM → wait → SIGKILL
@@ -243,7 +243,7 @@ targets:
 ```
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
-`selected: true`, `open: false`, `start: auto`.
+`selected: true`, `open-on-start: false`, `start: auto`.
 Naming a target on the command line overrides `selected` either way: named ones
 start, unnamed ones stay off (still listed, still startable with `space`).
 `start: onchange` holds the first run back until a file changes, and

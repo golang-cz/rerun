@@ -132,7 +132,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, url, columns, queries, group, muted, hide, open, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, open, open-on-start, columns, queries, group, muted, hide, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown schema",
@@ -621,11 +621,11 @@ api:
 	}
 
 	frontend := cfg.Targets[0]
-	if frontend.URL != "http://localhost:5173" {
-		t.Errorf("url = %q", frontend.URL)
+	if frontend.Open != "http://localhost:5173" {
+		t.Errorf("open = %q", frontend.Open)
 	}
-	if !frontend.Open {
-		t.Error("open = false, want true")
+	if !frontend.OpenOnStart {
+		t.Error("open-on-start = false, want true")
 	}
 	if !frontend.Selected {
 		t.Error("selected = false by default, want true")
@@ -635,11 +635,11 @@ api:
 	if api.Selected {
 		t.Error("selected = true for `selected: false`")
 	}
-	if api.Open {
-		t.Error("open = true by default")
+	if api.OpenOnStart {
+		t.Error("open-on-start = true by default")
 	}
-	if api.URL != "" {
-		t.Errorf("url = %q, want empty", api.URL)
+	if api.Open != "" {
+		t.Errorf("open = %q, want empty", api.Open)
 	}
 }
 
@@ -733,7 +733,7 @@ func TestParseConfigRejectsUnknownStartMode(t *testing.T) {
 }
 
 func TestParseConfigBoolFieldErrors(t *testing.T) {
-	for _, field := range []string{"open", "selected"} {
+	for _, field := range []string{"open-on-start", "selected"} {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
 		writeFile(t, path, "api:\n  cmd: echo hi\n  "+field+": 1\n")
 
@@ -753,25 +753,26 @@ func TestParseConfigBoolFieldErrors(t *testing.T) {
 // from the parser. Add a row here when a field joins the switch in parseTarget.
 func TestTargetFieldsAllAccepted(t *testing.T) {
 	values := map[string]string{
-		"desc":     "x",
-		"on":       "src",
-		"except":   "vendor",
-		"run":      "echo hi",
-		"cmd":      "echo hi",
-		"build":    "make",
-		"health":   "tcp://127.0.0.1:1",
-		"url":      "http://localhost:1",
-		"columns":  `["a {.b}"]`,
-		"queries":  "{errors: level=error}",
-		"group":    "backend",
-		"muted":    "true",
-		"hide":     "true",
-		"open":     "true",
-		"selected": "false",
-		"start":    "onchange",
-		"delay":    "1s",
-		"cooldown": "1s",
-		"grace":    "1s",
+		"desc":          "x",
+		"on":            "src",
+		"except":        "vendor",
+		"run":           "echo hi",
+		"cmd":           "echo hi",
+		"build":         "make",
+		"health":        "tcp://127.0.0.1:1",
+		"url":           "http://localhost:1",
+		"columns":       `["a {.b}"]`,
+		"queries":       "{errors: level=error}",
+		"group":         "backend",
+		"muted":         "true",
+		"hide":          "true",
+		"open":          "http://localhost:1",
+		"open-on-start": "true",
+		"selected":      "false",
+		"start":         "onchange",
+		"delay":         "1s",
+		"cooldown":      "1s",
+		"grace":         "1s",
 	}
 	for _, field := range targetFields {
 		value, ok := values[field]

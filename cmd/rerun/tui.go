@@ -551,20 +551,24 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.runner.control(ctrlReboot)
 }
 
-// openTarget is `o`: the target's url, else the newest local link it printed.
-func (m *tuiModel) openTarget(i int) {
+// openTarget is `o`: the target's open: value, a URL or a command, else the newest local link it printed.
+func (m *tuiModel) openTarget(i int) tea.Cmd {
 	t := m.targets[i]
-	link := t.spec.URL
-	if link == "" {
-		link = localLink(m.targetLines(i))
+	value := t.spec.Open
+	if value == "" {
+		value = localLink(m.targetLines(i))
 	}
-	if link == "" {
+	if value == "" {
 		m.showNotice(t.spec.Name+" has nothing to open · add open: in rerun.yml", false)
-		return
+		return nil
 	}
-	if err := openURL(link); err != nil {
-		m.showNotice(fmt.Sprintf("rerun: open %s: %v", link, err), true)
+	if !isOpenLink(value) {
+		return runOpenCommandCmd(value, t.spec.Dir)
 	}
+	if err := openURL(value); err != nil {
+		m.showNotice(fmt.Sprintf("rerun: open %s: %v", value, err), true)
+	}
+	return nil
 }
 
 // targetLines is the target's stored output lines, oldest first.
@@ -722,28 +726,30 @@ func appendLimit[T any](lines []T, line T, limit int) []T {
 	return append(lines, line)
 }
 
-func (m *tuiModel) applyEvents(events []event) {
+func (m *tuiModel) applyEvents(events []event) tea.Cmd {
+	var cmds []tea.Cmd
 	for _, ev := range events {
-		m.applyEvent(ev)
+		cmds = append(cmds, m.applyEvent(ev))
 	}
 	if len(m.pills) > 0 {
 		m.recomputeSearch(false)
 	}
 	m.fitEvents()
+	return tea.Batch(cmds...)
 }
 
-func (m *tuiModel) applyEvent(ev event) {
+func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	switch ev.kind {
 	case evConfigErr:
 		m.showNotice(ev.line, true)
 		if ev.err != nil {
 			m.cfgErr = printable(ev.err.Error(), true)
 		}
-		return
+		return nil
 
 	case evConfigOK:
 		m.cfgErr = ""
-		return
+		return nil
 
 	case evReconcile:
 		m.cfgErr = ""
@@ -756,18 +762,19 @@ func (m *tuiModel) applyEvent(ev event) {
 		if !m.now.Before(m.keepNoticeUntil) {
 			m.showNotice(ev.line, false)
 		}
-		return
+		return nil
 
 	case evNotice:
 		m.showNotice(ev.line, ev.err != nil)
-		return
+		return nil
 	}
 
 	i := m.targetIndex(ev.target)
 	if i < 0 {
-		return
+		return nil
 	}
 	t := m.targets[i]
+	var openCmd tea.Cmd
 
 	switch ev.kind {
 	case evOutput:
@@ -892,17 +899,15 @@ func (m *tuiModel) applyEvent(ev event) {
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
 		}
-		if t.spec.Open && t.spec.URL != "" && !t.opened {
+		if t.spec.OpenOnStart && t.spec.Open != "" && !t.opened {
 			t.opened = true // once per session, never on a restart
-			if err := openURL(t.spec.URL); err != nil {
-				m.showNotice(fmt.Sprintf("rerun: open %s: %v", t.spec.URL, err), true)
-			}
+			openCmd = m.openTarget(i)
 		}
 
 	case evExited:
 		// A swap's exit draws nothing; the ↻ rule at the next start stands for it.
 		if ev.restart {
-			return
+			return nil
 		}
 		t.lastRule = nil
 		t.state = stateExited
@@ -937,6 +942,7 @@ func (m *tuiModel) applyEvent(ev event) {
 	case evCleared:
 		// The TUI owns the screen; the clear bytes belong to the plain path.
 	}
+	return openCmd
 }
 
 // rebuildRows adopts a reconciled target list. Rows are matched by name, so a

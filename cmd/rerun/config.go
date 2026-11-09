@@ -73,7 +73,8 @@ type Target struct {
 	Build string
 	// Health is an http(s):// URL, a tcp://host:port, or a shell command.
 	Health string
-	URL    string
+	// Open is the `open:` value: a URL the system opens, or a shell command `o` runs.
+	Open string
 	// Columns are the effective columns: the target's own, else its schema's.
 	Columns []Column
 	// ownColumns is set when the target writes its own `columns:` instead of inheriting.
@@ -102,8 +103,8 @@ type Target struct {
 	// Selected is false for `selected: false` targets: they exist in the
 	// list but start off until they are started by hand.
 	Selected bool
-	// Open asks rerun to open URL in the browser on the first start.
-	Open bool
+	// OpenOnStart runs Open once at the first start.
+	OpenOnStart bool
 	// Muted is the `muted:` value, or nil when unset so the group's value can fill in.
 	Muted *bool
 	// GroupHide is set when the target's group is `hide: true`: its list header starts folded.
@@ -370,6 +371,7 @@ func ParseConfig(path string) (*Config, error) {
 	if file.legacy {
 		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s %s", filepath.Base(abs), migrateNoticeText))
 	}
+	cfg.Notices = append(cfg.Notices, file.notices...)
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
 		return nil, err
 	}
@@ -431,6 +433,21 @@ type parsedFile struct {
 	queries map[string]string
 	// legacy is set for a file whose targets sit at the top level: no `targets:` key, at least one top-level target.
 	legacy bool
+	// notices name the retired spellings the file used, one line each.
+	notices []string
+}
+
+// oldFormNotes collects one notice per retired spelling per file.
+type oldFormNotes struct {
+	file  string
+	lines []string
+}
+
+func (n *oldFormNotes) once(text string) {
+	line := filepath.Base(n.file) + ": " + text
+	if !slices.Contains(n.lines, line) {
+		n.lines = append(n.lines, line)
+	}
 }
 
 // groupDef is one `groups:` entry: its columns, and the `muted:`, `hide:` and `start:` its members start with.
@@ -457,6 +474,7 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 		return parsedFile{}, err
 	}
 	out := parsedFile{schemas: schemas}
+	notes := &oldFormNotes{file: file}
 	if _, block := mappingEntry(root, queriesKey); block != nil {
 		out.queries, err = parseQueries(src, queriesKey, block, nil)
 		if err != nil {
@@ -478,12 +496,14 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 		if block.Kind != yaml.MappingNode {
 			return parsedFile{}, src.at(block, nodeSpan(block), "targets: expected a mapping of target names")
 		}
-		out.targets, err = parseTargets(src, block, schemas, file, false)
+		out.targets, err = parseTargets(src, block, schemas, file, false, notes)
+		out.notices = notes.lines
 		return out, err
 	}
 
 	out.legacy = hasTopLevelTargets(root)
-	out.targets, err = parseTargets(src, root, schemas, file, true)
+	out.targets, err = parseTargets(src, root, schemas, file, true, notes)
+	out.notices = notes.lines
 	return out, err
 }
 
@@ -538,7 +558,7 @@ func hasTopLevelTargets(root *yaml.Node) bool {
 
 // parseTargets reads the target entries of a mapping. In a legacy file the same
 // mapping also holds the reserved keys, which are skipped.
-func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupDef, file string, legacy bool) ([]Target, error) {
+func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupDef, file string, legacy bool, notes *oldFormNotes) ([]Target, error) {
 	var out []Target
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(block.Content); i += 2 {
@@ -560,7 +580,7 @@ func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupD
 			}
 		}
 
-		target, err := parseTarget(src, name, key, value, schemas)
+		target, err := parseTarget(src, name, key, value, schemas, notes)
 		if err != nil {
 			return nil, err
 		}
@@ -866,9 +886,9 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node)
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "url", "columns", "queries", "group", "muted", "hide", "open", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "open", "open-on-start", "columns", "queries", "group", "muted", "hide", "selected", "start", "delay", "cooldown", "grace"}
 
-func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
+func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef, notes *oldFormNotes) (Target, error) {
 	node = deref(node)
 	if node.Kind != yaml.MappingNode {
 		return Target{}, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: expected a mapping of fields", name))
@@ -878,7 +898,8 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
 	var hide *bool
-	var queriesNode *yaml.Node
+	var queriesNode, urlKey *yaml.Node
+	openString := false
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
 		field := key.Value
@@ -913,7 +934,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Except = list
 			}
 
-		case "run", "cmd", "build", "health", "url":
+		case "run", "cmd", "build", "health":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
@@ -925,9 +946,41 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Build = s
 			case "health":
 				target.Health = s
-			default:
-				target.URL = s
 			}
+
+		case "url":
+			// Retired: the link moved to open:, which also takes a command.
+			s, err := scalarField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			target.Open = s
+			urlKey = key
+			notes.once("url: is now open:")
+
+		case "open":
+			if deref(value).Kind == yaml.ScalarNode && deref(value).Tag == "!!bool" {
+				b, err := boolField(src, name, field, value)
+				if err != nil {
+					return Target{}, err
+				}
+				target.OpenOnStart = b
+				notes.once(fmt.Sprintf("open: %t is now open-on-start: %t", b, b))
+				break
+			}
+			s, err := scalarField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			target.Open = s
+			openString = true
+
+		case "open-on-start":
+			b, err := boolField(src, name, field, value)
+			if err != nil {
+				return Target{}, err
+			}
+			target.OpenOnStart = b
 
 		case "columns":
 			cols, err := parseColumnList(src, owner, field, value)
@@ -972,16 +1025,12 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			}
 			hide = &b
 
-		case "open", "selected":
+		case "selected":
 			b, err := boolField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			if field == "open" {
-				target.Open = b
-			} else {
-				target.Selected = b
-			}
+			target.Selected = b
 
 		case "delay", "cooldown", "grace":
 			d, err := durationField(src, name, field, value)
@@ -1004,6 +1053,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		}
 	}
 
+	if urlKey != nil && openString {
+		return Target{}, src.at(urlKey, len("url"), fmt.Sprintf("target %q: both \"url\" and a string \"open\" are set; use open: alone", name))
+	}
 	// Own muted beats own hide, and both beat the group's muted and hide.
 	if target.Muted == nil && hide != nil {
 		target.Muted = hide

@@ -26,3 +26,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · fuzzy matches use fzf's sage green, readable on light and dark. Why: fzf users already read that color as a match.
 - 2026-11-09 · the fs row moves to the top of the left list and names the newest batch's file: `fs · server.go · 4s`. Why: the bottom row sat under the list, where a long list hid it.
 - 2026-11-09 · `o` falls back to the newest localhost link the target printed, and says so when it has none. Why: a silent `o` looked broken.
+- 2026-11-09 · `open:` is the target's link or command, and `open-on-start:` runs it at startup: one field for what `o` does, one for when. Why: a `url:` that could not run a command, and a boolean `open:` that did not open anything, misled readers.

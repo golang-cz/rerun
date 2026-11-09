@@ -15,8 +15,9 @@ import (
 // follow the server that just started. Last capture wins; a line without a
 // usable key changes nothing.
 func (m *tuiModel) captureURL(t *tuiTarget, line string) {
-	if url := jsonLineURL(line); url != "" {
-		t.spec.URL = url
+	// A command in open: is the user's choice, so an endpoint never replaces it.
+	if url := jsonLineURL(line); url != "" && (t.spec.Open == "" || isOpenLink(t.spec.Open)) {
+		t.spec.Open = url
 	}
 }
 

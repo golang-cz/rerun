@@ -767,7 +767,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.URL},
+		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link()},
 		seg{text: marker(m.targetDirty(t))},
 	)
 	if m.leftMode == leftFull {
@@ -1259,7 +1259,7 @@ var helpShortKeys = [][2]string{
 	{"enter", "list: focus the pane, starting a stopped row or group"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
-	{"o", "open the target's link · pane: original lines"},
+	{"o", "open the target's open: · pane: original lines"},
 	{"← →", "fold or unfold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last minute)"},
@@ -1284,7 +1284,7 @@ var helpKeys = [][2]string{
 	{"e", "fs events (last minute)"},
 	{"esc [ ] b", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b list width"},
 	{"ctrl+k g", "go to a target, or run a make target"},
-	{"o", "open the target's url · pane: original lines"},
+	{"o", "open the target's open: · pane: original lines"},
 	{"/ ctrl+f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},
 	{"n/N ctrl+g", "jump pill hits · bar: ←/→ pick, x drop, enter edit, → expands @"},
 	{"ctrl+l", "clear the log; old lines stay in scrollback"},

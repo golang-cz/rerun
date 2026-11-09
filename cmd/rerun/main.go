@@ -114,6 +114,8 @@ func runMigrate() int {
 		fmt.Fprintf(os.Stdout, "rerun: %s: targets now live under targets:\n", path)
 	case migrateAlready:
 		fmt.Fprintf(os.Stdout, "rerun: %s already uses targets:\n", path)
+	case migrateRenamed:
+		fmt.Fprintf(os.Stdout, "rerun: %s: url: is now open:, open: true is now open-on-start:\n", path)
 	default:
 		fmt.Fprintf(os.Stdout, "rerun: %s has no top-level targets to move\n", path)
 	}

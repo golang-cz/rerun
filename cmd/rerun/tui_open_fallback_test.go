@@ -75,7 +75,7 @@ func TestOpenOnAGroupHeaderSaysWhatItOpens(t *testing.T) {
 
 // The first ? view lists o with the pane's original-lines meaning.
 func TestHelpShortListNamesO(t *testing.T) {
-	want := [2]string{"o", "open the target's link · pane: original lines"}
+	want := [2]string{"o", "open the target's open: · pane: original lines"}
 	for _, kv := range helpShortKeys {
 		if kv == want {
 			return

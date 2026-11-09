@@ -32,7 +32,7 @@ columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-le
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
 `e` fs events (last minute), `m` mute a stream. `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
-On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens the target's url, else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
+On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
@@ -191,13 +191,13 @@ Each top-level key is one target. Fields:
 | `run` | shell command to run, required. Older spelling: `cmd`; use one |
 | `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
-| `url` | url to open for the target (`o`, and `open: true` at startup) |
+| `open` | what `o` runs: a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. Older spelling: `url:`, which still works as the link |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
 | `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
 | `hide` | start the stream muted, like `muted`; a group's `hide` also starts its header folded. Own `muted` wins over `hide`, and `muted: false` overrides both. `hide: false` overrides a group's `hide: true` |
-| `open` | open `url` in the browser once at startup (default false) |
+| `open-on-start` | run `open` once at startup (default false). Older spelling: a boolean `open:` |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
 | `delay` | batch window before restarting (default 200ms) |
@@ -400,7 +400,7 @@ restarting rerun. Each save prints one line naming what moved:
 
 A target you stopped by hand stays stopped: a save swaps its spec but never
 starts it again. A target added while the pane shows one target or group waits for `space`.
-`desc`, `url` and `open` are cosmetic, and `selected` only counts at startup.
+`desc` and `open` are cosmetic, and `selected` only counts at startup.
 A config that does not parse changes nothing and only prints the error.
 
 # Installation

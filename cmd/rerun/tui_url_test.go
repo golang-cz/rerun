@@ -9,7 +9,7 @@ func TestURLCapturedFromOutputRelinksTheRow(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"url":"http://localhost:5173"}`)
 
-	if got := m.targets[0].spec.URL; got != "http://localhost:5173" {
+	if got := m.targets[0].spec.Open; got != "http://localhost:5173" {
 		t.Fatalf("spec url = %q, want the captured url", got)
 	}
 	leftW, _ := m.layoutWidths()
@@ -49,11 +49,11 @@ func TestURLCapturePrecedence(t *testing.T) {
 // A line with no usable key leaves the URL the config set.
 func TestURLCaptureLeavesConfiguredURLAlone(t *testing.T) {
 	web := target("web")
-	web.URL = "http://configured"
+	web.Open = "http://configured"
 	m := newTestModel(t, web)
 	addLines(m, "web", "plain text", `{"msg":"hi"}`, `{"url":[1]}`)
 
-	if got := m.targets[0].spec.URL; got != "http://configured" {
+	if got := m.targets[0].spec.Open; got != "http://configured" {
 		t.Fatalf("spec url = %q, want the configured url", got)
 	}
 }
@@ -63,7 +63,7 @@ func TestURLCaptureLastWins(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", `{"url":"http://localhost:1"}`, `{"port":2}`)
 
-	if got := m.targets[0].spec.URL; got != "http://localhost:2" {
+	if got := m.targets[0].spec.Open; got != "http://localhost:2" {
 		t.Fatalf("spec url = %q, want the newest capture", got)
 	}
 }

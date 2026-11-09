@@ -36,10 +36,10 @@ func TestDiffTargetsReconcileActions(t *testing.T) {
 	startChanged.Start = startManual
 	cosmetic := recTarget("api", "api")
 	cosmetic.Desc = "the api"
-	cosmetic.URL = "http://localhost:8080"
+	cosmetic.Open = "http://localhost:8080"
 	cosmetic.Grace = time.Second
 	cosmetic.Cooldown = 2 * time.Second
-	cosmetic.Open = true
+	cosmetic.OpenOnStart = true
 	cosmetic.Selected = false
 
 	tests := []struct {

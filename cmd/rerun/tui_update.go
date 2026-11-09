@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -81,8 +82,16 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case eventsMsg:
-		m.applyEvents(msg.events)
-		return m, waitForEvents(m.events, m.stop)
+		return m, tea.Batch(m.applyEvents(msg.events), waitForEvents(m.events, m.stop))
+
+	case openExitMsg:
+		switch {
+		case msg.err != nil:
+			m.showNotice(fmt.Sprintf("open: %s did not start: %v", msg.first, msg.err), true)
+		case msg.code != 0:
+			m.showNotice(fmt.Sprintf("open: %s exited %d", msg.first, msg.code), true)
+		}
+		return m, nil
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -391,7 +400,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.paneFocus {
 			m.openOriginal()
 		} else if i := m.cursorTarget(); i >= 0 {
-			m.openTarget(i)
+			return m, m.openTarget(i)
 		} else if r, ok := m.cursorRow(); ok && r.header {
 			m.showNotice("o opens a target's open: link", false)
 		}

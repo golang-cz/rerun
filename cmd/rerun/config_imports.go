@@ -226,6 +226,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if err != nil {
 					return err
 				}
+				cfg.Notices = append(cfg.Notices, file.notices...)
 				if len(spec.groups) > 0 {
 					for _, g := range spec.groups {
 						if _, ok := file.schemas[g]; !ok {

@@ -17,7 +17,70 @@ const (
 	migrated         migrateStatus = iota // targets moved under `targets:`
 	migrateAlready                        // the file already uses `targets:`
 	migrateNoTargets                      // no top-level target keys to move
+	migrateRenamed                        // targets already live under targets:, and their retired keys were renamed
 )
+
+// migrateOpenKeys renames each target's url: to open: and its boolean open: to
+// open-on-start:, in place. It reports whether any key changed.
+func migrateOpenKeys(block *yaml.Node) (bool, error) {
+	changed := false
+	for i := 0; i+1 < len(block.Content); i += 2 {
+		name := deref(block.Content[i]).Value
+		target := deref(block.Content[i+1])
+		if target.Kind != yaml.MappingNode {
+			continue
+		}
+		ok, err := renameOpenKeys(target, name)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || ok
+	}
+	return changed, nil
+}
+
+// renameOpenKeys renames one target's retired keys; a url: beside a string open: is an error.
+func renameOpenKeys(target *yaml.Node, name string) (bool, error) {
+	urlAt, openAt := -1, -1
+	for i := 0; i+1 < len(target.Content); i += 2 {
+		switch target.Content[i].Value {
+		case "url":
+			urlAt = i
+		case "open":
+			openAt = i
+		}
+	}
+	if urlAt < 0 && openAt < 0 {
+		return false, nil
+	}
+	if openAt >= 0 && deref(target.Content[openAt+1]).Tag != "!!bool" {
+		if urlAt >= 0 {
+			return false, fmt.Errorf("target %q: both url: and a string open: are set; use open: alone", name)
+		}
+		return false, nil
+	}
+	if openAt >= 0 {
+		target.Content[openAt].Value = "open-on-start"
+	}
+	if urlAt >= 0 {
+		target.Content[urlAt].Value = "open"
+	}
+	return true, nil
+}
+
+// writeYAML writes a node to path, keeping its comments.
+func writeYAML(path string, node *yaml.Node) error {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(node); err != nil {
+		return err
+	}
+	if err := enc.Close(); err != nil {
+		return err
+	}
+	return replaceFile(path, buf.Bytes())
+}
 
 // migrateImports adds an imports: entry for a Makefile that rerun.yml's auto-import used to load, and returns the paths it added.
 func migrateImports(path string) ([]string, error) {
@@ -131,7 +194,17 @@ func migrateConfig(path string) (migrateStatus, error) {
 		if looksLikeTarget(value) {
 			return migrateNoTargets, fmt.Errorf("%s: %s", real, errTargetsReserved)
 		}
-		return migrateAlready, nil
+		renamed, err := migrateOpenKeys(value)
+		if err != nil {
+			return migrateNoTargets, fmt.Errorf("%s: %v", real, err)
+		}
+		if !renamed {
+			return migrateAlready, nil
+		}
+		if err := writeYAML(real, &doc); err != nil {
+			return migrateNoTargets, err
+		}
+		return migrateRenamed, nil
 	}
 
 	targets := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -153,17 +226,10 @@ func migrateConfig(path string) (migrateStatus, error) {
 	if len(targets.Content) == 0 {
 		return migrateNoTargets, nil
 	}
-
-	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(rebuilt); err != nil {
-		return migrateNoTargets, err
+	if _, err := migrateOpenKeys(targets); err != nil {
+		return migrateNoTargets, fmt.Errorf("%s: %v", real, err)
 	}
-	if err := enc.Close(); err != nil {
-		return migrateNoTargets, err
-	}
-	if err := replaceFile(real, buf.Bytes()); err != nil {
+	if err := writeYAML(real, rebuilt); err != nil {
 		return migrateNoTargets, err
 	}
 	return migrated, nil
