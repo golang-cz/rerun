@@ -52,7 +52,7 @@ func listLabels(m *tuiModel) []string {
 func leftLineRaw(m *tuiModel, y int) string {
 	m.frame()
 	leftW, _ := m.layoutWidths()
-	return ansi.Strip(m.leftLine(y, leftW))
+	return ansi.Strip(m.leftLine(y+1, leftW))
 }
 
 func TestBuildNeverChangesTheRowCount(t *testing.T) {

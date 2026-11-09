@@ -39,7 +39,7 @@ func TestNamesModeDropsStatusKeepsGlyphAndName(t *testing.T) {
 	press(m, "b")
 	m.frame()
 
-	row := ansi.Strip(m.leftLine(0, m.layout.leftW))
+	row := ansi.Strip(m.leftLine(1, m.layout.leftW))
 	if !strings.Contains(row, "web") || !strings.Contains(row, "✗") {
 		t.Fatalf("names row = %q, want the glyph and the name", row)
 	}

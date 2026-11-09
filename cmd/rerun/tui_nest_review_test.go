@@ -151,7 +151,7 @@ func TestToggleHeaderOfManualMembersStartsNothing(t *testing.T) {
 	for i := range m.targets {
 		m.targets[i].state = stateStopped
 	}
-	if line := leftPane(m)[0]; strings.Contains(line, playGlyph) {
+	if line := leftPane(m)[1]; strings.Contains(line, playGlyph) {
 		t.Fatalf("header = %q, want no play glyph without a startable member", line)
 	}
 

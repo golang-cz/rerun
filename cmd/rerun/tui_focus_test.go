@@ -256,7 +256,7 @@ func drawnRow(t *testing.T, m *tuiModel, key string) string {
 		t.Fatalf("row %q is not listed", key)
 	}
 	leftW, _ := m.layoutWidths()
-	return m.leftLine(idx-m.layout.offset, leftW)
+	return m.leftLine(idx-m.layout.offset+1, leftW)
 }
 
 // faintLine reports whether a drawn line carries the faint step-back style.

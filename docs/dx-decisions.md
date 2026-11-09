@@ -24,3 +24,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · go to lands in the pane, and a runnable row shows `▶` with `enter run`: the footer names what enter does. Why: a jump should show the log, and a run should not look like a jump.
 - 2026-11-09 · fs events services start one 2-space gap after the longest path, and no `·` separator: the `↻` names the restarts. Why: a right-aligned list drifted with every path length.
 - 2026-11-09 · fuzzy matches use fzf's sage green, readable on light and dark. Why: fzf users already read that color as a match.
+- 2026-11-09 · the fs row moves to the top of the left list and names the newest batch's file: `fs · server.go · 4s`. Why: the bottom row sat under the list, where a long list hid it.

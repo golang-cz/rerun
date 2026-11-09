@@ -41,17 +41,17 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 	}
 
 	lines := leftPane(m)
-	if !strings.HasPrefix(lines[0], "▾") || !strings.Contains(lines[0], "backend") || !strings.Contains(lines[0], "2/2") {
-		t.Fatalf("header = %q, want the backend header with its running count", lines[0])
+	if !strings.HasPrefix(lines[1], "▾") || !strings.Contains(lines[1], "backend") || !strings.Contains(lines[1], "2/2") {
+		t.Fatalf("header = %q, want the backend header with its running count", lines[1])
 	}
-	if !strings.HasPrefix(lines[1], " ● api") {
-		t.Fatalf("member = %q, want the name indented under its header", lines[1])
+	if !strings.HasPrefix(lines[2], " ● api") {
+		t.Fatalf("member = %q, want the name indented under its header", lines[2])
 	}
-	if !strings.HasPrefix(lines[5], "▾") || !strings.Contains(lines[5], "all") {
-		t.Fatalf("header = %q, want the trailing default header", lines[5])
+	if !strings.HasPrefix(lines[6], "▾") || !strings.Contains(lines[6], "all") {
+		t.Fatalf("header = %q, want the trailing default header", lines[6])
 	}
-	if !strings.HasPrefix(lines[6], " ● web") {
-		t.Fatalf("ungrouped member = %q, want it indented under default", lines[6])
+	if !strings.HasPrefix(lines[7], " ● web") {
+		t.Fatalf("ungrouped member = %q, want it indented under default", lines[7])
 	}
 }
 
@@ -59,7 +59,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 func TestSchemaHeaderCountsRunningMembers(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 	m.targets[1].state = stateStopped
-	if got := leftPane(m)[0]; !strings.Contains(got, "1/2") {
+	if got := leftPane(m)[1]; !strings.Contains(got, "1/2") {
 		t.Fatalf("header = %q, want 1/2 with one member stopped", got)
 	}
 }
@@ -197,7 +197,7 @@ func TestHeaderShowsPlayGlyphWhenSpaceWouldStart(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"))
 	m.targets[0].state = stateStopped
 
-	if line := leftPane(m)[0]; !strings.HasPrefix(line, "▶ backend") {
+	if line := leftPane(m)[1]; !strings.HasPrefix(line, "▶ backend") {
 		t.Fatalf("header = %q, want the play glyph in the fold column", line)
 	}
 }
@@ -209,11 +209,11 @@ func TestHeaderHidesPlayGlyphWhileAMemberRuns(t *testing.T) {
 	m.targets[1].state = stateStopped
 	lines := leftPane(m)
 
-	if strings.Contains(lines[0], playGlyph) {
-		t.Fatalf("backend header = %q, want no play glyph while its member runs", lines[0])
+	if strings.Contains(lines[1], playGlyph) {
+		t.Fatalf("backend header = %q, want no play glyph while its member runs", lines[1])
 	}
-	if !strings.Contains(lines[2], playGlyph) {
-		t.Fatalf("webapps header = %q, want the play glyph on a startable group", lines[2])
+	if !strings.Contains(lines[3], playGlyph) {
+		t.Fatalf("webapps header = %q, want the play glyph on a startable group", lines[3])
 	}
 }
 
@@ -225,16 +225,16 @@ func TestHeaderNameColumnMatchesPreGlyphColumn(t *testing.T) {
 	m.targets[1].state = stateStopped
 	lines := leftPane(m)
 
-	if strings.Contains(lines[0], playGlyph) || !strings.Contains(lines[2], playGlyph) {
-		t.Fatalf("headers = %q / %q, want the glyph only on webapps", lines[0], lines[2])
+	if strings.Contains(lines[1], playGlyph) || !strings.Contains(lines[3], playGlyph) {
+		t.Fatalf("headers = %q / %q, want the glyph only on webapps", lines[1], lines[3])
 	}
 	nameCol := func(line, name string) int {
 		return displayWidth(line[:strings.Index(line, name)])
 	}
-	if got := nameCol(lines[0], "backend"); got != 2 {
+	if got := nameCol(lines[1], "backend"); got != 2 {
 		t.Fatalf("header name column = %d, want the pre-glyph 2", got)
 	}
-	if got := nameCol(lines[2], "webapps"); got != 2 {
+	if got := nameCol(lines[3], "webapps"); got != 2 {
 		t.Fatalf("header with glyph name column = %d, want the pre-glyph 2", got)
 	}
 }
@@ -245,7 +245,7 @@ func TestCollapsedHeaderKeepsFoldMarker(t *testing.T) {
 	m.targets[0].state = stateStopped
 	m.collapsed = map[string]bool{"backend": true}
 
-	if line := leftPane(m)[0]; strings.Contains(line, playGlyph) || !strings.HasPrefix(line, "▸ backend") {
+	if line := leftPane(m)[1]; strings.Contains(line, playGlyph) || !strings.HasPrefix(line, "▸ backend") {
 		t.Fatalf("header = %q, want the fold marker on a collapsed header", line)
 	}
 }

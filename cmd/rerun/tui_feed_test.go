@@ -245,13 +245,13 @@ func TestListScrollKeepsTheCursorVisible(t *testing.T) {
 
 	visible := m.listHeight()
 	if visible != m.height-2 {
-		t.Fatalf("list height = %d, want the fs events line and version row to take 2 rows", visible)
+		t.Fatalf("list height = %d, want the fs row and version row to take 2 rows", visible)
 	}
 	line := m.cursor - m.layout.offset
 	if line < 0 || line >= visible {
 		t.Fatalf("the cursor row is at list line %d, outside the %d-row list area", line, visible)
 	}
-	if got := m.rowAt(2, line); got != m.cursor {
+	if got := m.rowAt(2, line+1); got != m.cursor {
 		t.Fatalf("the cursor row is off screen: line %d maps to %d, want %d", line, got, m.cursor)
 	}
 }
@@ -292,8 +292,8 @@ func TestVersionLineOwnsTheBottomRow(t *testing.T) {
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
 		t.Fatalf("the bottom row is not the version line: %q", got)
 	}
-	if got := lines[m.height-2]; !strings.HasPrefix(got, "fs events ·") {
-		t.Fatalf("the row above the version line = %q, want the fs events line", got)
+	if got := lines[0]; !strings.HasPrefix(got, "fs · ") {
+		t.Fatalf("the top row = %q, want the fs row", got)
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {
 		t.Fatalf("the version row resolved to row %d, want none", got)

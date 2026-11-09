@@ -214,21 +214,21 @@ func TestListLinesMapScreenLinesToTargets(t *testing.T) {
 	}
 
 	// web, api, worker; the fs events line and the version row sit below the list.
-	for y, want := range []int{0, 1, 2} {
-		if got := m.rowAt(2, y); got != want {
-			t.Fatalf("rowAt line %d = %d, want %d", y, got, want)
+	for i, want := range []int{0, 1, 2} {
+		if got := m.rowAt(2, i+1); got != want {
+			t.Fatalf("rowAt screen line %d = %d, want %d", i+1, got, want)
 		}
 	}
-	if got := m.rowAt(2, 3); got != -1 {
+	if got := m.rowAt(2, 4); got != -1 {
 		t.Fatalf("rowAt past the list = %d, want -1", got)
 	}
-	if got := m.rowAt(2, m.height-2); got != -1 {
+	if got := m.rowAt(2, 0); got != -1 {
 		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 
 	m.applyScope(1, "")
 	m.frame()
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 2, false))
 	if m.solo != 1 {
 		t.Fatalf("solo after a click on the soloed row = %d, want 1", m.solo)
 	}
@@ -244,10 +244,10 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	m.cursor = 2 // worker, the last row
 	m.height = 4 // two list rows above the fs events line and the version row
 	m.frame()
-	if got := m.rowAt(2, 1); got != 2 {
-		t.Fatalf("the last row is not on screen at offset %d: line 1 maps to %d", m.layout.offset, got)
+	if got := m.rowAt(2, 2); got != 2 {
+		t.Fatalf("the last row is not on screen at offset %d: line 2 maps to %d", m.layout.offset, got)
 	}
-	if got := m.rowAt(2, m.height-2); got != -1 {
+	if got := m.rowAt(2, 0); got != -1 {
 		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 
@@ -273,10 +273,10 @@ func TestListOffsetKeepsTheCursorRowVisible(t *testing.T) {
 	if line < 0 || line >= visible {
 		t.Fatalf("the cursor row is at list line %d, outside the %d-row list area", line, visible)
 	}
-	if got := many.rowAt(2, line); got != many.cursor {
+	if got := many.rowAt(2, line+1); got != many.cursor {
 		t.Fatalf("the cursor row is off screen: line %d maps to %d, want %d", line, got, many.cursor)
 	}
-	if got := many.rowAt(2, many.height-2); got != -1 {
+	if got := many.rowAt(2, 0); got != -1 {
 		t.Fatalf("rowAt on the fs events line = %d, want no row", got)
 	}
 }

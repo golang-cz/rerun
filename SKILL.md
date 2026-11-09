@@ -113,10 +113,10 @@ is refused with a footer error (edit rerun.yml by hand). Writes keep the file's 
 and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
-The fs events line above the bottom-left footer ages the newest change batch
-(`fs events · 4s ago`, `idle` past a minute), highlights for a second when one
-lands, and turns red `⚠ watch failed` after a watcher error; a click (or `e`)
-opens the fs events modal. The modal lists the last minute's batches (events
+The fs row at the top of the left column names the newest change batch's first
+file and its age (`fs · server.go +2 · 4s`, `+N` for the rest of the batch, `fs · idle`
+past a minute), highlights for a second when one lands, and turns red `fs ! <error>`
+after a watcher error; a click (or `e`) opens the fs events modal. The modal lists the last minute's batches (events
 within 150ms of each other), newest first: the time, the first changed file with
 `+N` for the rest, and the targets the batch restarted after a 2-space gap and a `↻` mark.
 `→` expands a batch's files, each naming the services whose watch globs it

@@ -591,8 +591,8 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	m.clearSelection()
 
-	// The fs events line opens the modal, like `e`.
-	if e.X < m.layout.leftW && e.Y == m.height-2 {
+	// The fs row opens the modal, like `e`.
+	if e.X < m.layout.leftW && e.Y == 0 {
 		m.openEvents()
 		return m, nil
 	}
@@ -767,13 +767,13 @@ func (m *tuiModel) copySelection() tea.Cmd {
 	return copyToClipboard(payload)
 }
 
-// rowAt resolves a screen cell to a list row index, or -1 for none. The fs
-// events line and the version row below it are never list rows.
+// rowAt resolves a screen cell to a list row index, or -1 for none. The fs row
+// at the top and the version row at the bottom are never list rows.
 func (m *tuiModel) rowAt(x, y int) int {
-	if y < 0 || y >= m.height-2 || x < 0 || x >= m.layout.leftW {
+	if y < 1 || y >= m.height-1 || x < 0 || x >= m.layout.leftW {
 		return -1
 	}
-	idx := m.layout.offset + y
+	idx := m.layout.offset + y - 1
 	if idx < 0 || idx >= m.listLen() {
 		return -1
 	}

@@ -519,8 +519,8 @@ func marker(dirty bool) string {
 // listLen counts the list's screen lines: schema headers and targets.
 func (m *tuiModel) listLen() int { return len(m.listRows()) }
 
-// listHeight is how many screen rows the target list has: everything above the
-// fs events line and the version row at the bottom.
+// listHeight is how many screen rows the target list has: everything between
+// the fs row at the top and the version row at the bottom.
 func (m *tuiModel) listHeight() int {
 	return max(1, m.height-2)
 }
@@ -633,30 +633,30 @@ func opText(op byte) string {
 	return string(op)
 }
 
-// leftLine draws one screen line of the left column: the version line owns the
-// last row, the fs events line the row above it, and the target list the rest.
+// leftLine draws one screen line of the left column: the fs row owns the first
+// row, the version line the last, and the target list the rows between.
 func (m *tuiModel) leftLine(y, leftW int) string {
-	// The list reserves the screen's very last row; the version line owns it.
 	if y == m.height-1 {
 		return m.versionCell(leftW)
 	}
-	if y == m.height-2 {
+	if y == 0 {
 		return m.feedHintCell(leftW)
 	}
-	r, ok := m.listRowAt(m.layout.offset + y)
+	idx := m.layout.offset + y - 1
+	r, ok := m.listRowAt(idx)
 	if !ok {
-		if i := m.layout.offset + y - m.listLen(); i >= 0 && i < len(m.missing) {
+		if i := idx - m.listLen(); i >= 0 && i < len(m.missing) {
 			return m.missingLine(m.missing[i], leftW)
 		}
 		return strings.Repeat(" ", leftW)
 	}
 	if r.header {
-		return m.schemaLine(m.layout.offset+y, r, leftW)
+		return m.schemaLine(idx, r, leftW)
 	}
 	if r.more {
-		return m.moreLine(m.layout.offset+y, r, leftW)
+		return m.moreLine(idx, r, leftW)
 	}
-	return m.targetLine(m.layout.offset+y, r, leftW)
+	return m.targetLine(idx, r, leftW)
 }
 
 // moreLine draws a block's `(+) N hidden` row, which the cursor and the mouse can act on.
@@ -668,37 +668,41 @@ func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
-// feedHintCell is the left column's fs events line: the newest visible
-// batch's age, a red watch failure while its batch sits in the modal's window,
-// and a 1s highlight when a batch lands. A click on it opens the fs events modal.
+// feedHintCell is the left column's fs row: the newest batch's first file and
+// age, `idle` when none landed in the last minute, and a red watcher error until
+// the next good batch. A 1s highlight marks a landed batch; a click opens the fs events modal.
 func (m *tuiModel) feedHintCell(leftW int) string {
 	style := m.styles.hint
-	text := "fs events · idle"
+	text := "fs · idle"
 	if batches, dim := m.feedVisible(); !dim && len(batches) > 0 {
 		b := batches[0]
-		switch {
-		case b.err != nil:
-			text = fitWatchFailed(leftW)
+		if b.err != nil {
+			text = ellipsize("fs ! "+b.err.Error(), leftW)
 			style = style.Foreground(lipgloss.Color(colorRed))
-		default:
-			text = "fs events · " + fmtDur(m.now.Sub(b.at)) + " ago"
+		} else {
+			text = fsHintText(b, fmtDur(m.now.Sub(b.at)), leftW)
 		}
 	}
 	if m.now.Before(m.feedFlashUntil) {
 		style = style.Reverse(true)
 	}
-	text = truncate(text, leftW)
 	return style.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
 }
 
-// fitWatchFailed is the hint's failure text, shortened until it fits leftW.
-func fitWatchFailed(leftW int) string {
-	for _, s := range []string{"fs events · ⚠ watch failed", "⚠ fs failed", "⚠ fs"} {
-		if displayWidth(s) <= leftW {
-			return s
-		}
+// fsHintText is `fs · <file> · <age>`, with `+N` after the file for the rest of
+// the batch. The file name is cut first so the age always shows.
+func fsHintText(b feedBatch, age string, leftW int) string {
+	_, name := feedSplit(strings.TrimSuffix(feedFirstFile(b), "/"))
+	more := ""
+	if n := len(b.files) - 1; n > 0 {
+		more = fmt.Sprintf(" +%d", n)
 	}
-	return truncate("⚠ fs", leftW)
+	tail := more + " · " + age
+	room := leftW - displayWidth("fs · "+tail)
+	if room < 1 {
+		return truncate("fs · "+name+tail, leftW)
+	}
+	return "fs · " + ellipsize(name, room) + tail
 }
 
 // ellipsize cuts s to w cells, ending a cut string with an ellipsis.
@@ -1294,7 +1298,7 @@ var helpKeys = [][2]string{
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
-	"click a group scopes to its targets; the fs line opens the batches",
+	"click a group scopes to its targets; the fs row opens the fs events",
 	"drag copies a range; shift-drag uses the terminal's selection",
 	"⚙ building  ● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",

@@ -139,12 +139,12 @@ func TestMoreRowEnterTogglesWithoutFocusingThePane(t *testing.T) {
 
 func TestMoreRowClickToggles(t *testing.T) {
 	m := autoHideFixture(t)
-	y := rowAtKey(t, m, "more:ops")
+	y := rowAtKey(t, m, "more:ops") + 1
 	click(m, 2, y)
 	if got := len(listedNames(m)); got != 3 {
 		t.Fatalf("click on (+) listed %d targets, want 3", got)
 	}
-	click(m, 2, rowAtKey(t, m, "more:ops"))
+	click(m, 2, rowAtKey(t, m, "more:ops")+1)
 	if got := len(listedNames(m)); got != 1 {
 		t.Fatalf("click on (−) listed %d targets, want 1", got)
 	}
@@ -188,7 +188,7 @@ func TestFoldedHeaderCountsHiddenMembers(t *testing.T) {
 		t.Fatalf("folded rows = %v, want %v", got, want)
 	}
 	leftW, _ := m.layoutWidths()
-	if line := ansi.Strip(m.leftLine(0, leftW)); !strings.Contains(line, "· 2 hidden") || strings.Contains(line, "hidd ") {
+	if line := ansi.Strip(m.leftLine(1, leftW)); !strings.Contains(line, "· 2 hidden") || strings.Contains(line, "hidd ") {
 		t.Fatalf("folded header = %q, want the hidden count", line)
 	}
 }

@@ -19,7 +19,7 @@ func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 
 	leftW, _ := m.layoutWidths()
 	nameW := m.nameWidth(leftW)
-	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y, leftW))) }
+	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y+1, leftW))) }
 
 	if got := string(cells(0)[2+nameW : 4+nameW]); got != "  " {
 		t.Errorf("clean row marker = %q, want two blank cells", got)
@@ -264,7 +264,7 @@ func TestLongTargetNameIsCapped(t *testing.T) {
 	if want := maxNameW + statusW + 4; leftW != want {
 		t.Fatalf("leftW = %d, want %d", leftW, want)
 	}
-	row := ansi.Strip(m.leftLine(0, leftW))
+	row := ansi.Strip(m.leftLine(1, leftW))
 	if !strings.Contains(row, "services-") || !strings.Contains(row, "backfill") || !strings.Contains(row, "…") {
 		t.Fatalf("row = %q, want the name kept at both ends with an ellipsis", row)
 	}

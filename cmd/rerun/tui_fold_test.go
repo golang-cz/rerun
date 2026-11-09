@@ -86,7 +86,7 @@ func TestNestedCollapseRestoresOnExpand(t *testing.T) {
 func TestCollapsedHeaderCountsAllMembers(t *testing.T) {
 	m := nestedFixture(t)
 	toggleKey(t, m, importKeyPrefix+"omsx")
-	if line := leftPane(m)[0]; !strings.HasPrefix(line, "▸") || !strings.Contains(line, "0/4") {
+	if line := leftPane(m)[1]; !strings.HasPrefix(line, "▸") || !strings.Contains(line, "0/4") {
 		t.Fatalf("collapsed import header = %q, want ▸ with its 0/4 count", line)
 	}
 }
@@ -132,14 +132,14 @@ func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 	m := nestedFixture(t)
 	m.frame()
 
-	m.handleMouse(mouse(0, 0, false)) // the import header's arrow cell
+	m.handleMouse(mouse(0, 1, false)) // the import header's arrow cell
 	if !m.collapsed[importKeyPrefix+"omsx"] || m.schemaSel != "" {
 		t.Fatalf("arrow click: collapsed=%v scope=%q, want folded and no scope", m.collapsed, m.schemaSel)
 	}
 
 	m.collapsed = nil
 	m.frame()
-	m.handleMouse(mouse(3, 0, false)) // the name cell
+	m.handleMouse(mouse(3, 1, false)) // the name cell
 	if m.collapsed[importKeyPrefix+"omsx"] || m.schemaSel != importKeyPrefix+"omsx" {
 		t.Fatalf("name click: collapsed=%v scope=%q, want selected and open", m.collapsed, m.schemaSel)
 	}
@@ -148,7 +148,7 @@ func TestArrowClickFoldsAndNameClickSelects(t *testing.T) {
 func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 	m := nestedFixture(t)
 	m.frame()
-	m.handleMouse(mouse(1, 1, false)) // the backend sub-header sits one indent in
+	m.handleMouse(mouse(1, 2, false)) // the backend sub-header sits one indent in
 	if !m.collapsed["omsx/backend"] {
 		t.Fatalf("sub-header arrow click left backend open: %v", m.collapsed)
 	}

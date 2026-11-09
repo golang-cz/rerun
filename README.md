@@ -94,7 +94,7 @@ terminal forwards it.
 With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift`+`↑`/`↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
 
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
-the fs events line at the bottom to open the change batches, and a click on a schema header to select
+the fs row at the top to open the fs events, and a click on a schema header to select
 its targets. Click a pane line to copy it; clicking an expandable line expands or
 collapses it instead, and drag copies a range and browses the scrollback
 (`esc` or `↓ N new` resumes). Shift-drag uses the terminal's own selection.
@@ -108,10 +108,10 @@ last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `hide: true` starts its header folded; `→` or a click expands it. Folding is a start state; a reload keeps your fold for groups already shown.
-The bottom-left footer reads `? help`. The line above it is the fs events line:
-`fs events · 4s ago` ages the newest change batch, reading `fs events · idle`
-when none landed in the last minute. It highlights for a second when a batch
-lands, turns red `fs events · ⚠ watch failed` after a watcher error until the
+The first row of the left column is the fs row: `fs · server.go · 4s` names the
+newest change batch's first file and its age, with `+N` for the rest of the batch,
+and reads `fs · idle` when none landed in the last minute. It highlights for a second
+when a batch lands, turns red `fs ! too many open files` after a watcher error until the
 next successful batch, and a click opens the fs events modal, like `e`. The
 modal lists the last minute's batches, newest first: `22:32:00  path +N` with
 the targets it restarted, after a 2-space gap and a `↻` mark (`config` for a rerun.yml

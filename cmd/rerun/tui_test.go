@@ -474,10 +474,10 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	m.height = 5
 	m.frame()
 
-	if row := m.rowAt(2, m.height-3); row != 2 {
+	if row := m.rowAt(2, m.height-2); row != 2 {
 		t.Fatalf("rowAt at the bottom = %d, want 2", row)
 	}
-	m.handleMouse(mouse(2, m.height-3, false))
+	m.handleMouse(mouse(2, m.height-2, false))
 	if m.cursor != 2 {
 		t.Fatalf("cursor = %d, want 2 after a click on the bottom row", m.cursor)
 	}
@@ -780,13 +780,13 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 		}
 	}
 
-	web := lines[0]
+	web := lines[1]
 	for _, want := range []string{"●", "web", "48s"} {
 		if !strings.Contains(web, want) {
 			t.Errorf("web row %q is missing %q", web, want)
 		}
 	}
-	if api := lines[1]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
+	if api := lines[2]; !strings.Contains(api, "✓") || !strings.Contains(api, "exit 0") {
 		t.Errorf("api row = %q, want ✓ and exit 0", api)
 	}
 }
@@ -839,7 +839,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 
 	// The right edge is the status column now; a click there never mutes.
 	m.toggleMute(0)
-	m.handleMouse(mouse(m.layout.leftW-1, 1, false))
+	m.handleMouse(mouse(m.layout.leftW-1, 2, false))
 	if m.targets[1].muted {
 		t.Fatal("a right-edge click muted the row")
 	}
@@ -847,7 +847,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	m.clearScope()
 
 	// A single click on a name cell moves the cursor there and solos it.
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 2, false))
 	if m.cursor != 1 {
 		t.Fatalf("cursor = %d, want 2", m.cursor)
 	}
@@ -859,7 +859,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	}
 
 	slowClick(m)
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 2, false))
 	if m.solo != 1 {
 		t.Fatalf("solo = %d, want 1 kept after the second single click", m.solo)
 	}
@@ -868,7 +868,7 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 	}
 
 	// Shift-click is a plain click: it scopes the row and leaves its mute alone.
-	m.handleMouse(mouse(2, 0, true))
+	m.handleMouse(mouse(2, 1, true))
 	if m.solo != 0 || m.cursor != 0 {
 		t.Fatalf("solo = %d cursor = %d after shift-click, want row 1 scoped", m.solo, m.cursor)
 	}
@@ -883,8 +883,8 @@ func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
 	m.frame()
 
 	// The pair's first click solos the row; the second stops it.
-	m.handleMouse(mouse(2, 0, false))
-	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
 
 	if m.targets[0].state != stateStopped {
 		t.Fatalf("state = %v, want stopped after a double-click", m.targets[0].state)
@@ -913,8 +913,8 @@ func TestMouseDoubleClickStartsAnOffRow(t *testing.T) {
 		t.Fatalf("setup: state = %v, want off", m.targets[0].state)
 	}
 
-	m.handleMouse(mouse(2, 0, false))
-	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
 
 	if m.targets[0].state != stateRunning {
 		t.Fatalf("state = %v, want running after a double-click on an off row", m.targets[0].state)
@@ -932,11 +932,11 @@ func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 	m.frame()
 
 	// Two quick clicks stop the running row and leave it soloed.
-	m.handleMouse(mouse(2, 0, false))
-	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 1, false))
 	queuedCtrl(t, m.targets[0].runner) // drain the stop
 
-	m.handleMouse(mouse(2, 0, false))
+	m.handleMouse(mouse(2, 1, false))
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0 kept by the third click", m.solo)
 	}
@@ -954,14 +954,14 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.frame()
 
-	m.handleMouse(motion(2, 0))
+	m.handleMouse(motion(2, 1))
 	if m.hover != 0 {
 		t.Fatalf("hover = %d, want 1 after a motion over row 1", m.hover)
 	}
 
 	// A wiggle inside the same row must not alter the frame.
 	before := m.View().Content
-	m.handleMouse(motion(1, 0))
+	m.handleMouse(motion(1, 1))
 	if m.hover != 0 {
 		t.Fatalf("hover = %d, want 1 still", m.hover)
 	}
@@ -972,12 +972,12 @@ func TestMouseMotionSameRowLeavesModelAlone(t *testing.T) {
 		t.Fatalf("the view changed on a same-row motion:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 
-	m.handleMouse(motion(2, 1))
+	m.handleMouse(motion(2, 2))
 	if m.hover != 1 {
 		t.Fatalf("hover = %d, want 2 after a motion onto another row", m.hover)
 	}
 
-	m.handleMouse(motion(m.layout.leftW+1, 1))
+	m.handleMouse(motion(m.layout.leftW+1, 2))
 	if m.hover != -1 {
 		t.Fatalf("hover = %d, want -1 outside the left column", m.hover)
 	}
@@ -1052,7 +1052,7 @@ func TestClickAfterWheelSelectsRowUnderMouse(t *testing.T) {
 		m.handleMouse(wheelDown(2, 1))
 	}
 
-	m.handleMouse(mouse(2, 1, false))
+	m.handleMouse(mouse(2, 2, false))
 	if want := m.layout.offset + 1; m.cursor != want {
 		t.Fatalf("cursor = %d after clicking list line 1 at offset %d, want %d", m.cursor, m.layout.offset, want)
 	}
@@ -1174,10 +1174,10 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 		t.Errorf("glyph = %q, want ·", got)
 	}
 	frame := strings.Split(m.View().Content, "\n")
-	if got := frame[0]; !strings.Contains(got, "waiting") {
+	if got := frame[1]; !strings.Contains(got, "waiting") {
 		t.Errorf("row 1 = %q, want the waiting status", got)
 	}
-	if got := frame[1]; !strings.Contains(got, "manual") {
+	if got := frame[2]; !strings.Contains(got, "manual") {
 		t.Errorf("row 2 = %q, want the manual status", got)
 	}
 
