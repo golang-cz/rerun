@@ -319,13 +319,15 @@ type tuiModel struct {
 	listScrolled bool
 	listScrollAt int
 
-	// barFocus routes keys to the filter bar; barSel is its focused chip, or -1.
+	// barFocus routes keys to the filter bar; barSel is its picked pill, or -1 for the input.
 	barFocus bool
 	barSel   int
 	// editKindOn and editKind carry a pill's kind through an edit round-trip, so
 	// re-committing its text restores filter vs highlight.
 	editKindOn bool
 	editKind   pillKind
+	// editAt is the pill slot an edit took its text from, where enter puts it back.
+	editAt int
 
 	// pinSeq is the restart rule the pane holds at its top, 0 for none.
 	pinSeq int
@@ -1326,11 +1328,11 @@ func (m *tuiModel) searchStatus() string {
 // pillStatus is the bar's scope, pill count, line counts, and hit position.
 func (m *tuiModel) pillStatus() string {
 	kept, total := m.matchCounts()
-	s := fmt.Sprintf("%s · %s · %d/%d lines", m.scopeName(), pillCount(len(m.pills)), kept, total)
+	s := fmt.Sprintf("%s · %s", m.scopeName(), pillCount(len(m.pills)))
 	if len(m.searchMatches) > 0 && m.searchRow >= 0 {
 		s += " · hit " + m.searchStatus()
 	}
-	return s
+	return s + fmt.Sprintf(" · %d/%d lines", kept, total)
 }
 
 func pillCount(n int) string {

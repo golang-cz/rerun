@@ -44,9 +44,7 @@ More keys: `c` copies the selected lines, or the pane cursor line when nothing i
 The query bar's pills AND together, and one input can hold several: `level=error -healthz` adds two on `enter`.
 Each pill is a filter (`[text]`, solid) or a highlight (`⟨text⟩`, dim): a filter pill hides non-matching lines, a
 highlight pill only marks its hits. Every pill's matches are marked in the pane, and `n`/`N`/`ctrl+g`/`ctrl+shift+g`
-jump between the hit lines. With the bar open and the input empty or the cursor at 0, `←`/`→` walk the pills: `x` or
-`backspace` removes the selected one, `enter` moves its text back into the input, `space` toggles filter ⇄ highlight,
-and `→` on a `[@name]` pill expands it into its pills. A pill that does not parse keeps the input red, with the error
+jump between the hit lines. With the bar open, `←`/`→` move the text cursor; `↑` moves focus to the pills row, where `←`/`→` pick, `delete` or `backspace` removes the picked one, `enter` or `↓` moves its text back into the input and `enter` puts it back in place, `space` toggles filter ⇄ highlight, `→` on the last `[@name]` pill expands it into its pills, and `esc` returns to the input. A click on a pill with the bar closed opens it picked. A pill that does not parse keeps the input red, with the error
 in the footer. The bar names the scope, the pill count and the matching/total lines. Typing `@` lists the pane scope's
 saved queries (see `queries:` below).
 

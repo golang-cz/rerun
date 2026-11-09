@@ -195,7 +195,7 @@ func TestExpandSavedPill(t *testing.T) {
 	typeString(m, "@hi")
 	press(m, "enter") // adds [@hits]; the bar stays open
 
-	press(m, "left") // select it
+	press(m, "up") // select it
 	if m.barSel != 0 {
 		t.Fatalf("barSel = %d, want the [@hits] pill selected", m.barSel)
 	}
@@ -216,7 +216,7 @@ func TestExpandSavedMultiPill(t *testing.T) {
 	press(m, "/")
 	typeString(m, "@multi")
 	press(m, "enter")
-	press(m, "left", "right")
+	press(m, "up", "right")
 	if len(m.pills) != 2 || m.pills[0].raw != "err" || m.pills[1].raw != "plain" {
 		t.Fatalf("expand: pills = %+v, want err and plain", m.pills)
 	}
@@ -250,7 +250,7 @@ func TestSavedPillToggleHighlight(t *testing.T) {
 	press(m, "/")
 	typeString(m, "@hi")
 	press(m, "enter") // adds [@hits]; the bar stays open
-	press(m, "left", " ", "esc")
+	press(m, "up", " ", "esc")
 	m.frame()
 	if got := len(rawPane(m)); got != 3 {
 		t.Fatalf("highlight [@hits] hid lines: pane holds %d, want 3", got)
@@ -409,9 +409,13 @@ func TestEscCommitsDraftWithPillSelected(t *testing.T) {
 	commitPill(m, "plain")
 	press(m, "/")
 	typeString(m, "err")
-	press(m, "home", "left") // select the [plain] pill
+	press(m, "home", "up") // select the [plain] pill
 	if m.barSel < 0 {
-		t.Fatal("left at cursor 0 did not select the pill")
+		t.Fatal("up did not select the pill")
+	}
+	press(m, "esc") // esc first returns to the input
+	if m.barSel != -1 || m.inputMode == inputNone {
+		t.Fatalf("esc on a picked pill: sel=%d mode=%d, want the input focused, bar open", m.barSel, m.inputMode)
 	}
 	press(m, "esc")
 	if len(m.pills) != 2 || m.pills[1].raw != "err" {
@@ -429,7 +433,7 @@ func TestExpandSavedKeepsKind(t *testing.T) {
 	press(m, "/")
 	typeString(m, "@multi")
 	press(m, "enter")
-	press(m, "left", " ", "right") // highlight, then expand
+	press(m, "up", " ", "right") // highlight, then expand
 	if len(m.pills) != 2 {
 		t.Fatalf("pills = %+v, want the two query pills", m.pills)
 	}
@@ -448,9 +452,9 @@ func TestExpandSavedKeepsKind(t *testing.T) {
 func TestEditRestoresPillKind(t *testing.T) {
 	m := queriesModel(t)
 	commitPill(m, "plain")
-	press(m, "/", "left", " ") // toggle to highlight
-	press(m, "enter")          // edit the text back into the input
-	press(m, "enter")          // commit it again
+	press(m, "/", "up", " ") // toggle to highlight
+	press(m, "enter")        // edit the text back into the input
+	press(m, "enter")        // commit it again
 	if len(m.pills) != 1 || m.pills[0].kind != pillHighlight {
 		t.Fatalf("pills = %+v, want the highlight kind restored after the edit", m.pills)
 	}
@@ -462,17 +466,17 @@ func TestSelectedPillContextFooter(t *testing.T) {
 	press(m, "/")
 	typeString(m, "@hi")
 	press(m, "enter")
-	press(m, "left") // select [@hits]
+	press(m, "up") // select [@hits]
 	box := ansi.Strip(m.inputBoxView())
-	want := "enter edit · x remove · space filter⇄highlight · → expand · esc back"
+	want := "←→ pick · enter edit · del remove · space filter⇄mark · esc input"
 	if !strings.Contains(box, want) {
 		t.Fatalf("box footer = %q, want %q", box, want)
 	}
 
 	commitPill(m, "plain")
-	press(m, "/", "left")
+	press(m, "/", "up")
 	box = ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, "enter edit · x remove · space filter⇄highlight · esc back") {
+	if !strings.Contains(box, "←→ pick · enter edit · del remove · space filter⇄mark · esc input") {
 		t.Fatalf("box footer = %q, want the keys without → expand on a plain pill", box)
 	}
 	if strings.Contains(box, "→ expand") {
@@ -630,7 +634,7 @@ func TestExpandNegatedSavedPillRefused(t *testing.T) {
 	press(m, "/")
 	typeString(m, "-@hits")
 	press(m, "enter")
-	press(m, "/", "left", "right")
+	press(m, "/", "up", "right")
 	if len(m.pills) != 1 || m.pills[0].saved != "hits" || !m.pills[0].neg {
 		t.Fatalf("pills = %+v, want the negated [@hits] kept whole", m.pills)
 	}

@@ -338,6 +338,9 @@ func (m *tuiModel) inputBoxW() int {
 
 // inputPlaceholder is the faint hint an empty query box shows.
 func (m *tuiModel) inputPlaceholder() string {
+	if len(m.pills) > 0 {
+		return "↑ pills"
+	}
 	return `level=error  "two words"  @saved  .yq`
 }
 
@@ -350,6 +353,10 @@ func (m *tuiModel) inputCount() string {
 		} else {
 			return fmt.Sprintf("%d queries", n)
 		}
+	}
+	if len(m.pills) > 0 {
+		// The pills row carries the line count at its end.
+		return ""
 	}
 	kept, total := m.matchCounts()
 	return fmt.Sprintf("%d/%d lines", kept, total)
@@ -1286,12 +1293,12 @@ var helpKeys = [][2]string{
 	{"ctrl+k g", "go to a target, or run a make target"},
 	{"o", "open the target's open: · pane: original lines"},
 	{"/ ctrl+f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},
-	{"n/N ctrl+g", "jump pill hits · bar: ←/→ pick, x drop, enter edit, → expands @"},
+	{"n/N ctrl+g", "jump pill hits · bar: ↑ pills, ←/→ pick, enter edit, → @"},
 	{"ctrl+l", "clear the log; old lines stay in scrollback"},
 	{"c", "copies the line or selection"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u/ctrl+d); a full page in focus"},
 	{"enter → a f", "pane: expand/collapse the line · a add key, f filter value"},
-	{"backspace ×", "pane: last pill · bar: ←/→ picks, backspace drops · click ×"},
+	{"backspace ×", "pane: last pill · bar: ↑ picks, del drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }

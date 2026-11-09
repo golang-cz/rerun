@@ -175,8 +175,8 @@ func TestBarHasNoPromptWhileBoxOpen(t *testing.T) {
 
 	press(m, "ctrl+f")
 	typeString(m, "alpha")
-	if got := paneOf(m)[0]; strings.Contains(got, "alpha") {
-		t.Fatalf("bar line = %q, want no draft echo", got)
+	if m.barRows() != 0 {
+		t.Fatalf("pills row shown with no pills while the draft types")
 	}
 	press(m, "esc")
 	if got := ansi.Strip(paneOf(m)[0]); !strings.Contains(got, "[alpha ×]") {

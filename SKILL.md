@@ -77,8 +77,8 @@ More keys: `b` cycles the left list: full, names only (the state glyph and name)
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
 (`!=`, `>`, `>=`, `<`, `<=`, `~` contains, `~/re/` regex, `=*` exists, `!=*` missing; `level=error|fatal` is any-of),
 `.expr` raw yq. A field name is a yq path without the leading dot; a scope column name resolves to its expression.
-`←`/`→` walk the pills: `x`/`backspace` removes, `enter` edits the text back into the input, `space` toggles filter
-⇄ highlight, `→` on `[@name]` expands it. Filter pills hide lines; every pill's matches are marked, and `n`/`N` jump
+`↑` moves focus to the pills row: `←`/`→` pick, `delete`/`backspace` removes, `enter`/`↓` edits the text back into the input (`enter` puts it back in place), `space` toggles filter
+⇄ highlight, `→` on the last `[@name]` expands it, `esc` returns to the input. With the bar closed, clicking a pill opens it picked. Filter pills hide lines; every pill's matches are marked, and `n`/`N` jump
 between hits. `@` lists the pane scope's saved queries from the `queries:` keys (top level, per group, per target;
 most specific wins a name clash). `esc` keeps the pills; `backspace` on an empty input removes the last one.
 

@@ -25,7 +25,7 @@ const columnMarkW = 2
 const savedNoticeHold = 2 * time.Second
 
 // chipHit is a pill's × cell in the header row, and the pill it removes.
-type chipHit struct{ x, idx int }
+type chipHit struct{ x0, x, idx int }
 
 // colNode is what column picks write to: a schema, or a target by name.
 type colNode struct {

@@ -20,8 +20,9 @@ func pillLabel(p pill) string {
 	return "[" + p.raw + " ×]"
 }
 
+// barRows is 1 while any pill exists: the pills row is the only bar row.
 func (m *tuiModel) barRows() int {
-	if m.barFocus || len(m.pills) > 0 {
+	if len(m.pills) > 0 {
 		return 1
 	}
 	return 0
@@ -70,7 +71,7 @@ func (m *tuiModel) barLine(w int) string {
 	}
 	hidden := 0
 	for hidden < len(texts)-1 && need(hidden, hint, status) > w {
-		if m.barFocus && m.barSel == hidden {
+		if m.barSel == hidden {
 			break
 		}
 		hidden++
@@ -91,11 +92,11 @@ func (m *tuiModel) barLine(w int) string {
 		if m.pills[i].kind == pillHighlight {
 			style = m.styles.chipHi
 		}
-		if m.barFocus && m.barSel == i {
+		if m.barSel == i {
 			style = style.Reverse(true)
 		}
 		cross := strings.LastIndex(text, "×")
-		m.layout.chips = append(m.layout.chips, chipHit{x: x + displayWidth(text[:cross]), idx: i})
+		m.layout.chips = append(m.layout.chips, chipHit{x0: x, x: x + displayWidth(text[:cross]), idx: i})
 		parts = append(parts, style.Render(text))
 		x += displayWidth(text) + 1
 	}
@@ -116,17 +117,12 @@ func (m *tuiModel) barHint() string {
 	if len(m.pills) == 0 {
 		return "/ query · @ saved"
 	}
-	return "/ add · ← backspace remove · space toggles"
+	return "/ add · ↑ pick"
 }
 
-// pillContextFooter is the input box's key line while a pill is selected;
-// → expand only shows on a saved [@name] pill.
+// pillContextFooter is the input box's key line while a pill is picked.
 func (m *tuiModel) pillContextFooter() string {
-	h := "enter edit · x remove · space filter⇄highlight"
-	if m.pills[m.barSel].saved != "" {
-		h += " · → expand"
-	}
-	return h + " · esc back"
+	return "←→ pick · enter edit · del remove · space filter⇄mark · esc input"
 }
 
 // removePill drops the pill at idx, then fixes the bar's focus.
@@ -205,8 +201,9 @@ func (m *tuiModel) pickCommit() bool {
 	return true
 }
 
-// commitText parses the input into pills and appends them, restoring the kind
-// of a pill under edit. A parse or resolve error is named and reported false.
+// commitText parses the input into pills and adds them, restoring the kind
+// of a pill under edit and putting it back where it was. A parse or resolve
+// error is named and reported false.
 func (m *tuiModel) commitText() bool {
 	pills, err := parsePills(m.input, m.barCols())
 	if err != nil {
@@ -221,6 +218,8 @@ func (m *tuiModel) commitText() bool {
 		for i := range pills {
 			pills[i].kind = m.editKind
 		}
+		m.pills = slices.Insert(m.pills, min(m.editAt, len(m.pills)), pills...)
+		return true
 	}
 	m.pills = append(m.pills, pills...)
 	return true
@@ -231,17 +230,7 @@ func (m *tuiModel) commitText() bool {
 // input into pills. A parse error keeps the input red and the bar open.
 func (m *tuiModel) commitInput() {
 	if m.barSel >= 0 {
-		p := m.pills[m.barSel]
-		m.pills = slices.Delete(m.pills, m.barSel, m.barSel+1)
-		text := p.raw
-		if m.input != "" {
-			text += " " + m.input
-		}
-		m.barSel = -1
-		// The kind survives the edit: re-committing restores filter vs highlight.
-		m.editKind, m.editKindOn = p.kind, true
-		m.inputSet(text, len([]rune(p.raw)))
-		m.pillsChanged()
+		m.editPill(m.barSel)
 		return
 	}
 	if m.pickActive() {
@@ -258,6 +247,29 @@ func (m *tuiModel) commitInput() {
 	m.input = ""
 	m.inputCursor = 0
 	m.closeBar()
+}
+
+// editPill moves the pill's text into the input; its kind and slot survive the
+// round trip, so enter puts it back in place.
+func (m *tuiModel) editPill(idx int) {
+	p := m.pills[idx]
+	m.pills = slices.Delete(m.pills, idx, idx+1)
+	text := p.raw
+	if m.input != "" {
+		text += " " + m.input
+	}
+	m.barSel = -1
+	m.editKind, m.editKindOn, m.editAt = p.kind, true, idx
+	m.inputSet(text, len([]rune(p.raw)))
+	m.pillsChanged()
+}
+
+// focusPill picks a pill on the pills row, opening the bar when it is closed.
+func (m *tuiModel) focusPill(idx int) {
+	if !m.barFocus {
+		m.openBar()
+	}
+	m.barSel = idx
 }
 
 // inputChanged re-parses the typed text live: a valid input previews as a
@@ -481,9 +493,9 @@ func (m *tuiModel) escList() {
 	m.applyRowScope(hr)
 }
 
-// handleBarKey routes keys while the query bar is open: the input owns the
-// text keys, and the pills take the arrows when the input is empty or the
-// cursor is at 0. Only Ctrl-C escapes the bar.
+// handleBarKey routes keys while the query bar is open. The input owns the
+// text keys and ←/→ move its cursor; ↑ moves focus to the pills row, where the
+// arrows pick and enter edits. Only Ctrl-C escapes the bar.
 func (m *tuiModel) handleBarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := barKeyName(msg)
 	if m.pickActive() {
@@ -500,6 +512,10 @@ func (m *tuiModel) handleBarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "ctrl+[":
+		if m.barSel >= 0 {
+			m.barSel = -1
+			break
+		}
 		m.closeBar()
 	case "ctrl+g":
 		m.inputSel = false
@@ -510,28 +526,31 @@ func (m *tuiModel) handleBarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchJump(-1)
 	case "enter", "ctrl+m":
 		m.commitInput()
-	case "left":
-		switch {
-		case m.barSel > 0:
-			m.barSel--
-		case m.barSel == 0:
-		case len(m.pills) > 0 && (m.input == "" || m.inputPos() == 0):
+	case "up":
+		if m.barSel < 0 && len(m.pills) > 0 {
 			m.barSel = len(m.pills) - 1
-		default:
-			m.inputMoveRune(-1)
 		}
+	case "down":
+		if m.barSel >= 0 {
+			m.editPill(m.barSel)
+		}
+	case "left":
+		if m.barSel >= 0 {
+			m.barSel = max(0, m.barSel-1)
+			break
+		}
+		m.inputMoveRune(-1)
 	case "right":
+		last := len(m.pills) - 1
 		switch {
-		case m.barSel >= 0 && m.pills[m.barSel].saved != "":
-			m.expandSaved(m.barSel)
-		case m.barSel >= 0 && m.barSel < len(m.pills)-1:
-			m.barSel++
-		case m.barSel >= 0:
-			m.barSel = -1
-		case m.input == "" && len(m.pills) > 0:
-			m.barSel = 0
-		default:
+		case m.barSel < 0:
 			m.inputMoveRune(1)
+		case m.barSel == last && m.pills[last].saved != "":
+			m.expandSaved(m.barSel)
+		case m.barSel < last:
+			m.barSel++
+		default:
+			m.barSel = -1
 		}
 	case "alt+left", "alt+b":
 		m.inputMoveWord(-1)

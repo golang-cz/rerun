@@ -140,22 +140,19 @@ func TestInputCtrlWDeletesWordBefore(t *testing.T) {
 	})
 }
 
-// An empty input hands the left arrow to the pills, with the bar kept open.
-func TestInputLeftOnEmptyStepsOntoChips(t *testing.T) {
+// ←/→ in the input only move the text cursor, never focus the pills.
+func TestInputLeftOnEmptyStaysInInput(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	press(m, "/")
-	press(m, "left")
+	press(m, "left", "right")
 
-	if m.inputMode != inputQuery {
-		t.Fatalf("inputMode = %d, want the bar kept open while the pills take the arrows", m.inputMode)
-	}
-	if m.barSel != 0 {
-		t.Fatalf("barSel = %d, want the last pill 0 focused", m.barSel)
+	if m.inputMode != inputQuery || m.barSel != -1 {
+		t.Fatalf("mode=%d sel=%d, want the bar open and the input focused", m.inputMode, m.barSel)
 	}
 }
 
-// Typed text at cursor 0 hands the left arrow to the pills but never loses the text.
+// Typed text at cursor 0: left stays in the input and keeps the text.
 func TestInputLeftOnTypedTextStaysInInput(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
@@ -163,12 +160,24 @@ func TestInputLeftOnTypedTextStaysInInput(t *testing.T) {
 	typeString(m, "be")
 	press(m, "home", "left")
 
-	if m.inputMode != inputQuery || m.input != "be" || m.inputCursor != 0 {
-		t.Fatalf("mode=%d input=%q cursor=%d, want the input open and the cursor at 0",
-			m.inputMode, m.input, m.inputCursor)
+	if m.inputMode != inputQuery || m.input != "be" || m.inputCursor != 0 || m.barSel != -1 {
+		t.Fatalf("mode=%d input=%q cursor=%d sel=%d, want the input focused, text kept, cursor at 0",
+			m.inputMode, m.input, m.inputCursor, m.barSel)
 	}
+}
+
+// ↑ from the input focuses the last pill; ↓ or enter edits it.
+func TestUpFocusesPillsAndDownEdits(t *testing.T) {
+	m := alphaModel(t)
+	commitText(m, "/", "alpha")
+	press(m, "/")
+	press(m, "up")
 	if m.barSel != 0 {
-		t.Fatalf("barSel = %d, want the last pill 0 focused", m.barSel)
+		t.Fatalf("up: sel=%d, want the last pill", m.barSel)
+	}
+	press(m, "down")
+	if len(m.pills) != 0 || m.input != "alpha" {
+		t.Fatalf("down: pills=%d input=%q, want the pill moved into the input", len(m.pills), m.input)
 	}
 }
 

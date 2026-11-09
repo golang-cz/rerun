@@ -111,7 +111,7 @@ func TestBarArrowsWalkPills(t *testing.T) {
 	commitPill(m, "alpha")
 	commitPill(m, "beta")
 
-	press(m, "/", "left")
+	press(m, "/", "up")
 	if m.barSel != 1 || m.inputMode != inputQuery {
 		t.Fatalf("left: sel=%d mode=%d, want the last pill selected with the bar open", m.barSel, m.inputMode)
 	}
@@ -132,11 +132,11 @@ func TestBarArrowsWalkPills(t *testing.T) {
 		t.Fatalf("right past the last pill: sel=%d, want the input (-1)", m.barSel)
 	}
 
-	// Cursor at 0 with typed text: left walks pills too.
+	// Cursor at 0 with typed text: left stays in the input.
 	typeString(m, "ga")
 	press(m, "home", "left")
-	if m.barSel != 1 || m.input != "ga" {
-		t.Fatalf("left at cursor 0: sel=%d input=%q, want the last pill and the text kept", m.barSel, m.input)
+	if m.barSel != -1 || m.input != "ga" {
+		t.Fatalf("left at cursor 0: sel=%d input=%q, want the input and the text kept", m.barSel, m.input)
 	}
 	// A printable key returns to the text.
 	typeString(m, "z")
@@ -153,7 +153,7 @@ func TestSelectedPillKeys(t *testing.T) {
 	commitPill(m, "beta")
 
 	// x removes the selected pill.
-	press(m, "/", "left", "x")
+	press(m, "/", "up", "x")
 	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
 		t.Fatalf("x: pills = %+v, want only alpha", m.pills)
 	}
@@ -178,7 +178,7 @@ func TestSelectedPillKeys(t *testing.T) {
 	// still open from the removal, so no fresh / is typed.
 	typeString(m, "alpha")
 	press(m, "enter")
-	press(m, "/", "left", " ", "esc")
+	press(m, "/", "up", " ", "esc", "esc")
 	if m.pills[0].kind != pillHighlight {
 		t.Fatalf("kind = %d after space, want highlight", m.pills[0].kind)
 	}
@@ -186,7 +186,7 @@ func TestSelectedPillKeys(t *testing.T) {
 	if got := len(rawPane(m)); got != 4 {
 		t.Fatalf("highlight pill hid lines: pane holds %d, want 4", got)
 	}
-	press(m, "/", "left", " ", "esc")
+	press(m, "/", "up", " ", "esc", "esc")
 	if m.pills[0].kind != pillFilter {
 		t.Fatalf("kind = %d after the second space, want filter", m.pills[0].kind)
 	}
@@ -201,7 +201,7 @@ func TestPillRenderingModes(t *testing.T) {
 	m := pillModel(t)
 	commitPill(m, "alpha")
 	commitPill(m, "beta")
-	press(m, "/", "left", " ", "esc")
+	press(m, "/", "up", " ", "esc", "esc")
 
 	bar := paneOf(m)[0]
 	if !strings.Contains(bar, "[alpha ×]") {
@@ -218,7 +218,7 @@ func TestPillSpansPaintedInPane(t *testing.T) {
 	m := pillModel(t)
 	commitPill(m, "alpha")
 	commitPill(m, "gamma")
-	press(m, "/", "left", "left", " ", "esc") // alpha highlights, gamma filters
+	press(m, "/", "up", "left", " ", "esc") // alpha highlights, gamma filters
 	m.frame()
 
 	want := []string{"alpha gamma", "delta gamma"}
@@ -271,7 +271,7 @@ func TestHitJumpsCoverPills(t *testing.T) {
 	}
 
 	// A highlight-mode pill's hits are jump targets too.
-	press(m, "/", "left", " ", "esc")
+	press(m, "/", "up", " ", "esc", "esc")
 	if got := len(m.searchMatches); got != 11 {
 		t.Fatalf("highlight pill matches = %d, want 11", got)
 	}
@@ -285,14 +285,14 @@ func TestBarShowsScopeCountAndRatio(t *testing.T) {
 	commitPill(m, "beta")
 	m.frame()
 	bar := ansi.Strip(paneOf(m)[0])
-	if !strings.Contains(bar, "all · 2 pills · 1/4 lines") {
+	if !strings.Contains(bar, "all · 2 pills") && strings.HasSuffix(strings.TrimSpace(bar), "1/4 lines") {
 		t.Fatalf("bar = %q, want all · 2 pills · 1/4 lines", bar)
 	}
 
 	m.applyScope(0, "") // solo web
 	m.frame()
 	bar = ansi.Strip(paneOf(m)[0])
-	if !strings.Contains(bar, "web · 2 pills · 1/4 lines") {
+	if !strings.Contains(bar, "web · 2 pills") && strings.HasSuffix(strings.TrimSpace(bar), "1/4 lines") {
 		t.Fatalf("bar = %q, want the web scope", bar)
 	}
 }

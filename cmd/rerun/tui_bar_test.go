@@ -98,8 +98,8 @@ func TestBackspaceRemovesTheFocusedChip(t *testing.T) {
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	// An empty input and left hand the focus to the last pill.
-	press(m, "/", "left")
+	// An empty input and up hand the focus to the last pill.
+	press(m, "/", "up")
 	if !m.barFocus || m.inputMode != inputQuery || m.barSel != 1 {
 		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last pill", m.barFocus, m.inputMode, m.barSel)
 	}
@@ -107,6 +107,7 @@ func TestBackspaceRemovesTheFocusedChip(t *testing.T) {
 	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
 		t.Fatalf("pills = %+v, want beta removed", m.pills)
 	}
+	press(m, "esc")
 	press(m, "esc")
 	if m.barFocus {
 		t.Fatal("esc left the bar focused")
@@ -119,7 +120,7 @@ func TestCtrlHRemovesTheFocusedChip(t *testing.T) {
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	press(m, "/", "left")
+	press(m, "/", "up")
 	if !m.barFocus || m.inputMode != inputQuery || m.barSel != 1 {
 		t.Fatalf("bar focus=%v mode=%d sel=%d, want focus on the last pill", m.barFocus, m.inputMode, m.barSel)
 	}

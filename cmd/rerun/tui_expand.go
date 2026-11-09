@@ -495,8 +495,15 @@ func (m *tuiModel) clickHeader(px, y int) {
 	m.clearSelection()
 	if y < m.barRows() {
 		for _, h := range m.layout.chips {
-			if px == h.x && h.idx < len(m.pills) {
+			if h.idx >= len(m.pills) {
+				continue
+			}
+			if px == h.x {
 				m.removePill(h.idx)
+				return
+			}
+			if px >= h.x0 && px < h.x0+displayWidth(pillLabel(m.pills[h.idx])) {
+				m.focusPill(h.idx)
 				return
 			}
 		}

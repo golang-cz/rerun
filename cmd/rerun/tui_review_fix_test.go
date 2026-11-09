@@ -168,7 +168,7 @@ func TestBarHintNamesTheKeys(t *testing.T) {
 	m := alphaModel(t)
 	m.width = 130 // wide enough for the hint beside the pill status
 	commitText(m, "/", "alpha")
-	if got := paneOf(m)[0]; !strings.Contains(got, "/ add · ← backspace remove · space toggles") {
+	if got := paneOf(m)[0]; !strings.Contains(got, "/ add · ↑ pick") {
 		t.Fatalf("bar = %q, want the key hint", got)
 	}
 }
