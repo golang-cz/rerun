@@ -64,8 +64,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			specs = append(specs, spec)
 		}
 	}
+	// Beside a rerun.yml only its imports: list load; a bare Makefile dir loads its Makefile.
+	mk := implicitMakefile(filepath.Dir(rootFile))
+	rootExists := fileExists(rootFile)
 	// Last, so an explicit import of the same file is seen first and wins the dedupe.
-	if mk := implicitMakefile(filepath.Dir(rootFile)); mk != "" {
+	if mk != "" && !rootExists {
 		specs = append(specs, importSpec{path: filepath.Base(mk), group: makeKind, optional: true, implicit: true})
 	}
 
@@ -108,14 +111,6 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			continue
 		}
 		seenFiles[canon] = spec.groups
-		// An implicit Makefile never breaks a config that loaded before: it yields to any make group.
-		if spec.implicit && seenGroups[makeKind] {
-			continue
-		}
-		if spec.implicit && rootOwnsGroup(cfg, rootSchemas, makeKind) {
-			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: rerun.yml defines group %q; list the Makefile under imports: to use it", filepath.Base(abs), makeKind))
-			continue
-		}
 		// A compose import's default group is its project name, known only after docker reads the file.
 		explicitGroup := spec.group != ""
 		if !explicitGroup {
@@ -303,6 +298,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			cfg.Targets = append(cfg.Targets, t)
 		}
 	}
+	if mk != "" && rootExists {
+		if _, listed := seenFiles[canonicalPath(mk)]; !listed {
+			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s not imported · add it under imports:", filepath.Base(mk)))
+		}
+	}
 	loaded := map[string]bool{}
 	for _, t := range cfg.Targets {
 		if t.Import != "" {
@@ -326,19 +326,6 @@ func autoHideOf(spec importSpec, root groupDef, makefile bool) bool {
 		return root.autoHide
 	}
 	return makefile
-}
-
-// rootOwnsGroup reports whether rerun.yml itself defines group, by a groups: entry or by its own targets.
-func rootOwnsGroup(cfg *Config, rootSchemas map[string]groupDef, group string) bool {
-	if _, ok := rootSchemas[group]; ok {
-		return true
-	}
-	for _, t := range cfg.Targets {
-		if t.Import == "" && t.Schema == group {
-			return true
-		}
-	}
-	return false
 }
 
 // errNoDocker is returned when a compose import needs the docker CLI and it is not on PATH.
@@ -543,4 +530,10 @@ func resolveImportPath(dir, p string) (string, error) {
 		p = filepath.Join(dir, p)
 	}
 	return filepath.Clean(p), nil
+}
+
+// fileExists reports whether p can be stat'd.
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

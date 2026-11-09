@@ -683,19 +683,30 @@ func TestMakefileImports(t *testing.T) {
 			wantNext: []string{"local", "make/build"},
 		},
 		{
-			name:     "an unlisted Makefile beside rerun.yml is imported as make",
-			root:     "local:\n  cmd: echo\n",
+			name:     "a listed Makefile beside rerun.yml is imported as make",
+			root:     "imports:\n  - path: Makefile\n\nlocal:\n  cmd: echo\n",
 			files:    map[string]string{"app/Makefile": "build:\n"},
 			wantNext: []string{"local", "make/build"},
 			check: func(t *testing.T, cfg *Config) {
 				build, _ := cfg.Find("make/build")
 				if !build.ImportHide {
-					t.Errorf("implicit make group is not folded by default")
+					t.Errorf("make group is not folded by default")
 				}
 				if !slices.ContainsFunc(cfg.Files, func(f string) bool {
 					return filepath.Dir(f) == filepath.Dir(cfg.Path) && strings.EqualFold(filepath.Base(f), "makefile")
 				}) {
-					t.Errorf("files = %v, want the implicit Makefile watched", cfg.Files)
+					t.Errorf("files = %v, want the listed Makefile watched", cfg.Files)
+				}
+			},
+		},
+		{
+			name:     "an unlisted Makefile beside rerun.yml is not imported",
+			root:     "local:\n  cmd: echo\n",
+			files:    map[string]string{"app/Makefile": "build:\n"},
+			wantNext: []string{"local"},
+			check: func(t *testing.T, cfg *Config) {
+				if !containsNotice(cfg, "Makefile not imported · add it under imports:") {
+					t.Errorf("notices = %q, want the not-imported notice", cfg.Notices)
 				}
 			},
 		},

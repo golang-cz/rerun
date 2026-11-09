@@ -16,11 +16,21 @@ var makeNameRE = regexp.MustCompile(`^[A-Za-z0-9_./+][A-Za-z0-9_./+-]*$`)
 var makeNames = []string{"GNUmakefile", "makefile", "Makefile"}
 
 // implicitMakefile is the Makefile in dir that a bare `make` would read, or "".
+// It matches the file's exact spelling, so Makefile is never read as makefile on a case-blind disk.
 func implicitMakefile(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	files := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			files[e.Name()] = true
+		}
+	}
 	for _, name := range makeNames {
-		p := filepath.Join(dir, name)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p
+		if files[name] {
+			return filepath.Join(dir, name)
 		}
 	}
 	return ""

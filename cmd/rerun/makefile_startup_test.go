@@ -111,7 +111,7 @@ func newMakeTUI(t *testing.T) *tuiModel {
 	t.Helper()
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "test:\n\ttrue\n\nlint:\n\ttrue\n",
-		ConfigFileName: "web:\n  cmd: sleep 30\n",
+		ConfigFileName: "imports:\n  - path: Makefile\n\nweb:\n  cmd: sleep 30\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestRunConfigModeMakeOnlyWithoutTTYExitsWithHint(t *testing.T) {
 	}
 }
 
-func TestImplicitMakefileYieldsToRootMakeTargetName(t *testing.T) {
+func TestUnlistedMakefileDoesNotShadowRootMakeTarget(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n\ntest:\n\tgo test\n",
 		ConfigFileName: "make/build:\n  cmd: echo root\n",
@@ -243,11 +243,11 @@ func TestImplicitMakefileYieldsToRootMakeTargetName(t *testing.T) {
 	if c, _ := cfg.Find("make/build"); c.Cmd != "echo root" {
 		t.Errorf("make/build Cmd = %q, want the rerun.yml target", c.Cmd)
 	}
-	if _, ok := cfg.Find("make/test"); !ok {
-		t.Errorf("targets = %v, want make/test still imported", targetNames(cfg))
+	if _, ok := cfg.Find("make/test"); ok {
+		t.Errorf("targets = %v, want no make/test from an unlisted Makefile", targetNames(cfg))
 	}
-	if !containsNotice(cfg, `"make/build" is skipped`) {
-		t.Errorf("notices = %v, want a skip notice for make/build", cfg.Notices)
+	if !containsNotice(cfg, "Makefile not imported") {
+		t.Errorf("notices = %v, want the not-imported notice", cfg.Notices)
 	}
 }
 
@@ -263,12 +263,12 @@ func TestRootGroupMakeSkipsImplicitMakefileWithNotice(t *testing.T) {
 	if got := targetNames(cfg); !reflect.DeepEqual(got, []string{"web"}) {
 		t.Errorf("targets = %v, want only web", got)
 	}
-	if !containsNotice(cfg, "defines group") {
-		t.Errorf("notices = %v, want the root-owns-make notice", cfg.Notices)
+	if !containsNotice(cfg, "Makefile not imported") {
+		t.Errorf("notices = %v, want the not-imported notice", cfg.Notices)
 	}
 }
 
-func TestImportClaimingMakeSkipsImplicitMakefileSilently(t *testing.T) {
+func TestImportClaimingMakeNoticesTheUnlistedMakefile(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
 		"tools.mk":     "lint:\n\tgo vet\n",
@@ -281,8 +281,8 @@ func TestImportClaimingMakeSkipsImplicitMakefileSilently(t *testing.T) {
 	if _, ok := cfg.Find("make/lint"); !ok {
 		t.Errorf("targets = %v, want make/lint from the explicit import", targetNames(cfg))
 	}
-	if got := withoutMigrateNotice(cfg.Notices); len(got) != 0 {
-		t.Errorf("notices = %v, want none", got)
+	if got := withoutMigrateNotice(cfg.Notices); len(got) != 1 || !strings.Contains(got[0], "Makefile not imported") {
+		t.Errorf("notices = %v, want only the not-imported notice", got)
 	}
 }
 
@@ -295,18 +295,22 @@ func containsNotice(cfg *Config, sub string) bool {
 	return false
 }
 
-func TestConfigWatchPicksUpAMakefileCreatedBesideRerunYML(t *testing.T) {
-	dir := makeDir(t, map[string]string{ConfigFileName: "web:\n  cmd: sleep 30\n"})
+func TestConfigWatchPicksUpAMakefileOnceRerunYMLListsIt(t *testing.T) {
+	dir := makeDir(t, map[string]string{
+		"Makefile":     "build:\n\tgo build\n",
+		ConfigFileName: "web:\n  cmd: sleep 30\n",
+	})
 	group, sink := startConfigWatch(t, filepath.Join(dir, ConfigFileName))
 	if _, ok := findSnapshot(group, "make/build"); ok {
-		t.Fatal("make/build loaded before the Makefile existed")
+		t.Fatal("make/build loaded from an unlisted Makefile")
 	}
 
-	create := func() { writeFile(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build\n") }
-	waitForKindPoking(t, sink, evReconcile, 10*time.Second, create)
-
+	list := func() {
+		writeFile(t, filepath.Join(dir, ConfigFileName), "imports:\n  - path: Makefile\n\nweb:\n  cmd: sleep 30\n")
+	}
+	waitForKindPoking(t, sink, evReconcile, 10*time.Second, list)
 	if _, ok := findSnapshot(group, "make/build"); !ok {
-		t.Fatal("make/build did not load once the Makefile appeared")
+		t.Fatal("make/build did not load once rerun.yml listed the Makefile")
 	}
 }
 
@@ -365,26 +369,19 @@ func TestEmptyPaneHintDropsUnfoldWhenMakeIsUnfolded(t *testing.T) {
 	}
 }
 
-func TestUnreadableImplicitMakefileIsANotice(t *testing.T) {
+func TestUnreadableListedMakefileFailsTheLoad(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads a chmod 000 file")
 	}
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
-		ConfigFileName: "web:\n  cmd: sleep 30\n",
+		ConfigFileName: "imports:\n  - path: Makefile\n\nweb:\n  cmd: sleep 30\n",
 	})
 	if err := os.Chmod(filepath.Join(dir, "Makefile"), 0); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(dir)
-	if err != nil {
-		t.Fatalf("LoadConfig: %v, want the Makefile skipped with a notice", err)
-	}
-	if got := targetNames(cfg); !reflect.DeepEqual(got, []string{"web"}) {
-		t.Errorf("targets = %v, want only web", got)
-	}
-	if !containsNotice(cfg, "is not imported") {
-		t.Errorf("notices = %v, want the not-imported notice", cfg.Notices)
+	if _, err := LoadConfig(dir); err == nil || !strings.Contains(err.Error(), "Makefile") {
+		t.Fatalf("LoadConfig err = %v, want the listed Makefile's read error", err)
 	}
 }
 

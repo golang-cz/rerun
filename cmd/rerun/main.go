@@ -117,6 +117,14 @@ func runMigrate() int {
 	default:
 		fmt.Fprintf(os.Stdout, "rerun: %s has no top-level targets to move\n", path)
 	}
+	added, err := migrateImports(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "rerun: migrate: %v\n", err)
+		return 1
+	}
+	for _, name := range added {
+		fmt.Fprintf(os.Stdout, "rerun: %s: added %s to imports:\n", path, name)
+	}
 	return 0
 }
 
