@@ -30,7 +30,7 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
-`e` fs events (last minute), `m` mute a stream. Moving the cursor
+`e` fs events (last minute), `m` mute a stream. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.

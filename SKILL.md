@@ -63,7 +63,7 @@ merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
-`enter` focuses the pane. The cursor row narrows the pane to its target or
+`enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
 targets. `o` open the url. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to

@@ -441,7 +441,7 @@ func (m *tuiModel) enterRow() {
 		}
 		m.applyRowScope(r)
 	}
-	m.paneFocus = true
+	m.focusPane()
 }
 
 // stopRow is `s`: stops the focused pane's scope, else the cursor's row. Never a toggle.

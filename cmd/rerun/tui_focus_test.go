@@ -313,3 +313,50 @@ func TestListFocusKeepsRowsBright(t *testing.T) {
 		t.Fatalf("cursor row = %q, want the cursor band", web)
 	}
 }
+
+// Focusing the pane lands the cursor on the service's last line, skipping rerun's rules.
+func TestFocusPutsCursorOnTheLastServiceLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{
+		{kind: evExited, target: "web", restart: true, code: -1, status: "stopped for restart"},
+		{kind: evExited, target: "web", code: 1},
+	})
+	m.frame()
+
+	press(m, "right")
+	if got := m.visibleRaw[m.paneCurRaw]; got != "two" {
+		t.Fatalf("focus put the cursor on %q, want the service's last line", got)
+	}
+	if m.follow {
+		t.Fatal("the cursor left the newest line but the tail still follows")
+	}
+}
+
+// When the service's last line is off screen, focus lands on the last line instead.
+func TestFocusOffScreenPutsCursorOnTheLastLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 60).events)
+	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
+	m.frame()
+	m.follow = false
+	m.vp.SetYOffset(0)
+
+	press(m, "right")
+	if want := len(m.visibleRaw) - 1; m.paneCurRaw != want {
+		t.Fatalf("cursor on raw %d, want the last line %d", m.paneCurRaw, want)
+	}
+}
+
+// Enter on a list row focuses the pane the same way, with the cursor on the service's last line.
+func TestEnterFocusPutsCursorOnTheLastServiceLine(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", "one", "two")
+	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
+	m.frame()
+
+	press(m, "enter")
+	if got := m.visibleRaw[m.paneCurRaw]; got != "two" {
+		t.Fatalf("enter put the cursor on %q, want the service's last line", got)
+	}
+}

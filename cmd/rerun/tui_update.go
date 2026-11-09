@@ -274,7 +274,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.listFocused() && m.treeRight() {
 				break
 			}
-			m.paneFocus = true
+			m.focusPane()
 		} else if !m.arrowExpand() {
 			m.paneCol++
 			m.vpDirty = true

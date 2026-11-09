@@ -253,6 +253,35 @@ func (m *tuiModel) arrowCollapse() bool {
 	return true
 }
 
+// focusPane gives the pane the keys, with its cursor on the service's last line.
+func (m *tuiModel) focusPane() {
+	m.paneFocus = true
+	n := m.paneLen()
+	if n == 0 {
+		return
+	}
+	// rerun's own rules are not service output, so they never take the cursor.
+	target := -1
+	for row := n - 1; row >= 0 && target < 0; row-- {
+		r := m.rowInfo(row)
+		if r.sub < 0 && !m.visibleSep[r.raw].isSep() {
+			target = row
+		}
+	}
+	if target < 0 {
+		return
+	}
+	top := m.vp.YOffset()
+	if target < top || target >= top+m.paneRows() {
+		target = n - 1
+	}
+	if m.follow && target == n-1 {
+		return
+	}
+	m.pauseTail()
+	m.setPaneCursor(target)
+}
+
 // cursorLine is the shown line under the cursor, false while it sits on an expansion row.
 func (m *tuiModel) cursorLine() (dispRow, bool) {
 	if m.paneLen() == 0 {
