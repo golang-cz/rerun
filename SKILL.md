@@ -65,13 +65,13 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
 schema's targets (`esc` backs out). On a schema header, `space`, `r`, and `m` act on its
-targets. `o` open the url. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
+targets. `o` open the url; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `hide: true` also folds its header. A target's own `hide: false` overrides a group's `hide: true`. A target's `hide: false` unmutes it, but the group header still starts folded. A root group named after an import folds that import's section. Folding is a start state; a reload keeps your fold for groups already shown. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
-More keys: `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
+More keys: `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
 `/`, `v` or `ctrl+f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
@@ -86,6 +86,8 @@ Build output shows inline: each build is one `⚙` rule in the stream, rewritten
 becomes `built <duration>` or `✗ build failed`. Its output folds under the rule: click anywhere on
 the rule line, or press `enter`. A failed build opens itself, and a `▶` rule folds its command when the
 pane cuts it short; a click on a cut rule expands it to the full command.
+
+With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift+↑/↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
@@ -123,6 +125,27 @@ and heads the files reported under it. The pane's top line
 names a muted row (`muted`). A rerun.yml reload shows as the `config`
 target. Batches older than a minute drop off.
 
+### Auto-hide: idle targets
+
+`auto-hide: true` on a group or an import lists its targets only while they run, start, restart or fail.
+Stopped, never-run, manual and off targets hide. A target that exits 0 hides ten minutes after it exits, so you can read its result.
+A target that exits non-zero stays visible.
+
+- A target the pane shows stays listed, so it never vanishes under the cursor.
+- A group's last row counts its hidden members: `(+) 12 hidden`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) hide 12`.
+- `h` shows or hides the cursor's group's hidden members from any row of that group. A folded header reads `▸ make · 2 running · 12 hidden`.
+- `ctrl+k` still finds hidden targets. Running one makes it visible.
+- A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
+
+```yaml
+imports:
+  - path: apps/api/Makefile
+    auto-hide: false               # keep every rule listed
+groups:
+  tools:
+    auto-hide: true                # default false outside Makefile imports
+```
+
 ### Imports: other projects' rerun.yml
 
 A `rerun.yml` can list other rerun files under `imports:`, one map per file:
@@ -144,6 +167,8 @@ A rerun.yml import's targets default to `auto`; a Makefile or compose import's t
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
 imported file is ignored. A compose file is imported as its services. See Docker Compose below.
 
+With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one. `rerun -migrate` adds the entry for a file that loaded before.
+
 ### Makefile: a make file's targets
 
 A Makefile is an import source too. Its targets become rows, read as text, never run through `make -p`.
@@ -156,7 +181,7 @@ imports:
     targets: [lint, gen]           # keep only these
 ```
 
-- A `Makefile` next to `rerun.yml` loads as a folded `make` group by default.
+- A `Makefile` next to `rerun.yml` loads as a folded `make` group by default. With a `rerun.yml`, it loads only when listed under `imports:`.
 - Subfolder Makefiles load only when imported. rerun never scans subfolders.
 - `groups: make: hide: false` unfolds a Makefile group.
 - Descriptions come from a trailing `## text` or the comment above the target.
@@ -182,6 +207,7 @@ imports:
 - Services start manually by default; an import's `start: auto` starts them at session start.
 - State comes from `docker events` and `docker compose ps`. Logs come from `docker logs -f`.
 - Quitting rerun leaves the containers running.
+- Compose files load only when listed under `imports:`. rerun never auto-imports one.
 - Needs the `docker` CLI on PATH. `groups:` is an error on a compose import.
 
 ## Building rerun.yml

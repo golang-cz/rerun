@@ -30,9 +30,9 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
-`e` fs events (last minute), `m` mute a stream. `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
+`e` fs events (last minute), `m` mute a stream. `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
-On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url. Scrolling up browses the
+On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` open the url; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/`, `v` or `ctrl+f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; `t` toggles the columns
@@ -90,6 +90,9 @@ the footer reads `unsaved columns · ctrl+s save` until then, and a schema or ta
 unsaved columns gets a `*` in its marker column, two cells after its name. A `columns:` list that a YAML alias uses elsewhere is
 not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
+
+With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift`+`↑`/`↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
+
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
 the fs events line at the bottom to open the change batches, and a click on a schema header to select
 its targets. Click a pane line to copy it; clicking an expandable line expands or
@@ -248,6 +251,27 @@ target's own `muted: false` overrides it. A group's `hide: true` mutes its membe
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
+#### Auto-hide
+
+`auto-hide: true` on a group or an import lists its targets only while they run, start, restart or fail.
+Stopped, never-run, manual and off targets hide. A target that exits 0 hides ten minutes after it exits, so you can read its result.
+A target that exits non-zero stays visible.
+
+- A target the pane shows stays listed, so it never vanishes under the cursor.
+- A group's last row counts its hidden members: `(+) 12 hidden`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) hide 12`.
+- `h` shows or hides the cursor's group's hidden members from any row of that group. A folded header reads `▸ make · 2 running · 12 hidden`.
+- `ctrl+k` still finds hidden targets. Running one makes it visible.
+- A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
+
+```yaml
+imports:
+  - path: apps/api/Makefile
+    auto-hide: false               # keep every rule listed
+groups:
+  tools:
+    auto-hide: true                # default false outside Makefile imports
+```
+
 #### Saved queries
 
 The reserved `queries:` key maps a name to a pill string at the top level, per group, and per target:
@@ -301,6 +325,7 @@ targets:
 - An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.
 - The same file imported twice loads once. A file that imports itself is an error.
 - An unknown import key is an error. A compose file is imported as its services. See Docker Compose below.
+- With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one. `rerun -migrate` adds the entry for a file that loaded before.
 
 #### Docker Compose
 
@@ -323,6 +348,7 @@ imports:
 - Logs come from `docker logs -f`. Quitting rerun leaves the containers running.
 - If docker stops answering, the footer shows `docker unreachable, retrying`.
 - The `docker` CLI must be on PATH. A required import without it is an error. An optional one is skipped with a notice.
+- Compose files load only when listed under `imports:`. rerun never auto-imports one.
 - `groups:` is an error on a compose import. `services:` and `profiles:` are errors on a rerun import.
 
 #### Makefile
@@ -342,7 +368,7 @@ groups:
     hide: false                    # unfold the default group
 ```
 
-- A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and starts folded.
+- A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and starts folded. With a `rerun.yml`, it loads only when listed under `imports:`.
 - A subfolder's Makefile loads only when you import it. rerun never scans subfolders.
 - The default group for a subfolder import is `make/<dir>`, such as `make/api`.
 - `groups: make: hide: false` unfolds a Makefile group.

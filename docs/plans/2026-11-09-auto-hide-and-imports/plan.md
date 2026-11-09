@@ -1,6 +1,6 @@
 # Auto-hide, explicit imports, open-original modal
 
-Status: READY
+Status: DONE
 
 ## Summary
 - `auto-hide:` on groups and imports lists a target only while it is running, starting, restarting or failed.

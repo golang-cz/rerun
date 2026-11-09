@@ -14,3 +14,7 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · `ctrl+l` blanks the pane and keeps scrollback: the clear hides old output without deleting it. Why: scrollback stays searchable.
 - 2026-11-09 · no `›` gutter glyph: each pane row drops a glyph. Why: the glyph cost bytes on every redraw.
 - 2026-11-09 · shift+arrows select lines in the pane: a keyboard selection reuses the drag highlight. Why: copying lines should not need the mouse.
+- 2026-11-09 · `auto-hide` lists idle targets only while they run or fail: Makefile imports default on, and an exit 0 hides after 10 minutes. Why: the list keeps what needs attention, and a clean exit stays readable for a while.
+- 2026-11-09 · with a rerun.yml, imports are explicit: only `imports:` loads, and `rerun -migrate` writes the entries. Why: no surprise targets appear from a file nobody listed.
+- 2026-11-09 · `o` in the pane opens the original lines, already filtered by the pills: raw logs with search. Why: the reader wants the exact text, not columns.
+- 2026-11-09 · `c` is the only copy key: no `y` anywhere, and the fs events modal moved from `y` to `c`. Why: one copy key across every modal.
