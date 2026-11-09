@@ -53,6 +53,10 @@ func (m *tuiModel) Init() tea.Cmd {
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// A motion report changes no row, so it skips the cursor follow every other message runs.
+	if mm, ok := msg.(tea.MouseMotionMsg); ok {
+		return m.handleMouse(mm)
+	}
 	defer m.keepCursor(m.cursor, m.cursorKey())
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:

@@ -189,6 +189,9 @@ type tuiModel struct {
 
 	targets []*tuiTarget
 
+	// cursorSet marks a cursor a handler placed itself, so keepCursor does not pull it back to its old row.
+	cursorSet bool
+
 	cursor  int // highlighted list row, an index into listRows
 	help    bool
 	helpAll bool // the help overlay shows every key, not the short list

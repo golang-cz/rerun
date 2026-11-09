@@ -488,3 +488,19 @@ func TestGoToJumpFocusesThePane(t *testing.T) {
 		t.Fatal("the jump did not land on api")
 	}
 }
+
+// A finder jump that unfolds a header above the cursor keeps the jumped row, even when it lands on the old index.
+func TestFinderJumpUnfoldKeepsJumpedRow(t *testing.T) {
+	alpha, beta := target("alpha1"), target("beta1")
+	alpha.Schema, beta.Schema = "alpha", "beta"
+	m := newTestModel(t, alpha, beta)
+	m.collapsed = map[string]bool{"alpha": true}
+	m.cursor = 1 // the beta header, which the jump's unfold pushes down one row
+
+	press(m, "g", "a", "l", "p", "h", "a", "1", "enter")
+
+	r, ok := m.cursorRow()
+	if !ok || m.rowKey(r) != "target:alpha1" {
+		t.Fatalf("cursor on %q, want target:alpha1", m.rowKey(r))
+	}
+}

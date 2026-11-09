@@ -239,6 +239,7 @@ func (m *tuiModel) finderJump(idx int) {
 		m.setRevealed(r.schema, true)
 	}
 	m.cursor = m.indexOfKey(m.rowKey(rows[idx]))
+	m.cursorSet = true
 	if r, ok := m.cursorRow(); ok {
 		m.applyRowScope(r)
 	}

@@ -328,12 +328,19 @@ func (m *tuiModel) toggleSubGroups(keys []string) {
 // keepCursor keeps the cursor on its row when rows above it appear or hide. A key that moved the cursor
 // keeps its place, and a row that left the list leaves the cursor on its nearest neighbour.
 func (m *tuiModel) keepCursor(idx int, key string) {
-	if m.cursor == idx && key != "" {
-		if i := m.indexOfKey(key); i >= 0 {
-			m.cursor = i
+	rows := m.listRows()
+	switch {
+	case m.cursorSet:
+		m.cursorSet = false
+	case m.cursor == idx && key != "":
+		for i, r := range rows {
+			if m.rowKey(r) == key {
+				m.cursor = i
+				break
+			}
 		}
 	}
-	m.cursor = min(max(m.cursor, 0), max(0, m.listLen()-1))
+	m.cursor = min(max(m.cursor, 0), max(0, len(rows)-1))
 }
 
 // cursorKey names the row under the cursor, or "" when there is none.
