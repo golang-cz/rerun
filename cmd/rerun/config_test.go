@@ -134,7 +134,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "targets:\n  api:\n    run: echo hi\n    bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, build, health, open, columns, queries, group, muted, selected, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, build, health, open, columns, queries, group, mute, keep, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown group",
@@ -149,7 +149,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field inside a group",
 			content: "groups:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\ntargets:\n  api:\n    run: echo hi\n",
-			wantSub: []string{`group "backend"`, `unknown field "bogus"`, "fields: columns, queries, muted, fold, start"},
+			wantSub: []string{`group "backend"`, `unknown field "bogus"`, "fields: columns, queries, mute, keep, fold, start"},
 		},
 		{
 			name:    "groups with no targets",
@@ -314,7 +314,7 @@ func TestParseConfigErrorPositions(t *testing.T) {
 			name:    "unknown field inside a group points at the key",
 			content: "groups:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\ntargets:\n  api:\n    run: echo hi\n",
 			head:    `:4:5: group "backend": unknown field "bogus"`,
-			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, muted, fold, start"},
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, mute, keep, fold, start"},
 		},
 		{
 			name:    "cmd is required points at the target",
@@ -530,17 +530,17 @@ func TestParseConfigAliasErrors(t *testing.T) {
 	}{
 		{
 			name:    "alias to bool on",
-			content: "targets:\n  api:\n    run: echo hi\n    selected: &b true\n\n  web:\n    run: echo hi\n    on: *b\n",
+			content: "targets:\n  api:\n    run: echo hi\n    mute: &b true\n\n  web:\n    run: echo hi\n    on: *b\n",
 			wantSub: []string{`target "web"`, `field "on"`, "expected a string or a list of strings, got bool"},
 		},
 		{
 			name:    "alias to bool as list item",
-			content: "targets:\n  api:\n    run: echo hi\n    selected: &b true\n\n  web:\n    run: echo hi\n    on: [*b]\n",
+			content: "targets:\n  api:\n    run: echo hi\n    mute: &b true\n\n  web:\n    run: echo hi\n    on: [*b]\n",
 			wantSub: []string{`target "web"`, `field "on"`, "expected a list of strings, got bool"},
 		},
 		{
 			name:    "alias to bool desc",
-			content: "targets:\n  api:\n    run: echo hi\n    selected: &b true\n\n  web:\n    run: echo hi\n    desc: *b\n",
+			content: "targets:\n  api:\n    run: echo hi\n    mute: &b true\n\n  web:\n    run: echo hi\n    desc: *b\n",
 			wantSub: []string{`target "web"`, `field "desc"`, "expected a string, got bool"},
 		},
 		{
@@ -596,7 +596,6 @@ func TestParseConfigOpenLinkSelected(t *testing.T) {
 
   api:
     run: go run ./cmd/api
-    selected: false
 `)
 
 	cfg, err := ParseConfig(path)
@@ -613,9 +612,6 @@ func TestParseConfigOpenLinkSelected(t *testing.T) {
 	}
 
 	api := cfg.Targets[1]
-	if api.Selected {
-		t.Error("selected = true for `selected: false`")
-	}
 	if api.Open != "" {
 		t.Errorf("open = %q, want empty", api.Open)
 	}
@@ -713,7 +709,7 @@ func TestParseConfigRejectsUnknownStartMode(t *testing.T) {
 }
 
 func TestParseConfigBoolFieldErrors(t *testing.T) {
-	for _, field := range []string{"selected"} {
+	for _, field := range []string{"mute"} {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
 		writeFile(t, path, "targets:\n  api:\n    run: echo hi\n    "+field+": 1\n")
 
@@ -742,9 +738,9 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"columns":  `["a {.b}"]`,
 		"queries":  "{errors: level=error}",
 		"group":    "backend",
-		"muted":    "true",
+		"mute":     "true",
+		"keep":     "5000",
 		"open":     "http://localhost:1",
-		"selected": "false",
 		"start":    "onchange",
 		"delay":    "1s",
 		"cooldown": "1s",

@@ -62,16 +62,16 @@ On a terminal, target mode opens the TUI: a row per target on the left, the
 merged stream on the right. Piped or non-TTY output stays plain prefixed text.
 Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 
-Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
-`enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
-schema's targets (`esc` backs out), and that row is bold. On a schema header, `space`, `r`, and `m` act on its
-targets. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
+Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream, `d` drop its older output and mute it,
+`enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor target narrows the pane to its target or
+schema's targets (`esc` backs out), and that target is bold. On a schema header, `space`, `r`, and `m` act on its
+targets. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor target
 narrows it to one target, keeping the name prefixes; each line pads the name to
-the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; A group's `fold: true` folds its idle members into a `(+) N more` row, and folding never mutes. The pane's top line is
-the cursor row's command, with its url linked. Mouse: click a row to show only its
+the longest target so messages start in a fixed column. A `mute: true` field in rerun.yml starts a target's stream muted (a group or an import may set it too); `d` drops a target's older output and mutes it, and a second `d` restores it. A muted name is light gray and italic. `keep:` sets each target's scrollback, a line count (`keep: 5000`) or a time (`keep: 1h`, at most 200,000 lines), default 10,000 lines; target, then group, then import wins. Ungrouped targets list first with no header, groups follow in `groups:` order, then undeclared imports, Makefile imports last. A group's `fold: true` folds its idle members into a `(+) N more` row, and folding never mutes. The pane's top line is
+the cursor target's command, with its url linked. Mouse: click a target to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
-More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows times in the left list only: durations, the fs hint age and the build age beside the version. Every log line always shows its `HH:MM:SS` in a dim column before it (selection, copy and search never include it). `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
+More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows times in the left list only: durations, the fs hint age and the build age beside the version. Every log line always shows its `HH:MM:SS` in a dim column before it (selection, copy and search never include it). `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the target (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
 `/` or `f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
@@ -113,7 +113,7 @@ is refused with a footer error (edit rerun.yml by hand). Writes keep the file's 
 and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
-The build cell after each name shows an orange braille spinner while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. The name itself tints orange for 2 seconds after a build starts, green for 2 seconds after a file-triggered restart, and red while the build is failed or the target loops; red wins. Nothing draws in reverse except the cursor and a selection. A rebuild loop is the core detector's pause: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three. The modal never auto-opens.
+The build cell after each name shows an orange braille spinner while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. The name itself tints orange for 1 second after a build starts, green for 1 second after a file-triggered restart, and red while the build is failed or the target loops; red wins. Nothing draws in reverse except the cursor and a selection. A rebuild loop is the core detector's pause: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three. The modal never auto-opens.
 
 The fs row at the top of the left column names the newest change batch's first
 file (`server.go +2`, `+N` for the other files in the batch, `fs idle` past 10 seconds); `t`
@@ -124,12 +124,12 @@ within 150ms of each other), newest first: the time, the first changed file with
 `→` expands a batch's files, each naming the services whose watch globs it
 matched; `c` copies every batch expanded. A created directory shows a trailing `/`
 and heads the files reported under it. The pane's top line
-names a muted row (`muted`). A rerun.yml reload shows as the `config`
+names a muted target (`muted`). A rerun.yml reload shows as the `config`
 target. Batches older than 10 minutes drop off.
 
 ### Fold: idle targets
 
-`fold: true` on a group or an import folds its idle targets into one dim `(+) N more` row.
+`fold: true` on a group or an import folds its idle targets into one dim `(+) N more` row. An import folds its whole subtree into that one row, and a sub-group with nothing listed leaves the list. `(+) N more` shows only for N of 2 or more; a single folded target is just listed.
 A folded group still lists every failing member, and every member that started, restarted or exited in the last 10 minutes.
 Failing means a failed build, a non-zero exit, or a restart backoff. Never-run targets, and targets that ran steadily for over 10 minutes, fold.
 `fold: false` lists every member. It is the default.
@@ -139,7 +139,7 @@ Failing means a failed build, a non-zero exit, or a restart backoff. Never-run t
 - `←` on an expanded header folds it again. Your toggles stay across config reloads.
 - A target the pane shows stays listed, so it never vanishes under the cursor.
 - `ctrl+k` still finds folded targets. Jumping to one lists only that target.
-- Folding never mutes. Mute a target with `muted: true` or `m`.
+- Folding never mutes. Mute a target with `mute: true` or `m`.
 - A Makefile import defaults to `fold: true`.
 
 ```yaml
@@ -229,7 +229,7 @@ targets:
     run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
     build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
     health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
-    open: http://localhost:5173    # ctrl+o opens it; the row links to it (or a shell command to run)
+    open: http://localhost:5173    # ctrl+o opens it; the target links to it (or a shell command to run)
     delay: 200ms                  # batch file events before restarting
     cooldown: 2s                  # min time between restarts (event storms)
     grace: 5s                     # SIGTERM → wait → SIGKILL
@@ -237,7 +237,8 @@ targets:
   api:
     on: [cmd, internal]
     run: go run ./cmd/api --addr :8080
-    selected: false               # listed in the TUI, starts off (space starts it)
+    mute: true                    # starts muted; m unmutes
+    keep: 2000                    # scrollback lines, or a time like 1h
 
   test:
     on: ['**/*.go']
@@ -247,9 +248,8 @@ targets:
 ```
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
-`selected: true`, `start: auto`.
-Naming a target on the command line overrides `selected` either way: named ones
-start, unnamed ones stay off (still listed, still startable with `space`).
+`start: auto`, `keep: 10000`.
+Naming a target on the command line starts only the named ones; the others stay off (still listed, still startable with `space`).
 `start: onchange` holds the first run back until a file changes, and
 `start: manual` watches nothing and runs only when `r` asks for it.
 Unknown fields, duplicate fields, and non-string values are errors.

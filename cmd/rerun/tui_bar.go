@@ -122,7 +122,7 @@ func (m *tuiModel) barHint() string {
 
 // pillContextFooter is the input box's key line while a pill is picked.
 func (m *tuiModel) pillContextFooter() string {
-	return "←→ pick · enter edit · del remove · space filter⇄mark · esc input"
+	return "←/→ pick · enter edit · del remove · space filter⇄mark · esc input"
 }
 
 // removePill drops the pill at idx, then fixes the bar's focus.

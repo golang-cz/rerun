@@ -127,7 +127,7 @@ func TestFsHintGoesIdleAfterTenSeconds(t *testing.T) {
 // tinted is the foreground color of a target's name at one instant.
 func tinted(tg *tuiTarget, now time.Time) string { return tg.nameColor(now) }
 
-// Every build start tints the name orange for 2 s and shows the spinner while it builds.
+// Every build start tints the name orange for 1 s and shows the spinner while it builds.
 func TestBuildStartTintsNameOrangeThenPlain(t *testing.T) {
 	for name, files := range map[string][]string{"file-triggered": {"a.go"}, "manual": nil} {
 		t.Run(name, func(t *testing.T) {
@@ -135,8 +135,8 @@ func TestBuildStartTintsNameOrangeThenPlain(t *testing.T) {
 			m.now = buildAt
 			tg := m.targets[0]
 			m.applyEvents([]event{buildStart("api", buildAt, files...)})
-			if got := tinted(tg, buildAt.Add(time.Second)); got != runYellow {
-				t.Fatalf("name 1s into a build = %q, want orange", got)
+			if got := tinted(tg, buildAt.Add(500*time.Millisecond)); got != runYellow {
+				t.Fatalf("name 0.5s into a build = %q, want orange", got)
 			}
 			if got := tinted(tg, buildAt.Add(3*time.Second)); got != "" {
 				t.Fatalf("name 3s into a build = %q, want plain", got)
@@ -184,7 +184,7 @@ func TestFailedBuildNameRedBeatsOtherTints(t *testing.T) {
 		t.Fatalf("name an hour later = %q, want red", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt.Add(time.Hour))})
-	if got := tinted(tg, buildAt.Add(time.Hour+time.Second)); got != runYellow {
+	if got := tinted(tg, buildAt.Add(time.Hour+500*time.Millisecond)); got != runYellow {
 		t.Fatalf("name in the next build = %q, want orange", got)
 	}
 }
@@ -201,13 +201,13 @@ func TestLoopNameRed(t *testing.T) {
 	}
 }
 
-// A file restart tints the name green for 2 s; the glyph and build cell stay as they were.
+// A file restart tints the name green for 1 s; the glyph and build cell stay as they were.
 func TestRestartTintsNameGreen(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	web := m.targets[0]
-	if got := tinted(web, spawnClock.Add(time.Second)); got != runGreen {
-		t.Fatalf("name 1s after a restart = %q, want green", got)
+	if got := tinted(web, spawnClock.Add(500*time.Millisecond)); got != runGreen {
+		t.Fatalf("name 0.5s after a restart = %q, want green", got)
 	}
 	if got := tinted(web, spawnClock.Add(3*time.Second)); got != "" {
 		t.Fatalf("name 3s after a restart = %q, want plain", got)

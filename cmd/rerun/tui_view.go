@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ const (
 	colorGreen  = "2"
 	colorRed    = "1"
 	colorGray   = "8"
+	// colorMutedName is the light gray of a muted target's name.
+	colorMutedName = "246"
 
 	// Run-state colors, apart from the rule colors, so healthy and starting read differently.
 	runGreen  = "46"
@@ -93,6 +96,8 @@ type seg struct {
 	color string
 	link  string
 	faint bool
+	// italic and strike style a muted or dropped name; they ride on the row's cursor band.
+	italic, strike bool
 }
 
 // rect is a cell area on screen, used for mouse hit testing.
@@ -408,7 +413,7 @@ func (m *tuiModel) inputBoxView() string {
 	}
 	if m.pickActive() {
 		body = m.pickLines(innerW)
-		footer = "↑↓ move · enter add · esc close"
+		footer = "↑/↓ move · enter add · esc close"
 	}
 	if m.queryErr != "" {
 		footer = m.styles.errText.Render(m.queryErr + " · esc clears")
@@ -470,9 +475,6 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	}
 	for _, mi := range m.missing {
 		rowW = max(rowW, min(displayWidth(mi.Group+" (not found)"), maxNameW))
-	}
-	if m.hasGroups() {
-		rowW = max(rowW, min(displayWidth(groupLabel(ungrouped)), maxNameW)+2)
 	}
 	// The last cell is padding before the divider; it also holds the unsaved-columns marker.
 	leftW = rowW + 1
@@ -794,10 +796,17 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
 	}
+	name := seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)}
+	if t.muted || t.dropped {
+		name.italic, name.strike = true, t.dropped
+		if name.color == "" {
+			name.color = colorMutedName
+		}
+	}
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)},
+		name,
 		seg{text: " "},
 		buildCell(t, m.now, m.spin),
 	)
@@ -817,7 +826,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	return renderSegs(segs, style, leftW)
 }
 
-// opColor ties a feed file glyph to the row palette: a created file is
+// opColor ties a feed file glyph to the list palette: a created file is
 // green, a removed one red, a written one yellow.
 func opColor(op string) string {
 	switch op {
@@ -871,8 +880,6 @@ func (m *tuiModel) plainRowStyle(row int, r listRow) lipgloss.Style {
 		return m.styles.solo
 	case r.header:
 		return m.styles.base
-	case m.targets[r.target].muted:
-		return m.styles.muted
 	case m.solo == r.target:
 		return m.styles.solo
 	}
@@ -958,6 +965,12 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 		if s.faint {
 			style = style.Faint(true)
 		}
+		if s.italic {
+			style = style.Italic(true)
+		}
+		if s.strike {
+			style = style.Strikethrough(true)
+		}
 		text := truncate(s.text, width-cells)
 		if text == "" {
 			continue
@@ -995,7 +1008,7 @@ func (m *tuiModel) rightLines(w int) []string {
 	out := strings.Split(m.vp.View(), "\n")
 
 	if idx := m.paneCursorRow() - m.vp.YOffset(); m.paneFocus && m.paneLen() > 0 && idx >= 0 && idx < len(out) {
-		out[idx] = m.styles.paneCursor.Render(padRight(out[idx], w-gutter))
+		out[idx] = m.styles.paneCursor.Render(reapplyAfterResets(padRight(out[idx], w-gutter), "\x1b[7m"))
 	}
 
 	// Selection is line-granular and styled before the bottom line's own
@@ -1269,7 +1282,7 @@ func (m *tuiModel) panLines(lines []string) []string {
 	return out
 }
 
-// runAgainHint names r as the way to run a stopped or exited make row again.
+// runAgainHint names r as the way to run a stopped or exited make target again.
 func (m *tuiModel) runAgainHint() string {
 	i := m.solo
 	if i < 0 {
@@ -1305,7 +1318,7 @@ func (m *tuiModel) emptyHint() string {
 		}
 		return "no lines match the filters · backspace removes the last"
 	}
-	// A solo row names its own state below; the make hint would hide it.
+	// A solo target names its own state below; the make hint would hide it.
 	if hint := m.makeEmptyHint(); hint != "" && !m.anyTargetRan() && m.solo < 0 {
 		return hint
 	}
@@ -1346,14 +1359,14 @@ func (m *tuiModel) allMuted() bool {
 
 // helpShortKeys is the help overlay's first view: the keys used most.
 var helpShortKeys = [][2]string{
-	{"j/k ↑/↓", "move between rows; the row under the cursor is selected"},
-	{"space", "start or stop the row · pane: jump to live"},
-	{"enter", "list: focus the pane, starting a stopped row or group"},
-	{"s", "stop the row · pane: stop what the pane shows"},
-	{"r", "run/reboot the row"},
+	{"j/k ↑/↓", "move between targets; the one under the cursor is selected"},
+	{"space", "start or stop the target · pane: jump to live"},
+	{"enter", "list: focus the pane, starting a stopped target or group"},
+	{"s", "stop the target · pane: stop what the pane shows"},
+	{"r m d", "reboot · mute · d drops older output and mutes"},
 	{"o i", "pick a link · pane i: original lines"},
 	{"ctrl+o", "open the current target's link"},
-	{"← →", "expand or fold a group; → on a row focuses the log pane"},
+	{"←/→", "expand or fold a group; → on a target focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last 10 min)"},
 	{"enter → a =", "pane: → expand · ← collapse · a adds key, = filters value"},
@@ -1369,13 +1382,13 @@ var helpShortKeys = [][2]string{
 
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
-	{"↑/↓ j/k", "move rows; ⇧↑⇧↓ select pane lines; home/end first/last"},
-	{"←/→ enter", "group: expand or fold · row: its group · pane: focus"},
+	{"↑/↓ j/k", "move the cursor; ⇧↑/⇧↓ select pane lines; home/end first/last"},
+	{"←/→ enter", "group: expand or fold · target: its group · pane: focus"},
 	{"space", "start or stop · pane: jump to live"},
-	{"s", "stop the row · pane: stop what the pane shows"},
-	{"m r", "mute (group: its targets) · r reboots"},
+	{"s", "stop the target · pane: stop what the pane shows"},
+	{"m d r", "mute (group: its targets) · d drops older output · r reboots"},
 	{"e", "fs events (last 10 min)"},
-	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t list times"},
+	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑/⇧↓ groups · b hides · t list times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
 	{"o i ctrl+o", "pick a link to open · ctrl+o: target's link · i: original lines"},
 	{"alt+z alt+y", "undo/redo text in the bar, Go-to and link picker"},
@@ -1392,7 +1405,7 @@ var helpKeys = [][2]string{
 
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
-	"click a row scopes to it; double-click starts or stops it",
+	"click a target scopes to it; double-click starts or stops it",
 	"click a group scopes to its targets; its ▾ folds or expands it; the fs row opens the fs events",
 	"a folded group (fold: true) lists failing and recent targets; click (+) N more to expand it; a log line expands, or copies if plain",
 	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
@@ -1448,4 +1461,12 @@ func (m *tuiModel) helpView() string {
 		footer += "  ↓ more"
 	}
 	return m.modalBox(m.styles.title.Render("rerun keys"), footer, shown, outerW, outerH)
+}
+
+// sgrReset matches the sequences that end a styled run, which would also end the cursor's reverse video.
+var sgrReset = regexp.MustCompile("\x1b\\[0?m")
+
+// reapplyAfterResets re-opens an outer style after every reset inside s, so a colored line stays painted edge to edge.
+func reapplyAfterResets(s, style string) string {
+	return sgrReset.ReplaceAllStringFunc(s, func(reset string) string { return reset + style })
 }

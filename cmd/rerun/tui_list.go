@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// ungrouped keys the trailing default header; NUL keeps it apart from any config name.
-const ungrouped = "\x00default"
-
 // importKeyPrefix keys an import's section, apart from the schema of the same name.
 const importKeyPrefix = "\x00import:"
 
@@ -43,14 +40,15 @@ type listRow struct {
 // indent is the list cells in front of a row's name.
 func (r listRow) indent() int { return indentCells * r.depth }
 
-// groupTargets orders targets as the list draws them: sections in first-use order, Makefile imports
-// after the rest, sub-groups in first-use order inside an import, and each import's `all` last.
-// Members stay contiguous.
+// groupTargets orders targets as the list draws them: ungrouped ones first, then sections in the
+// order rerun.yml declares its groups, then undeclared sections (imports) in first-use order, and
+// Makefile imports last. Sub-groups follow their file's group order. Members stay contiguous and
+// keep their `targets:` order.
 func groupTargets(rows []*tuiTarget) {
 	section := map[string]int{}
 	sub := map[string]int{}
 	for _, t := range rows {
-		if k := groupOf(t); k != ungrouped {
+		if k := groupOf(t); k != "" {
 			if _, ok := section[k]; !ok {
 				section[k] = len(section)
 			}
@@ -61,34 +59,51 @@ func groupTargets(rows []*tuiTarget) {
 			}
 		}
 	}
-	sectionOf := func(t *tuiTarget) int {
-		if k := groupOf(t); k != ungrouped {
-			return section[k]
-		}
-		return len(section)
-	}
-	subOf := func(t *tuiTarget) int {
-		if s := t.spec.Sub; s != "" {
-			return sub[s]
-		}
-		return len(sub)
-	}
-	// Makefile imports list last, after the ungrouped rows.
-	makeOf := func(t *tuiTarget) int {
-		if t.spec.Kind == makeKind {
+	// tier puts ungrouped rows first, declared sections next, other sections after, Makefile imports last.
+	tier := func(t *tuiTarget) int {
+		switch {
+		case groupOf(t) == "":
+			return 0
+		case t.spec.Kind == makeKind:
+			return 3
+		case sectionRank(t.spec) > 0:
 			return 1
 		}
-		return 0
+		return 2
+	}
+	subKey := func(t *tuiTarget) (int, int, int) {
+		s := t.spec.Sub
+		if s == "" {
+			return 1, 0, 0
+		}
+		rank := t.spec.groupRank
+		if rank == 0 {
+			rank = len(sub) + 1
+		}
+		return 0, rank, sub[s]
 	}
 	slices.SortStableFunc(rows, func(a, b *tuiTarget) int {
-		if c := cmp.Compare(makeOf(a), makeOf(b)); c != 0 {
+		if c := cmp.Compare(tier(a), tier(b)); c != 0 {
 			return c
 		}
-		if c := cmp.Compare(sectionOf(a), sectionOf(b)); c != 0 {
+		if c := cmp.Compare(sectionRank(a.spec), sectionRank(b.spec)); c != 0 {
 			return c
 		}
-		return cmp.Compare(subOf(a), subOf(b))
+		if c := cmp.Compare(section[groupOf(a)], section[groupOf(b)]); c != 0 {
+			return c
+		}
+		a1, a2, a3 := subKey(a)
+		b1, b2, b3 := subKey(b)
+		return cmp.Or(cmp.Compare(a1, b1), cmp.Compare(a2, b2), cmp.Compare(a3, b3))
 	})
+}
+
+// sectionRank is the 1-based position of the target's section in the root `groups:`, 0 when undeclared.
+func sectionRank(t Target) int {
+	if t.Import != "" {
+		return t.sectionRank
+	}
+	return t.groupRank
 }
 
 // groupOf is the top-level section key a target lists under; an import's targets stay in its section.
@@ -99,7 +114,7 @@ func groupOf(t *tuiTarget) string {
 	case t.spec.Schema != "":
 		return t.spec.Schema
 	}
-	return ungrouped
+	return ""
 }
 
 // inKey reports whether a target belongs to the group a scope key names.
@@ -113,8 +128,6 @@ func inKey(t Target, key string) bool {
 		return t.section() != "" && t.section() == strings.TrimPrefix(key, allKeyPrefix) && t.Sub == ""
 	case t.section() != "":
 		return t.Sub == key
-	case key == ungrouped:
-		return t.Schema == ""
 	}
 	return t.Schema == key
 }
@@ -138,8 +151,6 @@ func sharedNamePrefix(key string, names []string) string {
 // groupLabel is the full name a group shows in the bottom line and the chips.
 func groupLabel(key string) string {
 	switch {
-	case key == ungrouped:
-		return "all"
 	case strings.HasPrefix(key, importKeyPrefix):
 		return strings.TrimPrefix(key, importKeyPrefix)
 	case strings.HasPrefix(key, allKeyPrefix):
@@ -148,27 +159,25 @@ func groupLabel(key string) string {
 	return key
 }
 
-// hasGroups reports whether any target has a group. Without one the list stays flat.
+// hasGroups reports whether any target has a group.
 func (m *tuiModel) hasGroups() bool {
 	for _, t := range m.targets {
-		if groupOf(t) != ungrouped {
+		if groupOf(t) != "" {
 			return true
 		}
 	}
 	return false
 }
 
-// allRows is every row, folded or not: each header precedes its members, and an import nests sub-headers.
+// allRows is every row, folded or not: the ungrouped targets without a header, then each header before its
+// members, with an import nesting sub-headers.
 func (m *tuiModel) allRows() []listRow {
-	if !m.hasGroups() {
-		rows := make([]listRow, len(m.targets))
-		for i := range m.targets {
-			rows[i] = listRow{target: i}
-		}
-		return rows
-	}
 	var rows []listRow
-	for i := 0; i < len(m.targets); {
+	i := 0
+	for ; i < len(m.targets) && groupOf(m.targets[i]) == ""; i++ {
+		rows = append(rows, listRow{target: i})
+	}
+	for i < len(m.targets) {
 		key := groupOf(m.targets[i])
 		members := m.schemaMembers(key)
 		i += len(members)
@@ -182,38 +191,58 @@ func (m *tuiModel) allRows() []listRow {
 	return rows
 }
 
-// listRows is the list as drawn: allRows without the members a folded block folds away.
-// A block that folds any ends in a `(+) N more` row.
+// listRows is the list as drawn: allRows without the members a folded group folds away.
+// A section that folds two or more members ends in one `(+) N more` row for its whole subtree.
 func (m *tuiModel) listRows() []listRow {
 	all := m.allRows()
+	var out []listRow
+	for at := 0; at < len(all); {
+		if !all[at].header {
+			out = append(out, all[at])
+			at++
+			continue
+		}
+		end := at + 1
+		for end < len(all) && !(all[end].header && all[end].depth == 0) {
+			end++
+		}
+		out = append(out, m.sectionRows(all[at:end])...)
+		at = end
+	}
+	return out
+}
+
+// sectionRows draws one top-level section. A folded member leaves the list, and a sub-header with nothing
+// left under it leaves too. One folded member is listed instead, since `(+) 1 more` hides nothing worth a row.
+func (m *tuiModel) sectionRows(sec []listRow) []listRow {
 	gone := map[int]bool{}
-	goneIn := map[string]int{}
-	for _, r := range all {
+	for _, r := range sec {
 		if !r.header && m.foldedAway(r.target, r.schema) {
 			gone[r.target] = true
-			goneIn[r.schema]++
 		}
 	}
-	var out []listRow
-	for i, r := range all {
+	if len(gone) < 2 {
+		gone = nil
+	}
+	out := make([]listRow, 0, len(sec)+1)
+	for k, r := range sec {
 		if r.header {
 			for _, j := range r.members {
 				if gone[j] {
 					r.hidden++
 				}
 			}
-			out = append(out, r)
+			if k == 0 || r.hidden < len(r.members) {
+				out = append(out, r)
+			}
 			continue
 		}
 		if !gone[r.target] {
 			out = append(out, r)
 		}
-		if i+1 < len(all) && !all[i+1].header && all[i+1].schema == r.schema {
-			continue
-		}
-		if n := goneIn[r.schema]; n > 0 {
-			out = append(out, listRow{schema: r.schema, target: -1, depth: r.depth, more: true, label: fmt.Sprintf("(+) %d more", n)})
-		}
+	}
+	if n := len(gone); n > 0 {
+		out = append(out, listRow{schema: sec[0].schema, target: -1, depth: 1, more: true, label: fmt.Sprintf("(+) %d more", n)})
 	}
 	return out
 }
@@ -439,13 +468,18 @@ func (m *tuiModel) treeRight() bool {
 }
 
 // foldingHeader is the listed header of the block that folds away the row key names, or -1.
+// A sub-header that vanished with its members leaves the section's header.
 func (m *tuiModel) foldingHeader(key string) int {
 	if schema, ok := strings.CutPrefix(key, "more:"); ok {
 		return m.indexOfKey("schema:" + schema)
 	}
+	parent := ""
 	for _, r := range m.allRows() {
-		if !r.header && m.rowKey(r) == key {
-			return m.indexOfKey("schema:" + r.schema)
+		switch {
+		case r.header && r.depth == 0:
+			parent = r.schema
+		case !r.header && m.rowKey(r) == key:
+			return m.indexOfKey("schema:"+r.schema, "schema:"+parent)
 		}
 	}
 	return -1
@@ -511,9 +545,12 @@ func (m *tuiModel) enterRow() {
 	m.focusPane()
 }
 
-// expandMore is enter or a click on a `(+) N more` row: it expands the block and leaves the cursor on its header.
+// expandMore is enter or a click on a `(+) N more` row: it expands the section's subtree and leaves the cursor on its header.
 func (m *tuiModel) expandMore(r listRow) {
-	m.setFold([]string{r.schema}, false)
+	all := m.allRows()
+	if at := slices.IndexFunc(all, func(s listRow) bool { return s.header && s.schema == r.schema }); at >= 0 {
+		m.setFold(blockKeys(all, at), false)
+	}
 	m.cursor = max(0, m.indexOfKey("schema:"+r.schema))
 }
 
@@ -571,6 +608,11 @@ func (m *tuiModel) muteRow(r listRow) {
 	}
 	if r.header {
 		m.muteTargets(r.members)
+		if m.allMutedIn(r.members) {
+			m.showNotice(groupLabel(r.schema)+" muted · m unmutes", false)
+		} else {
+			m.showNotice(groupLabel(r.schema)+" unmuted", false)
+		}
 		return
 	}
 	m.toggleMute(r.target)
@@ -777,4 +819,14 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	}
 	segs = append(segs, seg{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)})
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
+}
+
+// allMutedIn reports whether every member is muted.
+func (m *tuiModel) allMutedIn(members []int) bool {
+	for _, i := range members {
+		if !m.targets[i].muted && m.solo != i {
+			return false
+		}
+	}
+	return true
 }

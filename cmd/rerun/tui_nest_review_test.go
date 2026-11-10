@@ -235,7 +235,7 @@ func fmtMembers(members []int) string {
 	return b.String()
 }
 
-// Interleaved targets still draw as contiguous sections, sub-groups in first-use order, and all last.
+// Interleaved targets still draw as contiguous sections, ungrouped ones first, sub-groups in first-use order, and all last.
 func TestGroupTargetsOrdersMembersLikeTheRows(t *testing.T) {
 	a := importTarget("a", "one", "a/backend")
 	a.Schema = "a/backend"
@@ -251,10 +251,10 @@ func TestGroupTargetsOrdersMembersLikeTheRows(t *testing.T) {
 	m := newTestModel(t, a, b, root, c, d, e, lone)
 
 	want := []string{
+		"lone",
 		"▾a", " ▾backend", "  one", "  three", " ▾webapps", "  five", " ▾all", "  four",
 		"▾b", " ▾webapps", "  two",
 		"▾backend", " server",
-		"▾all", " lone",
 	}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

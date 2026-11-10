@@ -46,7 +46,7 @@ func (m *tuiModel) pickNode() (colNode, bool) {
 	if m.listOnlyScope() {
 		return colNode{}, false
 	}
-	if m.schemaSel != "" && m.schemaSel != ungrouped {
+	if m.schemaSel != "" {
 		return colNode{schema: true, name: m.schemaSel}, true
 	}
 	if m.solo < 0 {

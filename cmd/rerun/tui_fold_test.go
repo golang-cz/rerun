@@ -62,7 +62,7 @@ func idle(m *tuiModel) {
 func TestFoldedImportFoldsEverySubGroup(t *testing.T) {
 	m := nestedFixture(t)
 	toggleKey(t, m, importKeyPrefix+"omsx")
-	want := []string{"▸omsx", " ▸backend", "  (+) 2 more", " ▸webapps", "  (+) 1 more", " ▸all", "  (+) 1 more"}
+	want := []string{"▸omsx", " (+) 4 more"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -71,7 +71,7 @@ func TestFoldedImportFoldsEverySubGroup(t *testing.T) {
 func TestFoldedSubHeaderFoldsOnlyItsTargets(t *testing.T) {
 	m := nestedFixture(t)
 	toggleKey(t, m, "omsx/backend")
-	want := []string{"▾omsx", " ▸backend", "  (+) 2 more", " ▾webapps", "  dash", " ▾all", "  misc"}
+	want := []string{"▾omsx", " ▾webapps", "  dash", " ▾all", "  misc", " (+) 2 more"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -85,8 +85,8 @@ func TestNestedFoldRestoresOnExpand(t *testing.T) {
 		t.Fatalf("after expanding the import: %d rows, want all 8: %v", len(got), got)
 	}
 	toggleKey(t, m, importKeyPrefix+"omsx")
-	if got := nestedRows(m); len(got) != 7 {
-		t.Fatalf("after folding the import: %d rows, want 7: %v", len(got), got)
+	if got := nestedRows(m); len(got) != 2 {
+		t.Fatalf("after folding the import: %d rows, want 2: %v", len(got), got)
 	}
 }
 
@@ -104,8 +104,8 @@ func TestCursorMovesToTheFoldedHeader(t *testing.T) {
 	m.applyScope(-1, "omsx/backend")
 	m.cursor = 2 // api, under backend
 	toggleKey(t, m, "omsx/backend")
-	if m.cursor != 1 {
-		t.Fatalf("cursor = %d, want 1, the folded backend header", m.cursor)
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0, the import header that outlives the emptied backend header", m.cursor)
 	}
 	if m.schemaSel != "omsx/backend" {
 		t.Fatalf("schemaSel = %q, want the scope kept", m.schemaSel)
@@ -154,21 +154,21 @@ func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 	if !m.foldState["omsx/backend"] {
 		t.Fatalf("sub-header arrow click left backend open: %v", m.foldState)
 	}
-	if got := len(m.listRows()); got != 7 {
-		t.Fatalf("rows after folding backend = %d, want 7", got)
+	if got := len(m.listRows()); got != 6 {
+		t.Fatalf("rows after folding backend = %d, want 6", got)
 	}
 }
 
 func TestFoldedImportSectionStartsFolded(t *testing.T) {
 	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n    fold: true\n",
-		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n  web:\n    run: echo web\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := newTestModel(t, cfg.Targets...)
 	idle(m)
-	if got, want := nestedRows(m), []string{"▸bpn", " (+) 1 more"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▸bpn", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 }
@@ -191,14 +191,14 @@ func TestRootFoldGroupNamedLikeImportFoldsTheSection(t *testing.T) {
 func TestImportedGroupFoldFoldsOnItsSubKey(t *testing.T) {
 	f := newImportFixture(t,
 		"imports:\n  - path: ../bpn/rerun.yml\n",
-		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    fold: true\ntargets:\n  tools-api:\n    group: tools\n    run: echo api\n  web:\n    run: echo web\n"})
+		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    fold: true\ntargets:\n  tools-api:\n    group: tools\n    run: echo api\n  tools-db:\n    group: tools\n    run: echo db\n  web:\n    run: echo web\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := newTestModel(t, cfg.Targets...)
 	idle(m)
-	want := []string{"▾bpn", " ▸tools", "  (+) 1 more", " ▾all", "  web"}
+	want := []string{"▾bpn", " ▾all", "  web", " (+) 2 more"}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -207,11 +207,12 @@ func TestImportedGroupFoldFoldsOnItsSubKey(t *testing.T) {
 func TestReloadFoldingTheCursorRowMovesCursorToHeader(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.cursor = 1 // api
-	api := target("api")
+	api, web := target("api"), target("web")
 	api.Schema, api.AutoFold, api.Start = "ops", true, startManual
+	web.Schema, web.AutoFold, web.Start = "ops", true, startManual
 	m.now = spawnClock
-	m.targets[1].state = stateManual
-	m.rebuildRows(&configChange{targets: []Target{target("web"), api}})
+	m.targets[0].state, m.targets[1].state = stateManual, stateManual
+	m.rebuildRows(&configChange{targets: []Target{web, api}})
 	r, ok := m.cursorRow()
 	if !ok || !r.header || r.schema != "ops" {
 		t.Fatalf("cursor on %+v, want the folded ops header", r)
@@ -221,7 +222,7 @@ func TestReloadFoldingTheCursorRowMovesCursorToHeader(t *testing.T) {
 func TestImportFoldReloadKeepsUserExpansion(t *testing.T) {
 	f := newImportFixture(t,
 		"imports:\n  - path: ../bpn/rerun.yml\n    fold: true\n",
-		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n  web:\n    run: echo web\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +233,7 @@ func TestImportFoldReloadKeepsUserExpansion(t *testing.T) {
 	r, _ := m.listRowAt(m.cursor)
 	m.expandMore(r)
 	m.rebuildRows(&configChange{targets: cfg.Targets})
-	if got := len(listedNames(m)); got != 1 {
+	if got := len(listedNames(m)); got != 2 {
 		t.Fatalf("reload re-folded the bpn section the user expanded; rows = %v", nestedRows(m))
 	}
 }

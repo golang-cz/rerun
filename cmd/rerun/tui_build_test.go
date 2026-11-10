@@ -306,7 +306,7 @@ func TestStartingAndStoppedDifferByShape(t *testing.T) {
 // buildRuleTexts is each build rule's raw text in the stream, in order.
 func buildRuleTexts(m *tuiModel) []string {
 	var out []string
-	for _, ml := range m.merged {
+	for _, ml := range m.mergedAll() {
 		if ml.sep.build != nil {
 			out = append(out, ml.text)
 		}
@@ -315,7 +315,7 @@ func buildRuleTexts(m *tuiModel) []string {
 }
 
 func buildRuleSeq(m *tuiModel) int {
-	for _, ml := range m.merged {
+	for _, ml := range m.mergedAll() {
 		if ml.sep.build != nil {
 			return ml.seq
 		}
@@ -333,8 +333,8 @@ func TestBuildRuleUpdatesInPlace(t *testing.T) {
 	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 0s · a.go +1 more" {
 		t.Fatalf("rule after the build = %q, want it rewritten in place", got)
 	}
-	if len(m.merged) != 1 {
-		t.Fatalf("stream holds %d lines, want the one rule", len(m.merged))
+	if len(m.mergedAll()) != 1 {
+		t.Fatalf("stream holds %d lines, want the one rule", len(m.mergedAll()))
 	}
 }
 
@@ -501,9 +501,9 @@ func TestBKeyHidesOnlyTheList(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.frame()
-	before := len(m.merged)
+	before := len(m.mergedAll())
 	press(m, "b")
-	if m.solo != -1 || !m.listHidden || len(m.expanded) != 0 || len(m.merged) != before {
+	if m.solo != -1 || !m.listHidden || len(m.expanded) != 0 || len(m.mergedAll()) != before {
 		t.Fatalf("b changed more than the list: solo=%d listHidden=%v expanded=%v", m.solo, m.listHidden, m.expanded)
 	}
 }
@@ -525,7 +525,7 @@ func TestRebuildsKeepOnlyLatestAndFailedOutput(t *testing.T) {
 		m.applyEvents(evs)
 	}
 	recs, lines := 0, 0
-	for _, ml := range m.merged {
+	for _, ml := range m.mergedAll() {
 		if ml.sep.build != nil && len(ml.sep.build.out) > 0 {
 			recs++
 			lines += len(ml.sep.build.out)
@@ -583,8 +583,8 @@ func TestExpansionDropsWhenRuleScrollsOut(t *testing.T) {
 	if !m.expanded[seq] {
 		t.Fatal("failed rule is not expanded")
 	}
-	flood := make([]event, 0, lineCap+5)
-	for k := 0; k < lineCap+5; k++ {
+	flood := make([]event, 0, defaultKeepLines+5)
+	for k := 0; k < defaultKeepLines+5; k++ {
 		flood = append(flood, event{kind: evOutput, target: "api", line: "svc"})
 	}
 	m.applyEvents(flood)
@@ -596,8 +596,8 @@ func TestExpansionDropsWhenRuleScrollsOut(t *testing.T) {
 func TestBuildEventsAfterScrollOutDoNotLeakExpansion(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	flood := make([]event, 0, lineCap+5)
-	for k := 0; k < lineCap+5; k++ {
+	flood := make([]event, 0, defaultKeepLines+5)
+	for k := 0; k < defaultKeepLines+5; k++ {
 		flood = append(flood, event{kind: evOutput, target: "api", line: "svc"})
 	}
 	m.applyEvents(flood)

@@ -125,7 +125,7 @@ func TestHealthyAppendRefreshesRawText(t *testing.T) {
 // A reload that leaves no groups clears a selected group, not just a missing one.
 func TestReloadWithoutGroupsClearsGroupScope(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), target("web"))
-	m.applyScope(-1, ungrouped)
+	m.applyScope(-1, "backend")
 	m.rebuildRows(&configChange{targets: []Target{target("api"), target("web")}})
 	if m.schemaSel != "" || m.hasGroups() {
 		t.Fatalf("schemaSel = %q with groups=%v, want the scope cleared", m.schemaSel, m.hasGroups())
@@ -135,11 +135,11 @@ func TestReloadWithoutGroupsClearsGroupScope(t *testing.T) {
 // Group keys move the list only; from the pane they leave the scope alone.
 func TestGroupKeysIgnoredWhenPaneHasFocus(t *testing.T) {
 	m := groupedModel(t)
-	m.cursor = 0
+	m.cursor = 1
 	m.liveSelect()
 	press(m, "right")
 	press(m, "]")
-	if m.cursor != 0 || m.schemaSel != "backend" {
+	if m.cursor != 1 || m.schemaSel != "backend" {
 		t.Fatalf("] from the pane moved cursor to %d scope %q", m.cursor, m.schemaSel)
 	}
 }
@@ -298,18 +298,18 @@ func TestStopInTheFocusedPaneStopsAGroupScope(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
 	m.applyScope(-1, "backend")
 	m.paneFocus = true
-	m.cursor = 3 // web, outside the scope
+	m.cursor = 0 // web, outside the scope
 	for i := range m.targets {
 		m.targets[i].state = stateRunning
 	}
 
 	press(m, "s")
 
-	if m.targets[0].state != stateStopped || m.targets[1].state != stateStopped {
-		t.Fatalf("backend states = %v, %v, want both stopped", m.targets[0].state, m.targets[1].state)
+	if m.targets[1].state != stateStopped || m.targets[2].state != stateStopped {
+		t.Fatalf("backend states = %v, %v, want both stopped", m.targets[1].state, m.targets[2].state)
 	}
-	if m.targets[2].state != stateRunning {
-		t.Fatalf("web state = %v, want running (outside the scope)", m.targets[2].state)
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("web state = %v, want running (outside the scope)", m.targets[0].state)
 	}
 }
 

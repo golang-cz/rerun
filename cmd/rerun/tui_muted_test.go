@@ -37,7 +37,7 @@ func TestReloadKeepsRuntimeUnmuteAndGivesNewRowsTheConfigDefault(t *testing.T) {
 		t.Error("the reload re-muted a row the user unmuted")
 	}
 	if !m.targets[2].muted {
-		t.Error("the new worker row did not take its config's muted: true")
+		t.Error("the new worker row did not take its config's mute: true")
 	}
 }
 
@@ -94,17 +94,22 @@ func TestReloadFoldsNewFoldGroup(t *testing.T) {
 	ops.Schema = "ops"
 	ops.AutoFold = true
 	ops.Start = startManual
+	ops2 := mutedSpec("ops2", true)
+	ops2.Schema = "ops"
+	ops2.AutoFold = true
+	ops2.Start = startManual
 	runner := newTargetRunner(recTarget("ops", "ops"), &recordingSink{})
+	runner2 := newTargetRunner(recTarget("ops2", "ops"), &recordingSink{})
 	m.applyEvent(event{
 		kind: evReconcile,
 		line: "── config reloaded ── +ops ──",
 		cfg: &configChange{
-			targets: []Target{m.targets[0].spec, m.targets[1].spec, ops},
-			runners: []*targetRunner{m.targets[0].runner, m.targets[1].runner, runner},
-			stopped: []bool{false, false, false},
+			targets: []Target{m.targets[0].spec, m.targets[1].spec, ops, ops2},
+			runners: []*targetRunner{m.targets[0].runner, m.targets[1].runner, runner, runner2},
+			stopped: []bool{false, false, false, false},
 		},
 	})
-	if got, want := nestedRows(m), []string{"▾backend", " api", " web", "▸ops", " (+) 1 more"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾backend", " api", " web", "▸ops", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after reload rows = %v, want %v", got, want)
 	}
 }

@@ -100,11 +100,16 @@ type Target struct {
 	startSet bool
 	// NoGitignore turns off .gitignore filtering for this target.
 	NoGitignore bool
-	// Selected is false for `selected: false` targets: they exist in the
-	// list but start off until they are started by hand.
+	// Selected is false for a target the command line did not name: it exists in the
+	// list but starts off until it is started by hand.
 	Selected bool
-	// Muted is the `muted:` value, or nil when unset so the group's value can fill in.
+	// Muted is the `mute:` value, or nil when unset so the group's value can fill in.
 	Muted *bool
+	// Keep is the `keep:` value, or nil when unset so the group's, then the import's, value can fill in.
+	Keep *keepSpec
+	// groupRank is the 1-based position of Schema in its file's `groups:`; sectionRank is the same for the
+	// root group an import's section is named after. Zero means undeclared.
+	groupRank, sectionRank int
 	// AutoFold folds the target into its group's `(+) N more` row unless it is failing or recent; see tui_list.go.
 	AutoFold bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
@@ -126,7 +131,7 @@ type Target struct {
 	SchemaLocal string
 }
 
-// mutedAtStart is the stream state a row starts in: its `muted:` value, else unmuted.
+// mutedAtStart is the stream state a row starts in: its `mute:` value, else unmuted.
 func (t Target) mutedAtStart() bool { return t.Muted != nil && *t.Muted }
 
 // section is the import whose list section the target lists under, or "".
@@ -423,11 +428,14 @@ type parsedFile struct {
 	queries map[string]string
 }
 
-// groupDef is one `groups:` entry: its columns, and the `muted:`, `fold:` and `start:` its members start with.
+// groupDef is one `groups:` entry: its columns, and the `mute:`, `keep:`, `fold:` and `start:` its members start with.
 type groupDef struct {
 	columns []Column
 	queries map[string]string
 	muted   *bool
+	keep    *keepSpec
+	// index is the entry's position in `groups:`.
+	index int
 	// autoFold and autoFoldSet are the group's `fold:`, which folds its idle members.
 	autoFold    bool
 	autoFoldSet bool
@@ -655,7 +663,7 @@ func checkQueryRef(lookup func(string) (queryRef, bool), stack []string, name st
 }
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "queries", "muted", "fold", "start"}
+var schemaFields = []string{"columns", "queries", "mute", "keep", "fold", "start"}
 
 // parseSchemas reads the top-level `groups:` block into name -> group. A null
 // block is an empty one, and a group with no columns, null or `{}`, is valid.
@@ -692,6 +700,7 @@ func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, erro
 			if err != nil {
 				return nil, err
 			}
+			def.index = len(schemas)
 			schemas[name] = def
 		}
 	}
@@ -731,12 +740,19 @@ func parseSchema(src *configSource, name string, node *yaml.Node) (groupDef, err
 			}
 			def.columns = parsed
 
-		case "muted":
+		case "mute":
 			b, err := boolField(src, name, field, deref(node.Content[i+1]))
 			if err != nil {
 				return groupDef{}, err
 			}
 			def.muted = &b
+
+		case "keep":
+			k, err := keepField(src, owner, field, deref(node.Content[i+1]))
+			if err != nil {
+				return groupDef{}, err
+			}
+			def.keep = &k
 
 		case "fold":
 			b, err := boolField(src, name, field, deref(node.Content[i+1]))
@@ -772,7 +788,7 @@ func parseSchema(src *configSource, name string, node *yaml.Node) (groupDef, err
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart.
-var targetFields = []string{"desc", "on", "except", "run", "build", "health", "open", "columns", "queries", "group", "muted", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "build", "health", "open", "columns", "queries", "group", "mute", "keep", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
@@ -862,19 +878,19 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			}
 			target.Start, target.startSet = m, true
 
-		case "muted":
+		case "mute":
 			b, err := boolField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
 			target.Muted = &b
 
-		case "selected":
-			b, err := boolField(src, name, field, value)
+		case "keep":
+			k, err := keepField(src, owner, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			target.Selected = b
+			target.Keep = &k
 
 		case "delay", "cooldown", "grace":
 			d, err := durationField(src, name, field, value)
@@ -908,6 +924,10 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		if target.Muted == nil {
 			target.Muted = group.muted
 		}
+		if target.Keep == nil {
+			target.Keep = group.keep
+		}
+		target.groupRank = group.index + 1
 		if group.autoFoldSet {
 			target.AutoFold = group.autoFold
 		}

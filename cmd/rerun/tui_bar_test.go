@@ -66,7 +66,7 @@ func TestBarChipClickRemovesIt(t *testing.T) {
 // The bar holds only filters, so a scoped group adds no chip and no key drops it.
 func TestScopeHasNoBarChipAndBackspaceKeepsIt(t *testing.T) {
 	m := groupedModel(t)
-	m.cursor = 0
+	m.cursor = 1
 	m.liveSelect()
 	m.frame()
 
@@ -135,7 +135,7 @@ func TestEscLadderNeverClearsFilters(t *testing.T) {
 	m := groupedModel(t)
 	commitText(m, "/", "keep")
 	commitText(m, "f", "keep")
-	m.cursor = 2 // worker, a backend member
+	m.cursor = 3 // worker, a backend member
 	m.liveSelect()
 
 	keep := func(step string) {
@@ -146,24 +146,24 @@ func TestEscLadderNeverClearsFilters(t *testing.T) {
 	}
 
 	press(m, "esc")
-	if m.cursor != 0 || m.schemaSel != "backend" || m.solo != -1 {
+	if m.cursor != 1 || m.schemaSel != "backend" || m.solo != -1 {
 		t.Fatalf("esc on a member: cursor=%d schemaSel=%q solo=%d, want the backend header", m.cursor, m.schemaSel, m.solo)
 	}
 	keep("esc on member")
 
 	press(m, "esc")
-	if m.cursor != 0 || m.schemaSel != "" {
+	if m.cursor != 1 || m.schemaSel != "" {
 		t.Fatalf("esc on a header: cursor=%d schemaSel=%q, want cursor kept and scope all", m.cursor, m.schemaSel)
 	}
 	keep("esc on header")
 
-	m.cursor = 6 // web, ungrouped: its header is the trailing default group
+	m.cursor = 0 // web, ungrouped: it has no header to back out to
 	m.liveSelect()
 	press(m, "esc")
-	if m.cursor != 5 || m.schemaSel != ungrouped {
-		t.Fatalf("esc on the ungrouped member: cursor=%d schemaSel=%q, want the default header", m.cursor, m.schemaSel)
+	if m.cursor != 0 || m.schemaSel != "" || m.solo != -1 {
+		t.Fatalf("esc on the ungrouped target: cursor=%d schemaSel=%q solo=%d, want scope all", m.cursor, m.schemaSel, m.solo)
 	}
-	keep("esc on default member")
+	keep("esc on ungrouped target")
 
 	press(m, "right")
 	press(m, "esc")
@@ -219,7 +219,7 @@ func TestSlashAndCtrlFFocusTheBarFromEveryFocus(t *testing.T) {
 
 func TestGroupKeysJumpBetweenHeaders(t *testing.T) {
 	m := groupedModel(t)
-	m.cursor = 0
+	m.cursor = 1
 	m.liveSelect()
 
 	steps := []struct {
@@ -227,12 +227,12 @@ func TestGroupKeysJumpBetweenHeaders(t *testing.T) {
 		cursor int
 		scope  string
 	}{
-		{"]", 3, "data"},
-		{"]", 5, ungrouped},
-		{"]", 5, ungrouped},
-		{"[", 3, "data"},
-		{"shift+up", 0, "backend"},
-		{"shift+down", 3, "data"},
+		{"]", 4, "data"},
+		{"]", 4, "data"},
+		{"[", 1, "backend"},
+		{"[", 1, "backend"},
+		{"shift+down", 4, "data"},
+		{"shift+up", 1, "backend"},
 	}
 	for _, s := range steps {
 		press(m, s.key)
@@ -242,15 +242,15 @@ func TestGroupKeysJumpBetweenHeaders(t *testing.T) {
 		}
 	}
 
-	m.cursor = 2 // worker, a backend member: [ goes to its own header
+	m.cursor = 3 // worker, a backend member: [ goes to its own header
 	m.liveSelect()
 	press(m, "[")
-	if m.cursor != 0 || m.schemaSel != "backend" {
+	if m.cursor != 1 || m.schemaSel != "backend" {
 		t.Fatalf("[ from a member: cursor=%d schemaSel=%q, want the backend header", m.cursor, m.schemaSel)
 	}
 }
 
-func TestDefaultHeaderOnlyWhenSomeTargetHasAGroup(t *testing.T) {
+func TestUngroupedTargetsListFlatAtTheTop(t *testing.T) {
 	flat := newTestModel(t, target("web"), target("api"))
 	for _, r := range flat.listRows() {
 		if r.header {
@@ -262,16 +262,8 @@ func TestDefaultHeaderOnlyWhenSomeTargetHasAGroup(t *testing.T) {
 	}
 
 	mixed := groupedModel(t)
-	names := listNames(mixed)
-	if names[len(names)-2] != "▾all" || names[len(names)-1] != "web" {
-		t.Fatalf("mixed list = %v, want web under a trailing default header", names)
-	}
-
-	allGrouped := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("db", "data"))
-	for _, n := range listNames(allGrouped) {
-		if n == "▾all" {
-			t.Fatalf("all-grouped list has a default header: %v", listNames(allGrouped))
-		}
+	if got, want := listNames(mixed), []string{"web", "▾backend", "api", "worker", "▾data", "db"}; !equalStrings(got, want) {
+		t.Fatalf("mixed list = %v, want web first with no header", got)
 	}
 }
 

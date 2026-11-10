@@ -114,12 +114,12 @@ func TestBlockCapKeepsTheHintOnASmallScreen(t *testing.T) {
 
 func TestCellCacheStaysBoundedWhileStreaming(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	for i := 0; i < 2*lineCap+10; i++ {
-		m.cellBySeq[-i-1] = &cellEntry{}
+	for i := 0; i < defaultKeepLines+10; i++ {
+		m.addLine(0, "x")
+		m.cellBySeq[m.nextSeq] = &cellEntry{}
 	}
-	addLines(m, "web", "x")
-	if got := len(m.cellBySeq); got > 2*lineCap {
-		t.Fatalf("cell cache holds %d entries, want at most %d", got, 2*lineCap)
+	if got := len(m.cellBySeq); got > defaultKeepLines {
+		t.Fatalf("cell cache holds %d entries, want at most %d", got, defaultKeepLines)
 	}
 }
 

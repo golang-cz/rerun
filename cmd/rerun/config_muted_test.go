@@ -16,14 +16,14 @@ func mutedOf(t *testing.T, cfg *Config, name string) bool {
 
 func TestParseConfigMutedTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  api:\n    run: echo hi\n    muted: true\n\n  web:\n    run: echo web\n")
+	writeFile(t, path, "targets:\n  api:\n    run: echo hi\n    mute: true\n\n  web:\n    run: echo web\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
 	if !mutedOf(t, cfg, "api") {
-		t.Error("api with muted: true starts muted")
+		t.Error("api with mute: true starts muted")
 	}
 	if web, _ := cfg.Find("web"); web.Muted != nil {
 		t.Errorf("web without muted: Muted = %v, want unset", *web.Muted)
@@ -32,20 +32,20 @@ func TestParseConfigMutedTarget(t *testing.T) {
 
 func TestParseConfigMutedGroupIsTheMembersDefault(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "groups:\n  backend:\n    muted: true\n\ntargets:\n  api:\n    group: backend\n    run: echo api\n\n  worker:\n    group: backend\n    run: echo worker\n")
+	writeFile(t, path, "groups:\n  backend:\n    mute: true\n\ntargets:\n  api:\n    group: backend\n    run: echo api\n\n  worker:\n    group: backend\n    run: echo worker\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
 	if !mutedOf(t, cfg, "api") || !mutedOf(t, cfg, "worker") {
-		t.Error("members of a muted: true group start muted")
+		t.Error("members of a mute: true group start muted")
 	}
 }
 
 func TestParseConfigTargetMutedFalseOverridesGroup(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "groups:\n  backend:\n    muted: true\n\ntargets:\n  api:\n    group: backend\n    muted: false\n    run: echo api\n")
+	writeFile(t, path, "groups:\n  backend:\n    mute: true\n\ntargets:\n  api:\n    group: backend\n    mute: false\n    run: echo api\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -56,26 +56,26 @@ func TestParseConfigTargetMutedFalseOverridesGroup(t *testing.T) {
 		t.Fatalf("api Muted = %v, want an explicit false", api.Muted)
 	}
 	if mutedOf(t, cfg, "api") {
-		t.Error("muted: false on a target overrides its muted: true group")
+		t.Error("mute: false on a target overrides its mute: true group")
 	}
 }
 
 func TestParseConfigMutedImportedTarget(t *testing.T) {
 	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n",
-		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n    muted: true\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n    mute: true\n"})
 
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
 	if !mutedOf(t, cfg, "bpn/api") {
-		t.Error("an imported target with muted: true starts muted")
+		t.Error("an imported target with mute: true starts muted")
 	}
 }
 
 func TestParseConfigRootGroupMutesImportedTargets(t *testing.T) {
-	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n\ngroups:\n  bpn:\n    muted: true\n",
-		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n\n  worker:\n    run: echo worker\n    muted: false\n"})
+	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n\ngroups:\n  bpn:\n    mute: true\n",
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n\n  worker:\n    run: echo worker\n    mute: false\n"})
 
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestParseConfigRootGroupMutesImportedTargets(t *testing.T) {
 		t.Error("a root group named like the import mutes its imported targets")
 	}
 	if mutedOf(t, cfg, "bpn/worker") {
-		t.Error("an imported target's own muted: false beats the root group")
+		t.Error("an imported target's own mute: false beats the root group")
 	}
 }
 
@@ -94,7 +94,7 @@ func TestParseConfigMutedComposeImportedTarget(t *testing.T) {
 	dir := fakeDocker(t)
 	writeFake(t, dir, "config.json", `{"name":"devbox","services":{"postgres":{}}}`)
 	composeYML := "services:\n  postgres:\n    image: postgres\n"
-	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\n\ngroups:\n  devbox:\n    muted: true\n",
+	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\n\ngroups:\n  devbox:\n    mute: true\n",
 		map[string]string{"devbox/docker-compose.yml": composeYML})
 
 	cfg, err := ParseConfig(f.root)
@@ -141,7 +141,7 @@ func TestParseConfigRootFoldGroupDoesNotMuteImportedTargets(t *testing.T) {
 func TestImportFoldDoesNotMuteTargets(t *testing.T) {
 	f := newImportFixture(t,
 		"imports:\n  - path: ../bpn/rerun.yml\n    fold: true\n",
-		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n  web:\n    run: echo web\n    muted: true\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n  web:\n    run: echo web\n    mute: true\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
@@ -150,7 +150,7 @@ func TestImportFoldDoesNotMuteTargets(t *testing.T) {
 		t.Error("bpn/api starts muted under an import with fold: true")
 	}
 	if !mutedOf(t, cfg, "bpn/web") {
-		t.Error("bpn/web with its own muted: true starts muted")
+		t.Error("bpn/web with its own mute: true starts muted")
 	}
 	if api, _ := cfg.Find("bpn/api"); !api.AutoFold {
 		t.Error("bpn/api AutoFold = false, want the import's fold: true")

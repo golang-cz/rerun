@@ -78,7 +78,7 @@ func TestScopeFollowsTheListLines(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), target("web"))
 	paneOut(m, "api", "api-line")
 	paneOut(m, "web", "web-line")
-	press(m, "j")
+	press(m, "j", "j")
 
 	if got, want := m.paneLines(), []string{"api-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pane = %q, want %q", got, want)

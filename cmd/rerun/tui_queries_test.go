@@ -468,7 +468,7 @@ func TestSelectedPillContextFooter(t *testing.T) {
 	press(m, "enter")
 	press(m, "up") // select [@hits]
 	box := ansi.Strip(m.inputBoxView())
-	want := "←→ pick · enter edit · del remove · space filter⇄mark · esc input"
+	want := "←/→ pick · enter edit · del remove · space filter⇄mark · esc input"
 	if !strings.Contains(box, want) {
 		t.Fatalf("box footer = %q, want %q", box, want)
 	}
@@ -476,7 +476,7 @@ func TestSelectedPillContextFooter(t *testing.T) {
 	commitPill(m, "plain")
 	press(m, "/", "up")
 	box = ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, "←→ pick · enter edit · del remove · space filter⇄mark · esc input") {
+	if !strings.Contains(box, "←/→ pick · enter edit · del remove · space filter⇄mark · esc input") {
 		t.Fatalf("box footer = %q, want the keys without → expand on a plain pill", box)
 	}
 	if strings.Contains(box, "→ expand") {

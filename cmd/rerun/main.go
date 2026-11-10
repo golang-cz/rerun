@@ -38,7 +38,7 @@ rerun.yml groups: a top-level groups: block shares columns, and a target names o
   with group:
 
 rerun.yml target keys: run, build, health, desc, on, except, open,
-  columns, group, selected, start, delay, cooldown, grace
+  columns, group, mute, keep, start, delay, cooldown, grace
 
 Flags:
   -delay <dur>      batch window before restarting a command (default 200ms)

@@ -4,11 +4,11 @@ import "testing"
 
 // Startup scopes the pane to the cursor's row, the way a cursor move does.
 func TestStartupScopesPaneToCursorGroup(t *testing.T) {
-	targets := []Target{schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web")}
+	targets := []Target{schemaTarget("api", "backend"), schemaTarget("worker", "backend"), schemaTarget("db", "data")}
 	m := newConfigTUI(targets, &Config{})
 	addLines(m, "api", "api line")
 	addLines(m, "worker", "worker line")
-	addLines(m, "web", "web line")
+	addLines(m, "db", "db line")
 	m.frame()
 
 	r, ok := m.cursorRow()

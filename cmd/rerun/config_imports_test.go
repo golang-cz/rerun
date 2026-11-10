@@ -793,7 +793,7 @@ func TestMakeGroupsSortLast(t *testing.T) {
 	localRow := &tuiTarget{spec: Target{Name: "local"}}
 	rows := []*tuiTarget{makeRow, apiRow, localRow}
 	groupTargets(rows)
-	want := []*tuiTarget{apiRow, localRow, makeRow}
+	want := []*tuiTarget{localRow, apiRow, makeRow}
 	for i := range want {
 		if rows[i] != want[i] {
 			t.Fatalf("row %d = %q, want %q", i, rows[i].spec.Name, want[i].spec.Name)

@@ -9,14 +9,13 @@ import (
 )
 
 // threeTargetsYAML is the fixture the arg-flow tests share: one default-on
-// target, one `selected: false`, one default-on target nobody names.
+// target, one the tests name, one nobody names.
 const threeTargetsYAML = `targets:
   frontend:
     run: pnpm run dev
 
   api:
     run: go run ./cmd/api
-    selected: false
 
   test:
     run: go test ./...
@@ -106,9 +105,9 @@ func TestResolveTargetsNamedIsTheStartSet(t *testing.T) {
 		want []bool // Selected, in rerun.yml order
 	}{
 		{name: "two named", args: Args{Targets: []string{"api", "frontend"}}, want: []bool{true, true, false}},
-		{name: "one named, yml selected false", args: Args{Target: "api"}, want: []bool{false, true, false}},
-		{name: "one named, yml selected true", args: Args{Targets: []string{"test"}}, want: []bool{false, false, true}},
-		{name: "no args keeps yml defaults", args: Args{}, want: []bool{true, false, true}},
+		{name: "one named", args: Args{Target: "api"}, want: []bool{false, true, false}},
+		{name: "another named", args: Args{Targets: []string{"test"}}, want: []bool{false, false, true}},
+		{name: "no args starts everything", args: Args{}, want: []bool{true, true, true}},
 	}
 
 	for _, tt := range tests {
@@ -148,8 +147,11 @@ func TestResolveTargetsLeavesConfigUntouched(t *testing.T) {
 	if !cfg.Targets[0].Selected {
 		t.Error("resolveTargets cleared Selected on cfg.Targets[0]")
 	}
-	if cfg.Targets[1].Selected {
-		t.Error("resolveTargets set Selected on cfg.Targets[1]")
+	if !cfg.Targets[1].Selected {
+		t.Error("resolveTargets cleared Selected on cfg.Targets[1]")
+	}
+	if !cfg.Targets[2].Selected {
+		t.Error("resolveTargets cleared Selected on cfg.Targets[2]")
 	}
 }
 

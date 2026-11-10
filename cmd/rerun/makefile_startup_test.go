@@ -339,6 +339,7 @@ func TestSaveColumnsMakeOnlyWritesNothing(t *testing.T) {
 
 func TestEmptyPaneOnAFreshMakeConfigPointsAtFinder(t *testing.T) {
 	m := newMakeTUI(t)
+	m.clearScope()
 	if got := m.emptyHint(); got != "ctrl+k go to a target · → expand make/" {
 		t.Fatalf("emptyHint() = %q", got)
 	}
@@ -369,6 +370,7 @@ func TestEmptyPaneHintDropsUnfoldWhenMakeIsUnfolded(t *testing.T) {
 	m := newConfigTUI(cfg.Targets, cfg)
 	m.finder = finderState{}
 	m.width, m.height = 100, 24
+	m.clearScope()
 	if got := m.emptyHint(); got != "ctrl+k go to a target" {
 		t.Fatalf("emptyHint() = %q, want no unfold part", got)
 	}

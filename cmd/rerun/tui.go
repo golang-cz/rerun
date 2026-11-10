@@ -14,10 +14,6 @@ import (
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
 
-// lineCap bounds each target's scrollback and the merged stream. Phase B
-// swaps this for golang-cz/ringbuf.
-const lineCap = 10_000
-
 // Output under a build rule is capped at the tail a failed build keeps.
 const buildLogCap = buildTailLines
 
@@ -146,6 +142,10 @@ type tuiTarget struct {
 	backoffUntil time.Time
 
 	muted bool
+	// dropped is d's state: the stream is muted and its scrollback trimmed to dropKeepLines.
+	dropped bool
+	// lines is the target's own scrollback, oldest first, bounded by its keep:; the pane merges these by seq.
+	lines []mergedLine
 
 	// lastChange is the newest change batch the target reacted to, which the
 	// pane's title line counts.
@@ -260,11 +260,13 @@ type tuiModel struct {
 	// selKey marks a selection grown by shift+arrows, which no pointer motion may drag.
 	selKey bool
 
-	// merged is every line in arrival order; visible is the pane's
-	// materialized view of it, which muting and soloing filter.
-	merged      []mergedLine
+	// orphans are the lines of rows that left the config, oldest first; they keep their prefix but answer to no row.
+	orphans []mergedLine
+	// visible is the pane's materialized k-way merge of the targets' scrollback, which muting and soloing filter.
 	visible     []string
 	mergedDirty bool
+	// stale counts visible lines whose scrollback copy was evicted from the middle of the merge; enough of them force a rebuild.
+	stale int
 
 	// visibleRaw mirrors visible without target prefixes, so a copy yields the
 	// target's own text. len(visibleRaw) always equals len(visible).
@@ -505,10 +507,26 @@ func (m *tuiModel) toggleMute(i int) {
 	m.vpDirty = true
 	m.recomputeSearch(false)
 	if t.muted {
-		m.showNotice("muted "+t.spec.Name, false)
+		m.showNotice(t.spec.Name+" muted · m unmutes", false)
 	} else {
-		m.showNotice("unmuted "+t.spec.Name, false)
+		m.showNotice(t.spec.Name+" unmuted", false)
 	}
+}
+
+// toggleDrop is `d`: mutes the target and trims its scrollback to dropKeepLines; again it restores its keep: and unmutes.
+func (m *tuiModel) toggleDrop(i int) {
+	t := m.targets[i]
+	t.dropped = !t.dropped
+	t.muted = t.dropped
+	if t.dropped {
+		m.trimTarget(i)
+		m.showNotice(t.spec.Name+" dropped · earlier output gone", false)
+	} else {
+		m.showNotice(t.spec.Name+" kept again · unmuted", false)
+	}
+	m.mergedDirty = true
+	m.vpDirty = true
+	m.recomputeSearch(false)
 }
 
 // showHint posts a transient message to the pane's bottom line.
@@ -592,11 +610,9 @@ func (m *tuiModel) openTarget(i int) tea.Cmd {
 
 // targetLines is the target's stored output lines, oldest first.
 func (m *tuiModel) targetLines(i int) []string {
-	var out []string
-	for _, ml := range m.merged {
-		if ml.target == i {
-			out = append(out, ml.text)
-		}
+	out := make([]string, 0, len(m.targets[i].lines))
+	for _, ml := range m.targets[i].lines {
+		out = append(out, ml.text)
 	}
 	return out
 }
@@ -610,9 +626,12 @@ func (m *tuiModel) addLine(i int, line string) {
 // refreshRule rewrites a rule's stored raw text, so copy and search match what it now draws.
 func (m *tuiModel) refreshRule(rr *restartRule) {
 	raw := rr.label(1 << 16)
-	for k := range m.merged {
-		if m.merged[k].sep.restart == rr {
-			m.merged[k].text = raw
+	if i := m.targetIndex(rr.name); i >= 0 {
+		lines := m.targets[i].lines
+		for k := range lines {
+			if lines[k].sep.restart == rr {
+				lines[k].text = raw
+			}
 		}
 	}
 	for k := range m.visibleSep {
@@ -635,13 +654,8 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 	if ml.obj {
 		ml.lvl = jsonLevel(line)
 	}
-	m.merged = appendCapped(m.merged, ml)
-	if len(m.cellBySeq) > 2*lineCap {
-		m.pruneCells()
-	}
-	if len(m.expanded) > 0 {
-		m.pruneExpanded()
-	}
+	t.lines = append(t.lines, ml)
+	m.trimTarget(i)
 	if m.streamsTo(i) {
 		m.showLine(ml)
 		if !m.follow {
@@ -667,11 +681,14 @@ func (m *tuiModel) newBuildRule(i int, files []string) *buildRec {
 func (m *tuiModel) syncBuildRule(rec *buildRec) bool {
 	s := rec.sep()
 	found := false
-	for k := len(m.merged) - 1; k >= 0; k-- {
-		if m.merged[k].seq == rec.seq {
-			m.merged[k].text, m.merged[k].sep = s.raw(), s
-			found = true
-			break
+	if i := m.targetIndex(rec.name); i >= 0 {
+		lines := m.targets[i].lines
+		for k := len(lines) - 1; k >= 0; k-- {
+			if lines[k].seq == rec.seq {
+				lines[k].text, lines[k].sep = s.raw(), s
+				found = true
+				break
+			}
 		}
 	}
 	m.mergedDirty = true
@@ -686,15 +703,15 @@ func (m *tuiModel) dropBuild(rec *buildRec, reason string) {
 }
 
 func (m *tuiModel) showLine(ml mergedLine) {
-	m.visible = appendCapped(m.visible, m.prefixed(ml))
-	m.visibleRaw = appendCapped(m.visibleRaw, ml.text)
-	m.visibleIdx = appendCapped(m.visibleIdx, ml.target)
-	m.visibleCells = appendCapped(m.visibleCells, cellCache{})
-	m.visibleSeq = appendCapped(m.visibleSeq, ml.seq)
-	m.visibleObj = appendCapped(m.visibleObj, ml.obj)
-	m.visibleSep = appendCapped(m.visibleSep, ml.sep)
-	m.visibleLvl = appendCapped(m.visibleLvl, ml.lvl)
-	m.visibleAt = appendCapped(m.visibleAt, ml.at)
+	m.visible = append(m.visible, m.prefixed(ml))
+	m.visibleRaw = append(m.visibleRaw, ml.text)
+	m.visibleIdx = append(m.visibleIdx, ml.target)
+	m.visibleCells = append(m.visibleCells, cellCache{})
+	m.visibleSeq = append(m.visibleSeq, ml.seq)
+	m.visibleObj = append(m.visibleObj, ml.obj)
+	m.visibleSep = append(m.visibleSep, ml.sep)
+	m.visibleLvl = append(m.visibleLvl, ml.lvl)
+	m.visibleAt = append(m.visibleAt, ml.at)
 	m.dispDirty = true
 	// The bar's kept/total counts track arrivals even without a filter.
 	m.paneSelDirty = true
@@ -750,10 +767,8 @@ func (m *tuiModel) stampGutter() int {
 	return stampW
 }
 
-// appendCapped keeps the newest cap lines. The slice is re-sliced rather than
+// appendLimit keeps the newest limit lines. The slice is re-sliced rather than
 // shifted, so a line costs amortized O(1) and the backing array stays bounded.
-func appendCapped[T any](lines []T, line T) []T { return appendLimit(lines, line, lineCap) }
-
 func appendLimit[T any](lines []T, line T, limit int) []T {
 	if len(lines) >= limit {
 		lines = lines[len(lines)-limit+1:]
@@ -1053,20 +1068,26 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		index[row.spec.Name] = i
 	}
 
-	// Stream lines carry a row index, so every retained line is remapped. A
-	// line whose target left the config keeps its text and its prefix, and
+	// A line whose target left the config keeps its text and its prefix, and
 	// loses only its row: it stops answering to mute and solo.
-	for k := range m.merged {
-		if m.merged[k].target < 0 {
+	for _, t := range old {
+		if _, ok := index[t.spec.Name]; ok {
 			continue
 		}
-		m.merged[k].target = -1
-		if j, ok := index[m.merged[k].name]; ok {
-			m.merged[k].target = j
+		for k := range t.lines {
+			t.lines[k].target = -1
 		}
+		m.orphans = append(m.orphans, t.lines...)
+	}
+	if len(c.targets) < len(old) {
+		slices.SortFunc(m.orphans, func(a, b mergedLine) int { return a.seq - b.seq })
+		m.trimOrphans()
 	}
 
 	m.targets = rows
+	for i := range rows {
+		m.trimTarget(i)
+	}
 	m.applyEdits()
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
@@ -1490,6 +1511,13 @@ func (m *tuiModel) refreshNames() {
 // textCol is the cell where a line's message starts.
 func (m *tuiModel) textCol() int { return displayWidth(m.namePrefix("")) }
 
+// lineSource is one scrollback the pane merges.
+type lineSource struct {
+	lines  []mergedLine
+	target int
+}
+
+// rebuildMerged is a k-way merge by seq over the scrollback of every target the pane streams.
 func (m *tuiModel) rebuildMerged() {
 	m.visible = m.visible[:0]
 	m.visibleRaw = m.visibleRaw[:0]
@@ -1500,38 +1528,109 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleSep = m.visibleSep[:0]
 	m.visibleLvl = m.visibleLvl[:0]
 	m.visibleAt = m.visibleAt[:0]
-	for _, line := range m.merged {
-		if m.streamsTo(line.target) {
-			m.showLine(line)
+	var srcs []lineSource
+	total := 0
+	for i, t := range m.targets {
+		if len(t.lines) > 0 && m.streamsTo(i) {
+			srcs = append(srcs, lineSource{t.lines, i})
+			total += len(t.lines)
+		}
+	}
+	if len(m.orphans) > 0 {
+		srcs = append(srcs, lineSource{m.orphans, -1})
+		total += len(m.orphans)
+	}
+	m.visible = slices.Grow(m.visible, total)
+	for len(srcs) > 0 {
+		best := 0
+		for k := 1; k < len(srcs); k++ {
+			if srcs[k].lines[0].seq < srcs[best].lines[0].seq {
+				best = k
+			}
+		}
+		src := &srcs[best]
+		ml := src.lines[0]
+		ml.target = src.target
+		m.showLine(ml)
+		if src.lines = src.lines[1:]; len(src.lines) == 0 {
+			srcs = slices.Delete(srcs, best, best+1)
 		}
 	}
 	m.mergedDirty = false
+	m.stale = 0
 	m.paneSelDirty = true // paneSel indexes into the rebuilt visible
 	m.dispDirty = true
 }
 
-// pruneExpanded forgets expansions whose line scrolled out of merged.
-func (m *tuiModel) pruneExpanded() {
-	oldest := m.merged[0].seq
-	for seq := range m.expanded {
-		if seq < oldest {
-			delete(m.expanded, seq)
+// lineLimit is the most lines the target keeps now.
+func (t *tuiTarget) lineLimit() int {
+	if t.dropped {
+		return dropKeepLines
+	}
+	return t.spec.keep().lineCap()
+}
+
+// trimTarget evicts the target's scrollback past its keep: the oldest lines beyond the line cap, then those older than its age.
+func (m *tuiModel) trimTarget(i int) {
+	t := m.targets[i]
+	n := max(0, len(t.lines)-t.lineLimit())
+	if age := t.spec.keep().age; age > 0 && !t.dropped {
+		now := int64(m.stampNow())
+		for n < len(t.lines) && now-int64(t.lines[n].at) > int64(age/time.Second) {
+			n++
+		}
+	}
+	m.evictLines(t.lines[:n], m.streamsTo(i))
+	t.lines = t.lines[n:]
+}
+
+// trimAged evicts lines older than a time-based keep: from targets that went quiet too.
+func (m *tuiModel) trimAged() {
+	for i, t := range m.targets {
+		if t.spec.keep().age > 0 && len(t.lines) > 0 {
+			m.trimTarget(i)
 		}
 	}
 }
 
-// Drops entries for lines that scrolled out, so streaming cannot grow the map.
-func (m *tuiModel) pruneCells() {
-	live := make(map[int]*cellEntry, len(m.merged))
-	keep := func(line mergedLine) {
-		if e, ok := m.cellBySeq[line.seq]; ok {
-			live[line.seq] = e
+// trimOrphans bounds the lines of removed rows to the default keep.
+func (m *tuiModel) trimOrphans() {
+	n := max(0, len(m.orphans)-defaultKeepLines)
+	m.evictLines(m.orphans[:n], true)
+	m.orphans = m.orphans[n:]
+}
+
+// evictLines forgets what hangs off evicted lines. The pane drops one it holds at its front at once;
+// from the middle it keeps the copy until enough pile up to make a rebuild cheap.
+func (m *tuiModel) evictLines(gone []mergedLine, shown bool) {
+	for _, ml := range gone {
+		delete(m.expanded, ml.seq)
+		delete(m.cellBySeq, ml.seq)
+		switch {
+		case len(m.visibleSeq) > 0 && m.visibleSeq[0] == ml.seq:
+			m.popVisibleFront()
+		case shown:
+			m.stale++
 		}
 	}
-	for _, line := range m.merged {
-		keep(line)
+	if m.stale > max(1000, len(m.visible)/4) {
+		m.mergedDirty = true
 	}
-	m.cellBySeq = live
+}
+
+// popVisibleFront drops the pane's oldest line.
+func (m *tuiModel) popVisibleFront() {
+	m.visible = m.visible[1:]
+	m.visibleRaw = m.visibleRaw[1:]
+	m.visibleIdx = m.visibleIdx[1:]
+	m.visibleCells = m.visibleCells[1:]
+	m.visibleSeq = m.visibleSeq[1:]
+	m.visibleObj = m.visibleObj[1:]
+	m.visibleSep = m.visibleSep[1:]
+	m.visibleLvl = m.visibleLvl[1:]
+	m.visibleAt = m.visibleAt[1:]
+	m.dispDirty = true
+	m.paneSelDirty = true
 }
 
 // status is the times column: uptime while running, what happened after.

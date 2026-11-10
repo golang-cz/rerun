@@ -434,13 +434,13 @@ func (m *tuiModel) finderView() string {
 	}
 	footer := ""
 	if m.finderHasFooter() {
-		footer = "↑↓ move  enter go to  esc close"
+		footer = "↑/↓ move  enter go to  esc close"
 		if m.finder.links {
-			footer = "↑↓ move  enter open  ctrl+o open  esc close"
+			footer = "↑/↓ move  enter open  ctrl+o open  esc close"
 		} else if m.finder.sel < len(res) && m.finderRuns(res[m.finder.sel]) {
-			footer = "↑↓ move  enter run  ctrl+o open  esc close"
+			footer = "↑/↓ move  enter run  ctrl+o open  esc close"
 		} else if m.finder.sel < len(res) && res[m.finder.sel].target >= 0 {
-			footer = "↑↓ move  enter go to  ctrl+o open  esc close"
+			footer = "↑/↓ move  enter go to  ctrl+o open  esc close"
 		}
 		if len(res) == 0 {
 			footer = "esc close"

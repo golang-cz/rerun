@@ -26,7 +26,7 @@ const feedJoin = 150 * time.Millisecond
 const configJoin = 2 * time.Second
 
 // tintWindow is how long the name stays orange after a build starts, or green after a file restart.
-const tintWindow = 2 * time.Second
+const tintWindow = time.Second
 
 // configTarget is the pseudo-target a rerun.yml reload is listed under.
 const configTarget = "config"

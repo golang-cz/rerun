@@ -20,7 +20,7 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "fold", "start", "groups", "services", "profiles", "targets"}
+var importFields = []string{"path", "group", "optional", "fold", "mute", "keep", "start", "groups", "services", "profiles", "targets"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
@@ -29,6 +29,9 @@ type importSpec struct {
 	optional bool
 	// autoFold is the import's `fold:`; nil leaves it to the root group or the Makefile default.
 	autoFold *bool
+	// mute and keep are the import's defaults for members whose own file and group leave them unset.
+	mute     *bool
+	keep     *keepSpec
 	groups   []string
 	services []string
 	profiles []string
@@ -256,9 +259,15 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				t.Schema = spec.group + "/" + t.Schema
 				t.Sub = t.Schema
 			}
+			if root, ok := rootSchemas[spec.group]; ok {
+				t.sectionRank = root.index + 1
+			}
 			if root, ok := rootSchemas[spec.group]; ok && !inFileGroup {
 				if t.Muted == nil {
 					t.Muted = root.muted
+				}
+				if t.Keep == nil {
+					t.Keep = root.keep
 				}
 				// The importer's group hands its saved queries down too; the file's own win a name clash.
 				t.groupQueries = mergeQueries(root.queries, t.groupQueries)
@@ -278,6 +287,12 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			}
 			if !t.startSet && spec.startSet {
 				t.Start, t.startSet = spec.start, true
+			}
+			if t.Muted == nil {
+				t.Muted = spec.mute
+			}
+			if t.Keep == nil {
+				t.Keep = spec.keep
 			}
 			t.AutoFold = autoFoldOf(spec, rootSchemas[spec.group], t.Kind == makeKind || t.AutoFold)
 			cfg.Targets = append(cfg.Targets, t)
@@ -428,6 +443,23 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
 			}
 			spec.autoFold = &b
+
+		case "mute":
+			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
+				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
+			}
+			b, err := strconv.ParseBool(value.Value)
+			if err != nil {
+				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
+			}
+			spec.mute = &b
+
+		case "keep":
+			k, err := keepField(src, "import", field, value)
+			if err != nil {
+				return spec, err
+			}
+			spec.keep = &k
 
 		case "optional":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {

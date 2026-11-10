@@ -291,7 +291,7 @@ func TestClearInAFrozenPaneResumesTheTail(t *testing.T) {
 func TestClearOnAFoldedHeaderBlanksTheGroupPane(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
 	idle(m)
-	m.cursor = 0
+	m.cursor = 1 // the backend header
 	m.liveSelect()
 	addLines(m, "api", "api-1")
 	addLines(m, "worker", "worker-1")
@@ -378,7 +378,7 @@ func TestClearOnAGroupHeaderFromScrollbackResumesAndBlanks(t *testing.T) {
 	addLines(m, "api", streamLines("api", 30)...)
 	addLines(m, "worker", streamLines("worker", 10)...)
 	m.frame()
-	m.cursor = 0 // the backend header
+	m.cursor = 1 // the backend header
 	m.liveSelect()
 	press(m, "pgup")
 	if m.follow {

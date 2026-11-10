@@ -50,6 +50,7 @@ func TestImportNestsGroupsAndAllUnderItsHeader(t *testing.T) {
 	m := newTestModel(t, omsxAPI, gateway, dash, misc, server, lone)
 
 	want := []string{
+		"lone",
 		"▾omsx",
 		" ▾backend",
 		"  omsx-api",
@@ -60,8 +61,6 @@ func TestImportNestsGroupsAndAllUnderItsHeader(t *testing.T) {
 		"  misc",
 		"▾backend",
 		" server",
-		"▾all",
-		" lone",
 	}
 	if got := nestedRows(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -149,10 +148,7 @@ func TestImportHeaderScopesAllMembersAndSubHeaderItsOwn(t *testing.T) {
 	}
 }
 
-func TestAllLabelNamesUngroupedTargets(t *testing.T) {
-	if got := groupLabel(ungrouped); got != "all" {
-		t.Fatalf("ungrouped label = %q, want all", got)
-	}
+func TestAllLabelNamesAnImportsUngroupedTargets(t *testing.T) {
 	if got := groupLabel(allKeyPrefix + "omsx"); got != "omsx/all" {
 		t.Fatalf("import all label = %q, want omsx/all", got)
 	}

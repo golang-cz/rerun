@@ -458,6 +458,7 @@ func TestSaveWritesSchemaAndSurvivesReload(t *testing.T) {
 	m.width, m.height = 100, 20
 	m.group.configPath = path
 
+	m.cursor = 1 // the backend header; web, ungrouped, lists first
 	m.liveSelect()
 	addLines(m, "api", jsonReq)
 	m.frame()

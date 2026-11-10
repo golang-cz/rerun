@@ -83,9 +83,10 @@ func TestFoldRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newTestModel(t, foldGroup("build"), target("other"))
+			m := newTestModel(t, foldGroup("build"), foldGroup("pad"), target("other"))
 			m.now = spawnClock
-			tg := m.targets[0]
+			m.targets[m.targetIndex("pad")].state = stateManual
+			tg := m.targets[m.targetIndex("build")]
 			tg.state, tg.exitCode, tg.lastStart, tg.exitedAt, tg.runStarted, tg.buildFailed = tc.state, tc.code, tc.lastStart, tc.exitedAt, tc.ran, tc.buildFail
 			if got := slices.Contains(listedNames(m), "build"); got != tc.listed {
 				t.Fatalf("listed = %v, want %v; rows = %v", got, tc.listed, nestedRows(m))
@@ -96,6 +97,8 @@ func TestFoldRule(t *testing.T) {
 
 func TestFoldNeverFoldsTheSoloTarget(t *testing.T) {
 	m := foldFixture(t)
+	idleSpare := foldGroup("audit")
+	m.targets = append(m.targets, &tuiTarget{spec: idleSpare, runner: m.targets[2].runner, state: stateManual, exitCode: -1})
 	m.solo = 1
 	if got, want := listedNames(m), []string{"build", "serve"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("solo serve: listed %v, want %v", got, want)

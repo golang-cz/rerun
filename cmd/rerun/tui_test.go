@@ -259,7 +259,7 @@ func TestMutedSoloTargetStreamsToItsOwnView(t *testing.T) {
 
 func TestMutedTargetStaysOutOfGroupAndCombinedOutput(t *testing.T) {
 	m := groupedModel(t)
-	m.toggleMute(0) // api, in the backend group
+	m.toggleMute(m.targetIndex("api")) // in the backend group
 
 	m.applyScope(-1, "backend")
 	if got := strings.Join(m.paneLines(), "\n"); !strings.Contains(got, "worker keep") {
@@ -678,7 +678,7 @@ func TestHelpOverlayToggles(t *testing.T) {
 	if !m.help || m.helpAll {
 		t.Fatal("? did not open the short help overlay")
 	}
-	if view := m.View().Content; !strings.Contains(view, "move between rows") || strings.Contains(view, "shift-drag") {
+	if view := m.View().Content; !strings.Contains(view, "move between targets") || strings.Contains(view, "shift-drag") {
 		t.Errorf("short help should list the core keys only:\n%s", view)
 	}
 	press(m, "?")
@@ -1218,13 +1218,16 @@ func TestControlStartBootsEveryStartMode(t *testing.T) {
 	}
 }
 
-func TestAppendCappedKeepsNewestLines(t *testing.T) {
-	var lines []string
-	for i := 0; i < lineCap+5; i++ {
-		lines = appendCapped(lines, "line")
+func TestTargetKeepsItsNewestDefaultLines(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	for i := 0; i < defaultKeepLines+5; i++ {
+		m.addLine(0, "line")
 	}
-	if len(lines) != lineCap {
-		t.Fatalf("len = %d, want %d", len(lines), lineCap)
+	if got := len(m.targets[0].lines); got != defaultKeepLines {
+		t.Fatalf("scrollback = %d lines, want %d", got, defaultKeepLines)
+	}
+	if m.paneLen() != defaultKeepLines {
+		t.Fatalf("pane = %d lines, want %d", m.paneLen(), defaultKeepLines)
 	}
 }
 
@@ -1541,7 +1544,7 @@ func TestNameColumnOnlyInMultiTargetViews(t *testing.T) {
 	paneOut(m, "api", "api-line")
 	paneOut(m, "web", "web-line")
 
-	m.applyScope(0, "")
+	m.applyScope(m.targetIndex("api"), "")
 	if got, want := m.paneLines(), []string{"api-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("single pane = %q, want %q", got, want)
 	}

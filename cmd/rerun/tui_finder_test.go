@@ -533,6 +533,7 @@ func TestFinderJumpPlacesCursorOnNewPaneTail(t *testing.T) {
 // A finder jump to a folded target lists only that target; moving away folds it again.
 func TestFinderJumpToFoldedTargetDoesNotExpandGroup(t *testing.T) {
 	m := foldFixture(t)
+	m.targets = append(m.targets, &tuiTarget{spec: foldGroup("audit"), runner: m.targets[2].runner, state: stateManual, exitCode: -1})
 	press(m, "g", "s", "e", "r", "v", "e", "enter")
 
 	if got := listedNames(m); !slices.Contains(got, "serve") || slices.Contains(got, "lint") {

@@ -365,3 +365,20 @@ func TestSaveContinuesPastAStaleEdit(t *testing.T) {
 		t.Fatalf("saved api columns = %+v, want status", got)
 	}
 }
+
+// A colored line still highlights to the pane's right edge: its own resets must not end the cursor band.
+func TestPaneCursorPaintsTheWholeColoredLine(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	addLines(m, "api", "\x1b[31mred\x1b[0m plain text here")
+	m.focusPane()
+	m.frame()
+	for _, l := range paneOf(m) {
+		if strings.Contains(l, "plain text here") {
+			if !strings.Contains(l, "\x1b[0m\x1b[7m") {
+				t.Fatalf("line = %q, want reverse video re-applied after the line's reset", l)
+			}
+			return
+		}
+	}
+	t.Fatal("colored line not drawn")
+}

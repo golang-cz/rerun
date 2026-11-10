@@ -55,8 +55,8 @@ func TestMuteNamesTheTargetInTheFooter(t *testing.T) {
 		act  func()
 		want string
 	}{
-		{func() { m.toggleMute(0) }, "muted web"},
-		{func() { m.toggleMute(0) }, "unmuted web"},
+		{func() { m.toggleMute(0) }, "web muted · m unmutes"},
+		{func() { m.toggleMute(0) }, "web unmuted"},
 	} {
 		tc.act()
 		if m.notice != tc.want || !m.noticeLive() {
@@ -293,6 +293,7 @@ func TestFreshAutoTargetStartsGray(t *testing.T) {
 // ctrl+o on a group header explains itself instead of doing nothing.
 func TestCtrlOOnGroupHeaderShowsNotice(t *testing.T) {
 	m := newConfigTUI([]Target{schemaTarget("api", "backend"), target("web")}, &Config{})
+	m.cursor = 1
 	m.frame()
 	if r, ok := m.cursorRow(); !ok || !r.header {
 		t.Fatalf("cursor row = %+v, want a group header", r)

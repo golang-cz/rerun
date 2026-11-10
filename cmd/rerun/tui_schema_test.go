@@ -26,8 +26,8 @@ func listNames(m *tuiModel) []string {
 	return out
 }
 
-// Groups list in first-use order; ungrouped targets come last.
-func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
+// Ungrouped targets list first, without a header; groups follow in first-use order.
+func TestUngroupedTargetsListBeforeGroups(t *testing.T) {
 	m := newTestModel(t,
 		target("web"),
 		schemaTarget("api", "backend"),
@@ -36,23 +36,20 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 		target("job"),
 	)
 	m.showTimes = true
-	want := []string{"▾backend", "api", "worker", "▾data", "db", "▾all", "web", "job"}
+	want := []string{"web", "job", "▾backend", "api", "worker", "▾data", "db"}
 	if got := listNames(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("list = %v, want %v", got, want)
 	}
 
 	lines := leftPane(m)
-	if !strings.HasPrefix(lines[1], "▾") || !strings.Contains(lines[1], "backend") || !strings.Contains(lines[1], "2/2") {
-		t.Fatalf("header = %q, want the backend header with its running count", lines[1])
+	if !strings.HasPrefix(lines[1], "● web") {
+		t.Fatalf("ungrouped target = %q, want it flat at the top", lines[1])
 	}
-	if !strings.HasPrefix(lines[2], " ● api") {
-		t.Fatalf("member = %q, want the name indented under its header", lines[2])
+	if !strings.HasPrefix(lines[3], "▾") || !strings.Contains(lines[3], "backend") || !strings.Contains(lines[3], "2/2") {
+		t.Fatalf("header = %q, want the backend header with its running count", lines[3])
 	}
-	if !strings.HasPrefix(lines[6], "▾") || !strings.Contains(lines[6], "all") {
-		t.Fatalf("header = %q, want the trailing default header", lines[6])
-	}
-	if !strings.HasPrefix(lines[7], " ● web") {
-		t.Fatalf("ungrouped member = %q, want it indented under default", lines[7])
+	if !strings.HasPrefix(lines[4], " ● api") {
+		t.Fatalf("member = %q, want the name indented under its header", lines[4])
 	}
 }
 
@@ -73,7 +70,8 @@ func TestSchemaSelectionMergesOnlyItsMembers(t *testing.T) {
 	paneOut(m, "api", "api-line")
 	paneOut(m, "worker", "worker-line")
 
-	m.liveSelect() // cursor starts on the backend header
+	m.cursor = 1 // the backend header; web lists first
+	m.liveSelect()
 	if m.schemaSel != "backend" {
 		t.Fatalf("schemaSel = %q, want backend", m.schemaSel)
 	}
@@ -104,6 +102,7 @@ func TestEscClearsSchemaSelectionToTheMergedPane(t *testing.T) {
 	paneOut(m, "web", "web-line")
 	paneOut(m, "api", "api-line")
 
+	m.cursor = 1
 	m.liveSelect()
 	press(m, "esc")
 	if m.schemaSel != "" {
@@ -118,18 +117,19 @@ func TestEscClearsSchemaSelectionToTheMergedPane(t *testing.T) {
 func TestSpaceOnSchemaRowTogglesItsMembers(t *testing.T) {
 	m := newTestModel(t, target("web"), schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 
+	m.cursor = 1
 	press(m, " ")
-	for _, i := range []int{0, 1} {
+	for _, i := range []int{1, 2} {
 		if m.targets[i].state != stateStopped {
 			t.Fatalf("member %s state = %v, want stopped", m.targets[i].spec.Name, m.targets[i].state)
 		}
 	}
-	if m.targets[2].state != stateStarting {
-		t.Fatalf("web state = %v, want it untouched", m.targets[2].state)
+	if m.targets[0].state != stateStarting {
+		t.Fatalf("web state = %v, want it untouched", m.targets[0].state)
 	}
 
 	press(m, " ")
-	for _, i := range []int{0, 1} {
+	for _, i := range []int{1, 2} {
 		if m.targets[i].state != stateRunning {
 			t.Fatalf("member %s state = %v, want running", m.targets[i].spec.Name, m.targets[i].state)
 		}
@@ -155,16 +155,17 @@ func TestRebootOnSchemaRowTouchesSelectedMembersOnly(t *testing.T) {
 func TestMuteOnSchemaRowTogglesAllMembers(t *testing.T) {
 	m := newTestModel(t, target("web"), schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 
+	m.cursor = 1
 	press(m, "m")
-	if !m.targets[0].muted || !m.targets[1].muted {
+	if !m.targets[1].muted || !m.targets[2].muted {
 		t.Fatal("m on the header did not mute both members")
 	}
-	if m.targets[2].muted {
+	if m.targets[0].muted {
 		t.Fatal("m on the header muted a target outside the schema")
 	}
 
 	press(m, "m")
-	if m.targets[0].muted || m.targets[1].muted {
+	if m.targets[1].muted || m.targets[2].muted {
 		t.Fatal("second m on the header did not unmute the members")
 	}
 }
@@ -243,7 +244,7 @@ func TestHeaderNameColumnMatchesPreGlyphColumn(t *testing.T) {
 
 // A folded header keeps its fold marker, never the play glyph.
 func TestFoldedHeaderKeepsFoldMarker(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"))
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
 	idle(m)
 	m.foldState = map[string]bool{"backend": true}
 
@@ -254,8 +255,8 @@ func TestFoldedHeaderKeepsFoldMarker(t *testing.T) {
 
 // The play glyph steps back, so it reads as a hint, not as the header's own state.
 func TestPlayGlyphCellIsFaint(t *testing.T) {
-	m := newTestModel(t, schemaTarget("api", "backend"))
-	m.targets[0].state = stateStopped
+	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
+	m.targets[0].state, m.targets[1].state = stateStopped, stateStopped
 	m.cursor = m.indexOfKey("target:api")
 
 	if play := drawnRow(t, m, "schema:backend"); !faintLine(play) {

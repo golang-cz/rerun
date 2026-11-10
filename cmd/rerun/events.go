@@ -90,7 +90,7 @@ type event struct {
 type configChange struct {
 	targets []Target
 	runners []*targetRunner
-	// stopped is true for a target that must not be running: `selected: false`
+	// stopped is true for a target that must not be running: a target the command line left out
 	// in the config, a target the user stopped, or one added under a solo.
 	stopped []bool
 	// missing is the optional imports whose file is absent, shown as dim rows.

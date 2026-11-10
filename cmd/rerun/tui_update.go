@@ -113,6 +113,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.now = time.Time(msg)
+		m.trimAged()
 		m.fitEvents()
 		return m, tickCmd()
 
@@ -419,6 +420,11 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "m":
 		if r, ok := m.cursorRow(); ok {
 			m.muteRow(r)
+		}
+
+	case "d":
+		if r, ok := m.cursorRow(); ok && !r.header && !r.more {
+			m.toggleDrop(r.target)
 		}
 
 	case "r":
