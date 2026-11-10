@@ -77,6 +77,8 @@ type event struct {
 	lines []string
 	// buildAt is the start of the build an evBuildOutput line came from.
 	buildAt time.Time
+	// owner is the target that launched the shared build behind evBuildStarted; with at, it names the run.
+	owner string
 	// health is the new state behind evHealth.
 	health healthState
 	// runAt is the start time of the run an evHealth belongs to, matching that run's evStarted.at.

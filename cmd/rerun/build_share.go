@@ -54,6 +54,8 @@ type sharedBuild struct {
 	finished  bool
 	// members: guarded by share.mu and buf.mu.
 	members []*buildJob
+	// owner is the first member at launch; its row shows the run and the others join it.
+	owner string
 }
 
 // buildJob is one runner's seat in a sharedBuild.
@@ -165,7 +167,7 @@ func (run *sharedBuild) join(job *buildJob, files map[string]struct{}) (*sharedB
 	}
 	job.run = run
 	run.members = append(run.members, job)
-	out := []emission{{job.sink, event{kind: evBuildStarted, target: job.name, files: sortedFiles(run.files), at: run.started}}}
+	out := []emission{{job.sink, event{kind: evBuildStarted, target: job.name, owner: run.owner, files: sortedFiles(run.files), at: run.started}}}
 	// Replay only completed lines: the partial one arrives whole when it completes.
 	for _, line := range run.buf.lines {
 		out = append(out, emission{job.sink, event{kind: evBuildOutput, target: job.name, line: line, buildAt: run.started}})
@@ -197,6 +199,7 @@ func (s *buildShare) launchLocked(key buildKey, grace time.Duration, members []*
 	run.buf = &tailBuffer{n: buildTailLines, onLine: run.fanOut}
 	run.buf.mu.Lock()
 	run.members = slices.Clone(members)
+	run.owner = run.members[0].name
 	for _, m := range run.members {
 		m.run = run
 	}
@@ -205,7 +208,7 @@ func (s *buildShare) launchLocked(key buildKey, grace time.Duration, members []*
 	sorted := sortedFiles(run.files)
 	var out []emission
 	for _, m := range run.members {
-		out = append(out, emission{m.sink, event{kind: evBuildStarted, target: m.name, files: sorted, at: run.started}})
+		out = append(out, emission{m.sink, event{kind: evBuildStarted, target: m.name, owner: run.owner, files: sorted, at: run.started}})
 	}
 
 	devNull, err := os.Open(os.DevNull)

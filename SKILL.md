@@ -249,6 +249,8 @@ targets:
 
 Plain commands without shell syntax run directly; anything else runs via `/bin/sh -c`.
 
+To force a shell for a plain command, write `run: sh -c '...'` or `run: sh ./run.sh`, as in docker compose.
+
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
 `start: auto`, `keep: 10000`.
 Naming a target on the command line starts only the named ones; the others stay off (still listed, still startable with `space`).

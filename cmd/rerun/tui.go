@@ -586,11 +586,16 @@ func (m *tuiModel) showHint(text string) {
 	m.hintUntil = m.now.Add(hintDuration)
 }
 
-// cancelBuild drops a running build's flags, and its rule reads cancelled.
+// cancelBuild drops a running build's flags, and its rule reads cancelled. A joined target only leaves its owner's rule.
 func (m *tuiModel) cancelBuild(i int) {
 	t := m.targets[i]
 	if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
-		m.dropBuild(rec, "cancelled")
+		if rec.name == t.spec.Name {
+			m.dropBuild(rec, "cancelled")
+		} else {
+			rec.members = slices.DeleteFunc(rec.members, func(n string) bool { return n == t.spec.Name })
+			m.syncBuildRule(rec)
+		}
 	}
 	m.setBuildState(i, false, t.buildFailed)
 }
@@ -724,7 +729,8 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 
 // The rule is in the stream before any output, so output always has a row to fold under.
 func (m *tuiModel) newBuildRule(i int, files []string) *buildRec {
-	rec := &buildRec{name: m.targets[i].spec.Name, files: files, cmd: oneLine(m.targets[i].spec.Build)}
+	name := m.targets[i].spec.Name
+	rec := &buildRec{name: name, members: []string{name}, files: files, cmd: oneLine(m.targets[i].spec.Build)}
 	s := rec.sep()
 	rec.seq = m.addRow(i, s.raw(), s)
 	return rec
@@ -748,6 +754,23 @@ func (m *tuiModel) syncBuildRule(rec *buildRec) bool {
 	m.mergedDirty = true
 	m.vpDirty = true
 	return found
+}
+
+// sharedRow is the owner's running rule that a target joins, when the event starts the owner's current run.
+func (m *tuiModel) sharedRow(t *tuiTarget, ev event) *buildRec {
+	if ev.owner == "" || ev.owner == t.spec.Name {
+		return nil
+	}
+	oi := m.targetIndex(ev.owner)
+	if oi < 0 {
+		return nil
+	}
+	o := m.targets[oi]
+	rec := o.buildRule
+	if rec == nil || rec.phase != buildRunning || !o.buildStart.Equal(t.buildStart) {
+		return nil
+	}
+	return rec
 }
 
 // A build that never finished reads as dropped, not stuck at building.
@@ -932,7 +955,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		t.loopFile = ""
 		t.buildStart = eventTime(ev, m.now)
 		m.setBuildState(i, true, false)
-		if old := t.buildRule; old != nil {
+		if old := t.buildRule; old != nil && old.name == t.spec.Name {
 			if old.phase == buildRunning {
 				m.dropBuild(old, "replaced")
 			}
@@ -942,11 +965,20 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 				m.dispDirty = true
 			}
 		}
+		if rec := m.sharedRow(t, ev); rec != nil {
+			// The owner's rule already shows this run, so the target joins it instead of adding one.
+			t.buildRule = rec
+			if !slices.Contains(rec.members, t.spec.Name) {
+				rec.members = append(rec.members, t.spec.Name)
+			}
+			m.syncBuildRule(rec)
+			break
+		}
 		t.buildRule = m.newBuildRule(i, ev.files)
 
 	case evBuildOutput:
-		// A line from a build that a newer one has replaced belongs to no shown build.
-		if rec := t.buildRule; !t.dropped && rec != nil && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
+		// Stale output belongs to no shown build; a joined target's copy would print the owner's rule twice.
+		if rec := t.buildRule; !t.dropped && rec != nil && rec.name == t.spec.Name && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
 			rec.out = appendLimit(rec.out, printable(ev.line, false), buildLogCap)
 			m.dispDirty = m.dispDirty || m.expanded[rec.seq]
 			m.vpDirty = true
@@ -959,7 +991,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		at := eventTime(ev, m.now)
 		t.buildOKAt = at
 		m.setBuildState(i, false, false)
-		if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
+		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && rec.name == t.spec.Name {
 			rec.phase, rec.dur = buildPassed, ev.dur
 			m.syncBuildRule(rec)
 		}
@@ -972,18 +1004,20 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		up := t.runStarted && t.state.up()
 		m.setBuildState(i, false, true)
 		t.restartBatch = 0
-		rec := t.buildRule
-		if rec == nil || rec.phase != buildRunning {
-			rec = m.newBuildRule(i, ev.files)
-			t.buildRule = rec
-		}
-		rec.phase, rec.reason = buildBroke, buildReason(ev)
-		rec.note = "nothing running"
-		if up {
-			rec.note = "still running the old build"
-		}
-		if m.syncBuildRule(rec) && !t.dropped {
-			m.expanded[rec.seq] = true
+		// A joined target's failure is the owner's rule's to show, once.
+		if rec := t.buildRule; rec == nil || rec.name == t.spec.Name {
+			if rec == nil || rec.phase != buildRunning {
+				rec = m.newBuildRule(i, ev.files)
+				t.buildRule = rec
+			}
+			rec.phase, rec.reason = buildBroke, buildReason(ev)
+			rec.note = "nothing running"
+			if up {
+				rec.note = "still running the old build"
+			}
+			if m.syncBuildRule(rec) && !t.dropped {
+				m.expanded[rec.seq] = true
+			}
 		}
 		if !up {
 			t.state = stateExited

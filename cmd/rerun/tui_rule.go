@@ -33,7 +33,10 @@ type sepLine struct {
 	// full is the command a started rule expands to when its label cuts it short.
 	full string
 	// base is a build rule's label before its command, which text cuts first.
+	// lead joins base to the command, and tail follows it.
 	base string
+	lead string
+	tail string
 }
 
 func (s sepLine) isSep() bool { return s.label != "" || s.restart != nil }
@@ -47,14 +50,14 @@ func (s sepLine) text(w int) string {
 		return s.label
 	}
 	// The name and status outrank the command, so the command takes the cut.
-	room := w - 4 - displayWidth(s.base+" · ")
+	room := w - 4 - displayWidth(s.base+s.lead+s.tail)
 	switch {
 	case room >= displayWidth(s.build.cmd):
 		return s.label
 	case room <= 0:
-		return ellipsize(s.base, max(0, w-4))
+		return ellipsize(s.base+s.tail, max(0, w-4))
 	}
-	return s.base + " · " + ellipsize(s.build.cmd, room)
+	return s.base + s.lead + ellipsize(s.build.cmd, room) + s.tail
 }
 
 // expandable reports whether the rule has anything under it at pane width w.
@@ -142,12 +145,15 @@ const (
 
 // One build keeps one rule, rewritten in place as the build moves on.
 type buildRec struct {
-	name   string
-	seq    int
-	files  []string
-	phase  buildPhase
-	dur    time.Duration
-	reason string
+	// name is the owner target, whose stream holds the rule.
+	name string
+	// members are the targets the rule names: the owner first, then any that joined its shared build.
+	members []string
+	seq     int
+	files   []string
+	phase   buildPhase
+	dur     time.Duration
+	reason  string
 	// cmd is the build command, the first row under the rule.
 	cmd string
 	// note is the first row under a failed build: whether the old run survived.
@@ -156,38 +162,67 @@ type buildRec struct {
 }
 
 func (r *buildRec) sep() sepLine {
-	icon, head := "⚙", r.name
-	switch r.phase {
-	case buildRunning:
-		head += " building"
-	case buildPassed:
-		head += " built " + fmtDur(r.dur)
-	case buildBroke:
-		icon, head = "✗", r.name+" build failed"
-		if r.reason != "" {
-			head += " · " + r.reason
-		}
-	case buildDropped:
-		head += " build " + r.reason
-	}
-	label := icon + " " + head
 	s := sepLine{build: r, tone: toneNone}
 	if r.phase == buildBroke {
 		s.tone = toneFail
 	}
+	shared := len(r.members) > 1
+	icon, status := r.status(shared)
+	files := ""
 	if len(r.files) > 0 {
-		label += " · " + filepath.Base(r.files[0])
+		files = filepath.Base(r.files[0])
 	}
 	if n := len(r.files) - 1; n > 0 {
 		s.more = fmt.Sprintf("+%d more", n)
-		label += " " + s.more
+		files += " " + s.more
 	}
-	s.label = label
-	if r.cmd != "" {
-		s.base = label
-		s.label = label + " · " + r.cmd
+	if shared {
+		// The command leads, so it takes the cut; the status, files and names stay whole.
+		s.base, s.lead = icon, " "
+		if status != "" {
+			s.tail += " " + status
+		}
+		if files != "" {
+			s.tail += " · " + files
+		}
+		s.tail += " · " + strings.Join(r.members, ", ")
+	} else {
+		s.base = icon + " " + r.name
+		if status != "" {
+			s.base += " " + status
+		}
+		if files != "" {
+			s.base += " · " + files
+		}
+		s.lead = " · "
 	}
+	if r.cmd == "" {
+		// Without a command there is no cut: the rule is its label.
+		s.label, s.base, s.lead = s.base+s.tail, "", ""
+		return s
+	}
+	s.label = s.base + s.lead + r.cmd + s.tail
 	return s
+}
+
+// status is the rule's phase in words, and its icon. A shared run's waiting rule names no phase, as its command already says what runs.
+func (r *buildRec) status(shared bool) (icon, text string) {
+	switch r.phase {
+	case buildPassed:
+		return "⚙", "built " + fmtDur(r.dur)
+	case buildBroke:
+		text = "build failed"
+		if r.reason != "" {
+			text += " · " + r.reason
+		}
+		return "✗", text
+	case buildDropped:
+		return "⚙", "build " + r.reason
+	}
+	if shared {
+		return "⚙", ""
+	}
+	return "⚙", "building"
 }
 
 func (r *buildRec) expansion() []string {

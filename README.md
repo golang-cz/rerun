@@ -200,6 +200,8 @@ Each top-level key is one target. Fields:
 
 Plain commands without shell syntax run directly; anything else runs via `/bin/sh -c`.
 
+To force a shell for a plain command, write `run: sh -c '...'` or `run: sh ./run.sh`, as in docker compose.
+
 A column can also hold literal text and several `{expr}` placeholders. Each
 placeholder evaluates on its own, a missing value renders as nothing, and runs of
 spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
