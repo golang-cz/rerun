@@ -13,7 +13,7 @@ func sharedPlainEvent(kind eventKind, target string) event {
 func TestPlainSinkLogsSharedBuildOnceByItsOwner(t *testing.T) {
 	s := newPlainSink(nil)
 	got := s.render(sharedPlainEvent(evBuildStarted, "api")) + s.render(sharedPlainEvent(evBuildStarted, "worker"))
-	if want := "⚙ go build ./cmd/app · api, worker\n"; got != want {
+	if want := "api +1 building\n"; got != want {
 		t.Fatalf("start = %q, want %q", got, want)
 	}
 
@@ -22,7 +22,7 @@ func TestPlainSinkLogsSharedBuildOnceByItsOwner(t *testing.T) {
 	okWorker := sharedPlainEvent(evBuildOK, "worker")
 	okWorker.dur = time.Second
 	got = s.render(ok) + s.render(okWorker)
-	if want := "⚙ go build ./cmd/app built 1s · api, worker\n"; got != want {
+	if want := "api +1 built 1s\n"; got != want {
 		t.Fatalf("built = %q, want %q", got, want)
 	}
 }
@@ -34,21 +34,21 @@ func TestPlainSinkLogsSharedFailureOnce(t *testing.T) {
 	worker := sharedPlainEvent(evBuildFailed, "worker")
 	worker.dur, worker.err = time.Second, errTest
 	got := s.render(fail) + s.render(worker)
-	want := "✗ go build ./cmd/app build failed after 1s: boom · api, worker\n[api] build: main.go:3: oops\n"
+	want := "api +1 build failed · boom\n[api] build: main.go:3: oops\n"
 	if got != want {
 		t.Fatalf("failure = %q, want %q", got, want)
 	}
 }
 
-// A single-target build keeps its plain lines.
-func TestPlainSinkSingleTargetBuildIsUnchanged(t *testing.T) {
+// A single-target build has no +N.
+func TestPlainSinkSingleTargetBuildHasNoCount(t *testing.T) {
 	s := newPlainSink(nil)
 	start := event{kind: evBuildStarted, target: "api", owner: "api", names: []string{"api"}}
-	if got, want := s.render(start), "[api] building ("+fileCount(0)+")\n"; got != want {
+	if got, want := s.render(start), "api building\n"; got != want {
 		t.Fatalf("start = %q, want %q", got, want)
 	}
 	ok := event{kind: evBuildOK, target: "api", owner: "api", names: []string{"api"}, dur: time.Second}
-	if got, want := s.render(ok), "[api] build ok (1s)\n"; got != want {
+	if got, want := s.render(ok), "api built 1s\n"; got != want {
 		t.Fatalf("ok = %q, want %q", got, want)
 	}
 }

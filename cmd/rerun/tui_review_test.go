@@ -39,7 +39,7 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 	paneOut(m, "web", "listening")
 	hasRule := func() bool {
 		for _, l := range rawPane(m) {
-			if strings.Contains(l, "▶ web started") {
+			if strings.Contains(l, "web started") {
 				return true
 			}
 		}
@@ -134,8 +134,8 @@ func TestRowLeavesRoomForTheMarkCell(t *testing.T) {
 func TestExitRuleOmitsDurationWithoutAStart(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
-	if got := m.visibleRaw[len(m.visibleRaw)-1]; got != "■ web exit 1" {
-		t.Fatalf("exit rule = %q, want no duration", got)
+	if got := m.visibleSep[len(m.visibleSep)-1]; got.text() != "crashed · exit 1" || len(got.detailRows()) != 0 {
+		t.Fatalf("exit rule = %+v, want no duration", got)
 	}
 }
 
@@ -147,21 +147,22 @@ func TestExitRuleNamesSignalsAndErrors(t *testing.T) {
 		want string
 		tone sepTone
 	}{
-		{"signal", event{code: -1, err: sigErr}, "■ web killed by term", toneFail},
-		{"error", event{code: -1, err: errors.New("boom")}, "■ web failed: boom", toneFail},
-		{"zero", event{code: 0}, "✓ web exit 0", toneOK},
-		{"code", event{code: 3}, "■ web exit 3", toneFail},
+		{"signal", event{code: -1, err: sigErr}, "crashed · killed by term", toneFail},
+		{"error", event{code: -1, err: errors.New("boom")}, "crashed · failed: boom", toneFail},
+		{"zero", event{code: 0}, "exited", toneOK},
+		{"code", event{code: 3}, "crashed · exit 3", toneFail},
+		{"oom", event{code: 137, status: "oom"}, "crashed · oom", toneFail},
 	}
 	for _, c := range cases {
 		got := exitRule(&tuiTarget{spec: target("web")}, c.ev, time.Now())
-		if got.label != c.want || got.tone != c.tone {
-			t.Errorf("%s: rule = %q tone %v, want %q tone %v", c.name, got.label, got.tone, c.want, c.tone)
+		if got.text() != c.want || got.tone != c.tone {
+			t.Errorf("%s: rule = %q tone %v, want %q tone %v", c.name, got.text(), got.tone, c.want, c.tone)
 		}
 	}
 }
 
 func TestRuleTruncatesWithAnEllipsis(t *testing.T) {
-	out := ansi.Strip(renderSep(sepLine{label: strings.Repeat("long ", 20)}, 20, true))
+	out := ansi.Strip(newTestModel(t, target("web")).renderSep(sepLine{verb: strings.Repeat("long ", 20)}, 20))
 	if displayWidth(out) != 20 || !strings.Contains(out, "…") {
 		t.Fatalf("rule = %q, want 20 cells ending in an ellipsis", out)
 	}
@@ -187,7 +188,7 @@ func TestClockValueAcceptsMoreTimestampForms(t *testing.T) {
 
 func TestExitRuleTruncatesLongErrors(t *testing.T) {
 	got := exitRule(&tuiTarget{spec: target("web")}, event{code: -1, err: errors.New(strings.Repeat("x", 100))}, time.Now())
-	if !strings.HasPrefix(got.label, "■ web failed: ") || !strings.Contains(got.label, "…") || displayWidth(got.label) > 60 {
-		t.Fatalf("rule = %q, want a failed rule with the error cut to an ellipsis", got.label)
+	if !strings.HasPrefix(got.text(), "crashed · failed: ") || !strings.Contains(got.text(), "…") || displayWidth(got.text()) > 60 {
+		t.Fatalf("rule = %q, want a failed rule with the error cut to an ellipsis", got.text())
 	}
 }

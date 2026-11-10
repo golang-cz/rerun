@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestHealthyAppendRefreshesRawText(t *testing.T) {
 	for i, s := range m.visibleSep {
 		if s.restart != nil {
 			found = true
-			if !strings.Contains(m.visibleRaw[i], "· healthy in 1s") {
+			if !slices.Contains(s.detailRows(), "healthy in 1s") {
 				t.Fatalf("raw text = %q, want the healthy time", m.visibleRaw[i])
 			}
 		}

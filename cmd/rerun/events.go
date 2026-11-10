@@ -158,7 +158,7 @@ func (s *plainSink) render(ev event) string {
 
 	case evExited:
 		if ev.restart {
-			return fmt.Sprintf("[%s] stopped for restart\n", ev.target)
+			return eventRow(ev.target, 0, "restarting", "")
 		}
 		if raw {
 			return fmt.Sprintf("rerun: exited (%s) — waiting for changes\n", ev.status)
@@ -181,40 +181,30 @@ func (s *plainSink) render(ev event) string {
 		if joined(ev) {
 			return ""
 		}
-		if len(ev.names) > 1 {
-			return fmt.Sprintf("⚙ %s · %s\n", ev.cmd, strings.Join(ev.names, ", "))
-		}
-		return fmt.Sprintf("[%s] building (%s)\n", ev.target, fileCount(len(ev.files)))
+		return eventRow(ev.target, len(ev.names)-1, "building", "")
 
 	case evBuildOK:
 		if joined(ev) {
 			return ""
 		}
-		if len(ev.names) > 1 {
-			return fmt.Sprintf("⚙ %s built %s · %s\n", ev.cmd, fmtDur(ev.dur), strings.Join(ev.names, ", "))
-		}
-		return fmt.Sprintf("[%s] build ok (%s)\n", ev.target, fmtDur(ev.dur))
+		return eventRow(ev.target, len(ev.names)-1, "built", fmtDur(ev.dur))
 
 	case evBuildFailed:
 		if joined(ev) {
 			return ""
 		}
 		var b strings.Builder
-		if len(ev.names) > 1 {
-			fmt.Fprintf(&b, "✗ %s build failed after %s: %v · %s\n", ev.cmd, fmtDur(ev.dur), ev.err, strings.Join(ev.names, ", "))
-		} else {
-			fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, fmtDur(ev.dur), ev.err)
-		}
+		b.WriteString(eventRow(ev.target, len(ev.names)-1, "build failed", buildReason(ev)))
 		for _, l := range ev.lines {
 			fmt.Fprintf(&b, "[%s] build: %s\n", ev.target, l)
 		}
 		return b.String()
 
 	case evHealth:
-		return fmt.Sprintf("[%s] health: %s (%s after start)\n", ev.target, ev.health, fmtDur(ev.dur))
+		return eventRow(ev.target, 0, string(ev.health), fmtDur(ev.dur))
 
 	case evStopped:
-		return fmt.Sprintf("[%s] stopped\n", ev.target)
+		return eventRow(ev.target, 0, "stopped", "")
 
 	case evCleared:
 		if raw {
@@ -233,14 +223,22 @@ func (s *plainSink) render(ev event) string {
 	return ""
 }
 
-func fileCount(n int) string {
-	if n == 1 {
-		return "1 file"
+// eventRow is the plain log's event line: the target, +N for a shared build, a verb and at most one fact.
+// A failing verb sets its fact apart with a dot, as the TUI's rows do.
+func eventRow(target string, others int, verb, fact string) string {
+	row := target
+	if others > 0 {
+		row += fmt.Sprintf(" +%d", others)
 	}
-	if n == 0 {
-		return "no files"
+	row += " " + verb
+	switch {
+	case fact == "":
+	case strings.Contains(verb, "fail") || verb == "crashed":
+		row += " · " + fact
+	default:
+		row += " " + fact
 	}
-	return fmt.Sprintf("%d files", n)
+	return row + "\n"
 }
 
 // label is the target's identity in rerun's own messages.

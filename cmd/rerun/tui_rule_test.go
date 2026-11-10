@@ -18,7 +18,7 @@ func TestStartAndExitWriteRunRules(t *testing.T) {
 		{kind: evExited, target: "web", code: 0, at: start.Add(4200 * time.Millisecond)},
 	})
 
-	want := []string{"▶ web started · sleep 1", "listening", "✓ web exit 0 · 4s"}
+	want := []string{"web started", "listening", "web exited"}
 	var got []string
 	for i, line := range m.visibleRaw {
 		if m.visibleSep[i].isSep() || line == "listening" {
@@ -40,7 +40,7 @@ func TestFailedExitRuleIsRed(t *testing.T) {
 		{kind: evExited, target: "web", code: 1},
 	})
 	last := m.visibleSep[len(m.visibleSep)-1]
-	if last.tone != toneFail || !strings.Contains(last.label, "exit 1") {
+	if last.tone != toneFail || last.fact != "exit 1" {
 		t.Fatalf("exit rule = %+v, want a red exit 1 rule", last)
 	}
 }
@@ -51,7 +51,7 @@ func TestRunRuleFillsThePaneOnResize(t *testing.T) {
 
 	ruleWidth := func() int {
 		for _, line := range paneOf(m) {
-			if plain := ansi.Strip(line); strings.Contains(plain, "▶ web started") {
+			if plain := ansi.Strip(line); strings.Contains(plain, " started") {
 				return displayWidth(strings.TrimRight(dropStamp(plain), " "))
 			}
 		}
@@ -77,7 +77,7 @@ func TestRunRuleIsNotATableRow(t *testing.T) {
 	if !m.tableOn() {
 		t.Fatal("expected table mode")
 	}
-	if got := dropStamp(ansi.Strip(paneOf(m)[m.titleHeight()+1])); !strings.HasPrefix(got, "── ▶ web started") {
+	if got := dropStamp(ansi.Strip(paneOf(m)[m.titleHeight()+1])); !strings.HasPrefix(got, "web ") || !strings.Contains(got, " started") {
 		t.Fatalf("rule row = %q, want the run rule unchanged at the left edge", got)
 	}
 }

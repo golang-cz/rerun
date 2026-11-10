@@ -307,6 +307,8 @@ type tuiModel struct {
 	inBatch  bool
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
+	// frameRows is the list drawn by the frame in progress; nil between frames.
+	frameRows []listRow
 	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.
 	blockCache map[blockKey][]dispRow
 	nextSeq    int
@@ -317,8 +319,6 @@ type tuiModel struct {
 	disp      []dispRow
 	dispText  []string
 	dispDirty bool
-	// frameRows is the list drawn by the frame in progress; nil between frames.
-	frameRows []listRow
 	// edits are the unsaved column picks, one per schema or target node.
 	edits []colEdit
 
@@ -713,7 +713,7 @@ func (m *tuiModel) addLine(i int, line string) {
 
 // refreshRule rewrites a rule's stored raw text, so copy and search match what it now draws.
 func (m *tuiModel) refreshRule(rr *restartRule) {
-	raw := rr.label(1 << 16)
+	raw := restartedRule(rr).raw()
 	if i := m.targetIndex(rr.name); i >= 0 {
 		lines := m.targets[i].lines
 		for k := range lines {
@@ -1092,7 +1092,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		if ev.restart {
 			rr := &restartRule{name: t.spec.Name, at: eventTime(ev, m.now), files: ev.files, built: ev.buildDur, upFor: ev.prevUp, cmd: oneLine(t.spec.Cmd)}
 			t.lastRule = rr
-			m.addRule(i, sepLine{restart: rr, full: rr.cmd})
+			m.addRule(i, restartedRule(rr))
 			if m.follow && m.solo == i && m.schemaSel == "" {
 				m.pinSeq, m.pinGap = m.nextSeq, false
 			}
@@ -1657,9 +1657,22 @@ func (m *tuiModel) rebuildMerged() {
 	var srcs []lineSource
 	total := 0
 	for i, t := range m.targets {
-		if len(t.lines) > 0 && m.streamsTo(i) {
-			srcs = append(srcs, lineSource{t.lines, i})
-			total += len(t.lines)
+		if len(t.lines) == 0 {
+			continue
+		}
+		lines := t.lines
+		if !m.streamsTo(i) {
+			// A shared build's row also sits in the log of each member the pane shows.
+			lines = nil
+			for _, ml := range t.lines {
+				if ml.sep.build != nil && m.buildStreams(ml.sep.build) {
+					lines = append(lines, ml)
+				}
+			}
+		}
+		if len(lines) > 0 {
+			srcs = append(srcs, lineSource{lines, i})
+			total += len(lines)
 		}
 	}
 	if len(m.orphans) > 0 {

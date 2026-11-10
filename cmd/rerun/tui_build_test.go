@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -223,7 +222,7 @@ func TestLongBuildLeavesServiceLinesIntact(t *testing.T) {
 	m.liveSelect()
 	m.applyEvents([]event{{kind: evOutput, target: "api", line: "still serving"}})
 	got := rawPane(m)
-	if len(got) != 3 || got[0] != "server up" || got[2] != "still serving" || !strings.HasPrefix(got[1], "⚙ api building") {
+	if len(got) != 3 || got[0] != "server up" || got[2] != "still serving" || !strings.HasPrefix(got[1], "api building") {
 		t.Fatalf("service pane after a 5000-line build = %q, want the rule between the service lines", got)
 	}
 	if n := len(m.targets[0].buildRule.out); n != buildLogCap {
@@ -326,11 +325,11 @@ func buildRuleSeq(m *tuiModel) int {
 func TestBuildRuleUpdatesInPlace(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go"), buildOut("api", buildAt, "compiling")})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api building · a.go +1 more · make api" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "api building" {
 		t.Fatalf("building rule = %q, want one rule", got)
 	}
 	m.applyEvents([]event{buildOK("api", 500*time.Millisecond)})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 0s · a.go +1 more · make api" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "api built 0s" {
 		t.Fatalf("rule after the build = %q, want it rewritten in place", got)
 	}
 	if len(m.mergedAll()) != 1 {
@@ -374,7 +373,7 @@ func TestBuildFailureAutoExpandsItsRule(t *testing.T) {
 		{kind: evBuildFailed, target: "api", dur: 6 * time.Second, code: 2, files: []string{"/x/a.go"}},
 	})
 	m.frame()
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "✗ api build failed · exit 2 · a.go · make api" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "api build failed · exit 2" {
 		t.Fatalf("failed rule = %q", got)
 	}
 	if !m.expanded[buildRuleSeq(m)] {
@@ -467,48 +466,47 @@ func TestDoubleClickOnACutCommandExpandsIt(t *testing.T) {
 	}
 }
 
-func TestDoubleClickOnMoreOpensFileList(t *testing.T) {
+func TestExpandedBuildRowListsTriggerFiles(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go")})
 	m.frame()
-	s := m.visibleSep[0]
-	end := displayWidth("── " + s.label)
-	if s.more != "+2 more" {
-		t.Fatalf("more = %q, want +2 more for %q", s.more, s.label)
+	if rows := strings.Join(m.paneLines(), "\n"); strings.Contains(rows, "/x/c.go") {
+		t.Fatalf("files shown before expanding: %q", rows)
 	}
-	row := m.paneCursorRow()
-	doubleClick(m, m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
-	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "/x/c.go") {
-		t.Fatalf("file list not shown after +2 more: %q", rows)
+	m.toggleExpand(m.paneCursorRow())
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "files: /x/a.go, /x/b.go, /x/c.go") {
+		t.Fatalf("file list not shown after expanding: %q", rows)
 	}
 }
 
-func TestLongStartedCommandExpandsToFullText(t *testing.T) {
-	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
+func TestStartedCommandIsFoldedUntilExpanded(t *testing.T) {
 	tg := target("api")
-	tg.Cmd = long
+	tg.Cmd = "go run ./cmd/api --flag end"
 	m := newTestModel(t, tg)
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
 	m.frame()
 	row := m.paneCursorRow()
+	if rows := strings.Join(m.paneLines(), "\n"); strings.Contains(rows, "--flag end") {
+		t.Fatalf("command shown while folded: %q", rows)
+	}
 	if !m.expandable(row) {
-		t.Fatal("a cut-short command is not expandable")
+		t.Fatal("a started row with a command is not expandable")
 	}
 	m.toggleExpand(row)
-	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
-		t.Fatalf("expansion lacks the full command: %q", rows)
+	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "$ go run ./cmd/api --flag end") {
+		t.Fatalf("expansion lacks the command: %q", rows)
 	}
 }
 
-func TestShortStartedCommandIsNotExpandable(t *testing.T) {
+func TestStartedWithoutCommandIsNotExpandable(t *testing.T) {
 	tg := target("api")
-	tg.Cmd = "echo hi"
+	tg.Cmd = ""
 	m := newTestModel(t, tg)
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
 	m.frame()
 	row := m.paneCursorRow()
 	if m.expandable(row) {
-		t.Fatal("an uncut command shows an expand affordance")
+		t.Fatal("a row with nothing folded shows an expand affordance")
 	}
 	press(m, "right", "enter")
 	if len(m.expanded) != 0 {
@@ -520,7 +518,7 @@ func TestReplacedBuildRuleSaysReplaced(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildStart("api", buildAt.Add(time.Minute))})
 	got := buildRuleTexts(m)
-	if len(got) != 2 || got[0] != "⚙ api build replaced · make api" || got[1] != "⚙ api building · make api" {
+	if len(got) != 2 || got[0] != "api build replaced" || got[1] != "api building" {
 		t.Fatalf("rules = %q, want the old one replaced and the new one building", got)
 	}
 }
@@ -528,7 +526,7 @@ func TestReplacedBuildRuleSaysReplaced(t *testing.T) {
 func TestCancelledBuildRuleSaysCancelled(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), {kind: evBuildCancelled, target: "api"}})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api build cancelled · make api" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "api build cancelled" {
 		t.Fatalf("rule = %q, want it to read cancelled", got)
 	}
 }
@@ -570,45 +568,6 @@ func TestRebuildsKeepOnlyLatestAndFailedOutput(t *testing.T) {
 	// Five failed builds plus the latest passed one keep output.
 	if recs != 6 || lines != 6*buildLogCap {
 		t.Fatalf("retained %d records with %d lines, want 6 records with %d lines", recs, lines, 6*buildLogCap)
-	}
-}
-
-func TestResizeRedrawsCutRule(t *testing.T) {
-	tg := target("api")
-	tg.Cmd = "go run " + strings.Repeat("x", 200)
-	m := newTestModel(t, tg)
-	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.frame()
-	raw := m.rowInfo(m.paneLen() - 1).raw
-	if !m.expandable(raw) {
-		t.Fatal("a cut command is not expandable")
-	}
-	m.toggleExpand(raw)
-	if m.paneLen() < 2 {
-		t.Fatal("expansion did not open")
-	}
-	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
-	m.frame()
-	if m.paneLen() != 1 {
-		t.Fatalf("widening left %d rows, want the expansion gone", m.paneLen())
-	}
-}
-
-func TestResizeNarrowingMakesRuleExpandable(t *testing.T) {
-	tg := target("api")
-	tg.Cmd = "echo hi"
-	m := newTestModel(t, tg)
-	m.Update(tea.WindowSizeMsg{Width: 400, Height: 20})
-	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}})
-	m.frame()
-	raw := m.rowInfo(m.paneLen() - 1).raw
-	if m.expandable(raw) {
-		t.Fatal("a short command is expandable on a wide pane")
-	}
-	m.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
-	m.frame()
-	if !m.expandable(raw) {
-		t.Fatal("narrowing did not make the cut command expandable")
 	}
 }
 
@@ -794,16 +753,13 @@ func spinIndex(s string) int {
 	return -1
 }
 
-// The build command takes the cut on a narrow pane; the name and status stay whole.
-func TestBuildRuleCutsTheCommandNotTheStatus(t *testing.T) {
+func TestBuildRowIsConcise(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
-	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go"), buildOK("api", 2*time.Second)})
 	m.frame()
-	rule := m.visibleSep[m.rowInfo(ruleRow(t, m)).raw]
-
-	got := rule.text(4 + displayWidth(rule.base+" · ") + 4) // leaves four cells for the command
-	if !strings.HasPrefix(got, "⚙ api built 1s · ") || !strings.HasSuffix(got, "…") {
-		t.Fatalf("text = %q, want the status whole and the command cut", got)
+	got := strings.TrimSpace(strings.TrimRight(ansi.Strip(ruleLine(m, "built")), "─ "))
+	if !strings.HasSuffix(got, "built 2s") || strings.Contains(got, "a.go") || strings.Contains(got, "⚙") {
+		t.Fatalf("row = %q, want only the verb and duration", got)
 	}
 }
 

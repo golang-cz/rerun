@@ -240,11 +240,11 @@ func TestPlainSinkRendersBuildAndHealthEvents(t *testing.T) {
 		ev   event
 		want string
 	}{
-		{event{kind: evBuildStarted, target: "api", files: []string{"a.go", "b.go"}}, "[api] building (2 files)\n"},
-		{event{kind: evBuildOK, target: "api", dur: 1500 * time.Millisecond}, "[api] build ok (1s)\n"},
-		{event{kind: evBuildFailed, target: "api", dur: time.Second, err: os.ErrInvalid, lines: []string{"boom"}}, "[api] build failed after 1s: invalid argument\n[api] build: boom\n"},
-		{event{kind: evHealth, target: "api", health: healthUnhealthy, dur: 2 * time.Second}, "[api] health: unhealthy (2s after start)\n"},
-		{event{kind: evExited, target: "api", restart: true}, "[api] stopped for restart\n"},
+		{event{kind: evBuildStarted, target: "api", files: []string{"a.go", "b.go"}}, "api building\n"},
+		{event{kind: evBuildOK, target: "api", dur: 1500 * time.Millisecond}, "api built 1s\n"},
+		{event{kind: evBuildFailed, target: "api", dur: time.Second, err: os.ErrInvalid, lines: []string{"boom"}}, "api build failed · invalid argument\n[api] build: boom\n"},
+		{event{kind: evHealth, target: "api", health: healthUnhealthy, dur: 2 * time.Second}, "api unhealthy 2s\n"},
+		{event{kind: evExited, target: "api", restart: true}, "api restarting\n"},
 	}
 	for _, c := range cases {
 		if got := s.render(c.ev); got != c.want {

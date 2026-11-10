@@ -26,7 +26,7 @@ func clearedText(m *tuiModel) int {
 		}
 	}
 	for _, s := range m.visibleSep {
-		if strings.Contains(s.label, "cleared") {
+		if strings.Contains(s.raw(), "cleared") {
 			n++
 		}
 	}
@@ -116,7 +116,7 @@ func TestClearAddsNoLine(t *testing.T) {
 		t.Fatalf("paneLen = %d, want %d (a clear must not add a line)", got, before)
 	}
 	for _, s := range m.visibleSep {
-		if strings.Contains(s.label, "cleared") {
+		if strings.Contains(s.raw(), "cleared") {
 			t.Fatalf("sepLine = %+v, want no cleared rule", s)
 		}
 	}

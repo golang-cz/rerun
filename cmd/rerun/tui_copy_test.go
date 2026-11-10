@@ -735,7 +735,7 @@ func TestDoubleClickOnBuildRuleExpandsIt(t *testing.T) {
 }
 
 func TestRuleWithoutCommandHasNoCopyCommand(t *testing.T) {
-	if got := (sepLine{label: "✓ web ok"}).cmd(); got != "" {
+	if got := (sepLine{verb: "exited"}).cmd(); got != "" {
 		t.Fatalf("cmd() = %q, want none for a status rule", got)
 	}
 }
@@ -747,7 +747,7 @@ func TestRangeCopyKeepsTheFullRule(t *testing.T) {
 	m.frame()
 	row := ruleRow(t, m)
 
-	want := "▶ web started · sleep 1\nhello\n"
+	want := "web started\nhello\n"
 	if got := copyRows(t, m, row, row+1); got != want {
 		t.Fatalf("payload = %q, want %q", got, want)
 	}

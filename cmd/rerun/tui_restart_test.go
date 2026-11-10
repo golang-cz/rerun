@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,51 +17,11 @@ func restartEvent(name string, files []string, buildDur, prevUp time.Duration) e
 func rawRules(m *tuiModel) []string {
 	var out []string
 	for _, l := range rawPane(m) {
-		if strings.Contains(l, "↻") || strings.Contains(l, "■") || strings.Contains(l, "✓ ") || strings.Contains(l, "✗ ") || strings.Contains(l, "▶") {
+		if strings.Contains(l, "restarted") || strings.Contains(l, "crashed") || strings.Contains(l, "exited") || strings.Contains(l, "build failed") || strings.Contains(l, "started") {
 			out = append(out, l)
 		}
 	}
 	return out
-}
-
-func TestRestartRuleTextAndOmissions(t *testing.T) {
-	full := &restartRule{name: "api", at: restartAt, files: []string{"/src/handler.go", "/src/a.go", "/src/b.go"},
-		built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second}
-	cases := []struct {
-		name string
-		rr   *restartRule
-		want string
-	}{
-		{"all segments", full, "↻ api restarted · handler.go +2 · built 6s · was up 3m12s"},
-		{"no files", &restartRule{name: "api", at: restartAt, built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second},
-			"↻ api restarted · built 6s · was up 3m12s"},
-		{"no build", &restartRule{name: "api", at: restartAt, files: []string{"a.go"}, upFor: 3*time.Minute + 12*time.Second},
-			"↻ api restarted · a.go · was up 3m12s"},
-		{"no previous run", &restartRule{name: "api", at: restartAt, files: []string{"a.go"}, built: 6 * time.Second},
-			"↻ api restarted · a.go · built 6s"},
-		{"one file", &restartRule{name: "api", at: restartAt, files: []string{"/x/only.go"}},
-			"↻ api restarted · only.go"},
-	}
-	for _, c := range cases {
-		if got := c.rr.label(200); got != c.want {
-			t.Errorf("%s: label = %q, want %q", c.name, got, c.want)
-		}
-	}
-}
-
-func TestRestartRuleTruncatesRestLastAndKeepsName(t *testing.T) {
-	full := &restartRule{name: "api", at: restartAt, files: []string{"/src/handler.go", "/src/a.go"},
-		built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second}
-	headFiles := "↻ api restarted · handler.go +1"
-	if got := full.label(displayWidth(headFiles)); got != headFiles {
-		t.Errorf("label at name+time+files width = %q, want %q (the rest dropped first)", got, headFiles)
-	}
-	if got := full.label(displayWidth(headFiles) - 1); got != "↻ api restarted" {
-		t.Errorf("one cell narrower = %q, want the files segment dropped as a unit", got)
-	}
-	if got := full.label(10); !strings.HasPrefix(got, "↻ api") {
-		t.Errorf("narrowest label = %q, want the name kept", got)
-	}
 }
 
 func TestHealthyAppendsToItsRestartRule(t *testing.T) {
@@ -77,8 +38,8 @@ func TestHealthyAppendsToItsRestartRule(t *testing.T) {
 	}
 
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(1800 * time.Millisecond), runAt: restartAt, dur: 1800 * time.Millisecond}})
-	if got := m.targets[0].lastRule.label(200); !strings.Contains(got, " · healthy in 1s") {
-		t.Fatalf("label = %q, want healthy in 1s appended", got)
+	if got := m.targets[0].lastRule.details(); !slices.Contains(got, "healthy in 1s") {
+		t.Fatalf("details = %q, want healthy in 1s appended", got)
 	}
 
 	m.applyEvents([]event{{kind: evHealth, target: "api", health: healthHealthy, at: restartAt.Add(-time.Minute), runAt: restartAt.Add(-time.Minute), dur: 9 * time.Second}})
@@ -95,10 +56,10 @@ func TestRestartDrawsOneRuleAndNoExitRule(t *testing.T) {
 	m.frame()
 
 	rules := rawRules(m)
-	if len(rules) != 2 || !strings.HasPrefix(rules[0], "▶ api started") || !strings.HasPrefix(rules[1], "↻ api restarted") {
+	if len(rules) != 2 || !strings.HasPrefix(rules[0], "api") || !strings.Contains(rules[0], " started") || !strings.Contains(rules[1], " restarted") {
 		t.Fatalf("rules = %q, want the first-start rule then one restart rule and no exit rule", rules)
 	}
-	if strings.Contains(strings.Join(rules, "\n"), "■") {
+	if strings.Contains(strings.Join(rules, "\n"), "exited") {
 		t.Fatalf("a restart exit drew a ■ rule: %q", rules)
 	}
 	if strings.Contains(rules[1], "built") {
@@ -111,7 +72,7 @@ func TestNonRestartExitKeepsExitRule(t *testing.T) {
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt}})
 	m.applyEvents([]event{{kind: evExited, target: "api", code: 0, status: "exited 0", at: restartAt.Add(time.Second)}})
 	m.frame()
-	if rules := rawRules(m); len(rules) != 2 || !strings.HasPrefix(rules[1], "✓ api exit 0") {
+	if rules := rawRules(m); len(rules) != 2 || !strings.Contains(rules[1], "api") || !strings.Contains(rules[1], " exited") {
 		t.Fatalf("rules = %q, want the ■ exit rule after the start", rules)
 	}
 }
@@ -120,7 +81,7 @@ func TestFirstStartRuleNamesItsBuild(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt, buildDur: 6 * time.Second}})
 	m.frame()
-	if rules := rawRules(m); len(rules) != 1 || !strings.HasPrefix(rules[0], "▶ api started") || strings.Contains(rules[0], "built") {
+	if rules := rawRules(m); len(rules) != 1 || !strings.Contains(rules[0], " started") || strings.Contains(rules[0], "built") {
 		t.Fatalf("rules = %q, want the first start without its build", rules)
 	}
 }
@@ -143,7 +104,7 @@ func TestBuildFailedRuleLeavesOnlyTheHint(t *testing.T) {
 				lines: []string{"boom \x1b[31mred", "second"}}})
 			m.frame()
 
-			want := "✗ api build failed · a.go +1 more"
+			want := "api build failed"
 			if got := buildRuleTexts(m); len(got) != 1 || got[0] != want {
 				t.Fatalf("rule = %q, want %q", got, want)
 			}

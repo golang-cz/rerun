@@ -76,16 +76,9 @@ func (m *tuiModel) expansionRows(raw int) []dispRow {
 	return rows
 }
 
-// sepRows is a rule's expansion: its build rows, or the command a cut-short started rule hides.
+// sepRows is an event row's expansion: its folded details, then a build's output.
 func (m *tuiModel) sepRows(raw int) []dispRow {
-	s := m.visibleSep[raw]
-	if !s.expandable(m.vp.Width()) {
-		return nil
-	}
-	lines := []string{s.full}
-	if s.build != nil {
-		lines = s.build.expansion()
-	}
+	lines := m.visibleSep[raw].detailRows()
 	rows := make([]dispRow, len(lines))
 	for k, line := range lines {
 		rows[k] = dispRow{sub: k, text: spaces(4) + line}
@@ -95,7 +88,7 @@ func (m *tuiModel) sepRows(raw int) []dispRow {
 
 // expandable reports whether a shown line opens: a JSON object, or a rule with something under it.
 func (m *tuiModel) expandable(raw int) bool {
-	return m.visibleObj[raw] || m.visibleSep[raw].expandable(m.vp.Width())
+	return m.visibleObj[raw] || m.visibleSep[raw].expandable()
 }
 
 func (m *tuiModel) addDisp(r dispRow) {

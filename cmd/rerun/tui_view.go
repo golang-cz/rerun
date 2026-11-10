@@ -23,9 +23,10 @@ const (
 	colorMutedName = "246"
 
 	// Run-state colors, apart from the rule colors, so healthy and starting read differently.
-	runGreen  = "46"
-	runYellow = "220"
-	runRed    = "196"
+	runGreen     = "46"
+	runYellow    = "220"
+	runYellowDim = "136"
+	runRed       = "196"
 )
 
 // Left column geometry: glyph, space, name, a two-cell marker, the build cell,
@@ -806,11 +807,6 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		}
 	}
 	cell := buildCell(t, m.now, m.spin)
-	if t.building && t.buildOwner != "" && t.buildRule != nil && t.buildRule.phase == buildRunning {
-		if a := m.followArrow(row, r.target); a != "" {
-			cell = seg{text: a, color: runYellow}
-		}
-	}
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
@@ -934,7 +930,12 @@ func buildCell(t *tuiTarget, now time.Time, frame int) seg {
 	case t.looping():
 		return seg{text: "∞", color: runRed}
 	case t.building:
-		return seg{text: spinnerFrames[frame%len(spinnerFrames)], color: runYellow}
+		color := runYellow
+		// A follower spins in step with its owner, dimmer.
+		if t.buildOwner != "" && t.buildRule != nil && t.buildRule.phase == buildRunning {
+			color = runYellowDim
+		}
+		return seg{text: spinnerFrames[frame%len(spinnerFrames)], color: color}
 	case t.buildFailed:
 		return seg{text: "✗", color: runRed}
 	case !t.buildOKAt.IsZero() && now.Sub(t.buildOKAt) <= recentWindow:

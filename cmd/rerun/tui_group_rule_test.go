@@ -23,69 +23,78 @@ func ruleLine(m *tuiModel, marker string) string {
 	return ""
 }
 
-func TestRulesNameTheCommand(t *testing.T) {
+func TestEventRowsLineUpWithLogLines(t *testing.T) {
 	m := newTestModel(t, cmdTarget("api", "go run ./api"), cmdTarget("web", "npm start"))
 	m.applyEvents([]event{
-		{kind: evStarted, target: "api", at: restartAt, buildDur: 2 * time.Second},
+		{kind: evStarted, target: "api", at: restartAt},
 		restartEvent("web", nil, 0, time.Minute),
 	})
-
+	addLines(m, "web", "hello")
 	m.applyScope(-1, "")
 	m.frame()
-	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
-		t.Errorf("group start rule = %q, want the command named", got)
+	started := dropStamp(ruleLine(m, "started"))
+	restarted := dropStamp(ruleLine(m, "restarted"))
+	if !strings.HasPrefix(started, "api") || !strings.HasPrefix(restarted, "web") {
+		t.Fatalf("rows = %q, %q, want the name column first", started, restarted)
 	}
-	if got := ruleLine(m, "↻ web restarted"); !strings.Contains(got, "· npm start") {
-		t.Errorf("group restart rule = %q, want the command last", got)
+	if strings.Index(started, "started") != strings.Index(restarted, "restarted") {
+		t.Fatalf("verbs do not line up: %q, %q", started, restarted)
 	}
+	if strings.Contains(started, "go run") || strings.Contains(restarted, "npm start") {
+		t.Fatalf("command shown while folded: %q, %q", started, restarted)
+	}
+}
 
-	m.applyScope(0, "")
+func TestRestartDetailsShowOnlyWhenExpanded(t *testing.T) {
+	m := newTestModel(t, cmdTarget("api", "go run ./api"))
+	m.applyEvents([]event{restartEvent("api", []string{"/src/handler.go"}, 2*time.Second, time.Minute)})
 	m.frame()
-	if got := ruleLine(m, "▶ api started"); !strings.Contains(got, "· go run ./api") {
-		t.Errorf("single-target start rule = %q, want the command named", got)
+	if rows := strings.Join(m.paneLines(), "\n"); strings.Contains(rows, "handler.go") || strings.Contains(rows, "was up") {
+		t.Fatalf("details shown while folded: %q", rows)
+	}
+	m.toggleExpand(m.paneCursorRow())
+	rows := strings.Join(m.paneLines(), "\n")
+	for _, want := range []string{"files: /src/handler.go", "built 2s", "was up 1m00s", "$ go run ./api"} {
+		if !strings.Contains(rows, want) {
+			t.Fatalf("expansion lacks %q: %q", want, rows)
+		}
 	}
 }
 
-func TestRestartRuleLabelCutsMetaBeforeCommand(t *testing.T) {
-	rr := &restartRule{name: "api", at: restartAt, built: 2 * time.Second, cmd: "go run ./api"}
-	full := "↻ api restarted · built 2s"
-	if got := rr.label(1 << 16); got != full+" · go run ./api" {
-		t.Errorf("label = %q", got)
-	}
-	short := "↻ api restarted"
-	if got := rr.label(displayWidth(short) + 2); got != short+" · go run ./api" {
-		t.Errorf("narrow label = %q, want the build segment cut and the command kept", got)
-	}
-}
-
-func TestRestartRuleWithoutBuildOmitsIt(t *testing.T) {
+func TestRestartDetailsOmitWhatIsMissing(t *testing.T) {
 	rr := &restartRule{name: "api", at: restartAt, cmd: "go run ./api"}
-	if got := rr.label(1 << 16); got != "↻ api restarted · go run ./api" {
-		t.Errorf("label = %q, want no build segment", got)
-	}
-}
-
-func TestLongRestartCommandExpandsToFullText(t *testing.T) {
-	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
-	m := newTestModel(t, cmdTarget("api", long))
-	m.applyEvents([]event{restartEvent("api", nil, 0, time.Minute)})
-	m.frame()
-	row := m.paneCursorRow()
-	if !m.expandable(row) {
-		t.Fatal("a cut-short restart command is not expandable")
-	}
-	m.toggleExpand(row)
-	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
-		t.Fatalf("expansion lacks the full command: %q", rows)
+	if got := rr.details(); len(got) != 1 || got[0] != "$ go run ./api" {
+		t.Errorf("details = %q, want only the command", got)
 	}
 }
 
 func TestMultiLineCommandStaysOnOneRuleLine(t *testing.T) {
 	m := newTestModel(t, cmdTarget("api", "go run\n  ./api"), cmdTarget("web", "npm start"))
 	m.applyEvents([]event{restartEvent("api", nil, 0, time.Minute)})
-	m.applyScope(-1, "")
+	m.toggleExpand(m.paneCursorRow())
 	m.frame()
-	if got := ruleLine(m, "↻ api restarted"); !strings.Contains(got, "· go run ./api") {
-		t.Errorf("rule = %q, want the command flattened to one line", got)
+	if got := ruleLine(m, "$ go run"); !strings.Contains(got, "$ go run ./api") {
+		t.Errorf("detail = %q, want the command flattened to one line", got)
+	}
+}
+
+func TestConciseTextPerEventKind(t *testing.T) {
+	cases := []struct {
+		name string
+		got  sepLine
+		want string
+		tone sepTone
+	}{
+		{"started", startedRule("api", "go run ./api"), "started", toneNone},
+		{"restarted", restartedRule(&restartRule{name: "api", files: []string{"a.go"}, cmd: "x"}), "restarted", toneNone},
+		{"building", (&buildRec{name: "api", members: []string{"api"}}).sep(), "building", toneNone},
+		{"built", (&buildRec{phase: buildPassed, dur: 3 * time.Second}).sep(), "built 3s", toneNone},
+		{"build failed", (&buildRec{phase: buildBroke, reason: "exit 1"}).sep(), "build failed · exit 1", toneFail},
+		{"replaced", (&buildRec{phase: buildDropped, reason: "replaced"}).sep(), "build replaced", toneNone},
+	}
+	for _, c := range cases {
+		if c.got.text() != c.want || c.got.tone != c.tone {
+			t.Errorf("%s: text %q tone %v, want %q tone %v", c.name, c.got.text(), c.got.tone, c.want, c.tone)
+		}
 	}
 }

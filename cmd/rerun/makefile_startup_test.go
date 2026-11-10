@@ -175,7 +175,7 @@ func TestFinderEnterReRunsAfterExit(t *testing.T) {
 	if m.targets[i].state != stateExited || m.targets[i].exitLabel != "exit 0" {
 		t.Fatalf("state = %v, label %q, want exited with exit 0", m.targets[i].state, m.targets[i].exitLabel)
 	}
-	if view := m.View().Content; !strings.Contains(view, "exit 0") {
+	if view := m.View().Content; !strings.Contains(view, "exited") {
 		t.Fatalf("view does not show the exit label:\n%s", view)
 	}
 
