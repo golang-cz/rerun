@@ -321,3 +321,36 @@ func TestSharedBuildWarnsWhenKilledBuildOutlivesTheWait(t *testing.T) {
 		}
 	}
 }
+
+// The run keeps going when its owner leaves, so the next member owns its events.
+func TestSharedBuildOwnerLeavingHandsRunToNextMember(t *testing.T) {
+	share := newBuildShare()
+	dir := t.TempDir()
+	script, counter, gate := countedBuild(t, 0)
+	a, aLog, ctx := sharedRunner(t, share, "a", dir, script)
+	b, bLog, _ := sharedRunner(t, share, "b", dir, script)
+
+	src := oldFile(t, dir, "a.go")
+	a.handleChange(ctx, changeOf(src))
+	b.handleChange(ctx, changeOf(src))
+	waitForRuns(t, counter, 1)
+	a.cancelBuild()
+
+	share.mu.Lock()
+	owner := share.open[buildKeyOf(a.target)].owner
+	share.mu.Unlock()
+	if owner != "b" {
+		t.Fatalf("run owner = %q, want b", owner)
+	}
+	releaseGate(t, gate)
+	b.finishBuild(ctx, nextBuild(t, b))
+	if got := len(bLog.kind(evBuildOK)); got != 1 {
+		t.Errorf("b: evBuildOK = %d, want 1", got)
+	}
+	if got := len(aLog.kind(evBuildOK)); got != 0 {
+		t.Errorf("a: evBuildOK = %d, want 0 after it left", got)
+	}
+	if n := runCount(counter); n != 1 {
+		t.Fatalf("build ran %d times, want 1", n)
+	}
+}

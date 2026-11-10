@@ -588,19 +588,39 @@ func (m *tuiModel) showHint(text string) {
 	m.hintUntil = m.now.Add(hintDuration)
 }
 
-// cancelBuild drops a running build's flags, and its rule reads cancelled. A joined target only leaves its owner's rule.
+// cancelBuild drops a running build's flags, and its rule reads cancelled. A joined target only leaves its owner's rule,
+// and an owner leaving a run that keeps going hands the rule to its next member.
 func (m *tuiModel) cancelBuild(i int) {
 	t := m.targets[i]
 	if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
-		if rec.name == t.spec.Name {
-			m.dropBuild(rec, "cancelled")
-		} else {
+		switch {
+		case rec.owner != t.spec.Name:
 			rec.members = slices.DeleteFunc(rec.members, func(n string) bool { return n == t.spec.Name })
 			m.syncBuildRule(rec)
+		case len(rec.members) > 1:
+			t.buildRule = nil
+			m.handOver(rec, t.spec.Name)
+		default:
+			m.dropBuild(rec, "cancelled")
 		}
 	}
 	t.buildOwner = ""
 	m.setBuildState(i, false, t.buildFailed)
+}
+
+// handOver makes the next member of a shared run its owner after from leaves; the rule and its output carry on.
+func (m *tuiModel) handOver(rec *buildRec, from string) {
+	rec.members = slices.DeleteFunc(rec.members, func(n string) bool { return n == from })
+	rec.owner = rec.members[0]
+	if ni := m.targetIndex(rec.owner); ni >= 0 {
+		m.targets[ni].buildRule, m.targets[ni].buildOwner = rec, ""
+	}
+	for _, n := range rec.members[1:] {
+		if fi := m.targetIndex(n); fi >= 0 {
+			m.targets[fi].buildOwner = rec.owner
+		}
+	}
+	m.syncBuildRule(rec)
 }
 
 // newConfigTUI is the TUI for a loaded config. A Makefile-only config opens the finder, the only way to pick its targets.
@@ -733,7 +753,7 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 // The rule is in the stream before any output, so output always has a row to fold under.
 func (m *tuiModel) newBuildRule(i int, files []string) *buildRec {
 	name := m.targets[i].spec.Name
-	rec := &buildRec{name: name, members: []string{name}, files: files, cmd: oneLine(m.targets[i].spec.Build)}
+	rec := &buildRec{name: name, owner: name, members: []string{name}, files: files, cmd: oneLine(m.targets[i].spec.Build)}
 	s := rec.sep()
 	rec.seq = m.addRow(i, s.raw(), s)
 	return rec
@@ -959,7 +979,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		t.buildStart = eventTime(ev, m.now)
 		t.buildOwner = ""
 		m.setBuildState(i, true, false)
-		if old := t.buildRule; old != nil && old.name == t.spec.Name {
+		if old := t.buildRule; old != nil && old.owner == t.spec.Name {
 			if old.phase == buildRunning {
 				m.dropBuild(old, "replaced")
 			}
@@ -982,7 +1002,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evBuildOutput:
 		// Stale output belongs to no shown build; a joined target's copy would print the owner's rule twice.
-		if rec := t.buildRule; !t.dropped && rec != nil && rec.name == t.spec.Name && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
+		if rec := t.buildRule; !t.dropped && rec != nil && rec.owner == t.spec.Name && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
 			rec.out = appendLimit(rec.out, printable(ev.line, false), buildLogCap)
 			m.dispDirty = m.dispDirty || m.expanded[rec.seq]
 			m.vpDirty = true
@@ -996,7 +1016,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		t.buildOKAt = at
 		t.buildOwner = ""
 		m.setBuildState(i, false, false)
-		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && rec.name == t.spec.Name {
+		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && rec.owner == t.spec.Name {
 			rec.phase, rec.dur = buildPassed, ev.dur
 			m.syncBuildRule(rec)
 		}
@@ -1011,7 +1031,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		t.buildOwner = ""
 		t.restartBatch = 0
 		// A joined target's failure is the owner's rule's to show, once.
-		if rec := t.buildRule; rec == nil || rec.name == t.spec.Name {
+		if rec := t.buildRule; rec == nil || rec.owner == t.spec.Name {
 			if rec == nil || rec.phase != buildRunning {
 				rec = m.newBuildRule(i, ev.files)
 				t.buildRule = rec

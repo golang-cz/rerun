@@ -145,8 +145,10 @@ const (
 
 // One build keeps one rule, rewritten in place as the build moves on.
 type buildRec struct {
-	// name is the owner target, whose stream holds the rule.
+	// name is the target whose stream holds the rule; it never moves.
 	name string
+	// owner is the member whose events drive the rule: the launcher, or the next member after it leaves.
+	owner string
 	// members are the targets the rule names: the owner first, then any that joined its shared build.
 	members []string
 	seq     int

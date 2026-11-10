@@ -298,6 +298,10 @@ func (s *buildShare) leave(job *buildJob) {
 	run.buf.mu.Lock()
 	run.members = slices.DeleteFunc(run.members, func(m *buildJob) bool { return m == job })
 	empty := len(run.members) == 0
+	if !empty && run.owner == job.name {
+		// The run keeps going, so its next member takes over the rule and the owner's events.
+		run.owner = run.members[0].name
+	}
 	run.buf.mu.Unlock()
 	if run.finished || run.cancelled || !empty {
 		s.mu.Unlock()

@@ -146,3 +146,31 @@ func slicesContain(xs []string, want string) bool {
 	}
 	return false
 }
+
+func TestOwnerCancelHandsSharedRowToNextMember(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"), sharedBuildTarget("web"))
+	m.applyEvents([]event{
+		sharedStart("api", "api"),
+		sharedStart("worker", "api"),
+		sharedStart("web", "api"),
+		buildOut("api", buildAt, "line 1"),
+		{kind: evBuildCancelled, target: "api"},
+		buildOut("worker", buildAt, "line 2"),
+	})
+	if got, want := buildRuleTexts(m), []string{"⚙ go build ./cmd/app · worker, web"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules = %q, want %q", got, want)
+	}
+	if out := m.targets[m.targetIndex("worker")].buildRule.out; !reflect.DeepEqual(out, []string{"line 1", "line 2"}) {
+		t.Fatalf("output = %q, want the old and the new line on the same rule", out)
+	}
+	if cell := targetCell(t, m, "worker"); strings.ContainsAny(cell, "↑↓") {
+		t.Fatalf("new owner row = %q, want the spinner, not an arrow", cell)
+	}
+	if cell := targetCell(t, m, "web"); !strings.Contains(cell, "↑") {
+		t.Fatalf("web row = %q, want ↑ toward the new owner above it", cell)
+	}
+	m.applyEvents([]event{buildOK("worker", time.Second), buildOK("web", time.Second)})
+	if got, want := buildRuleTexts(m), []string{"⚙ go build ./cmd/app built 1s · worker, web"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rules after the build = %q, want %q", got, want)
+	}
+}
