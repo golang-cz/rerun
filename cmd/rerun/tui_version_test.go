@@ -53,9 +53,9 @@ func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	}
 
 	leftW, _ := m.layoutWidths()
-	text := "rerun · v9.9.9 · ? help"
+	text := "rerun · v9.9.9"
 	got := string([]rune(plainLine(bottom))[:leftW])
-	if want := text + strings.Repeat(" ", leftW-displayWidth(text)); got != want {
+	if want := text + strings.Repeat(" ", leftW-displayWidth(text)-len("?help")) + "?help"; got != want {
 		t.Fatalf("left column = %q, want %q", got, want)
 	}
 	if r := []rune(plainLine(bottom))[leftW]; r != '│' {
@@ -63,16 +63,17 @@ func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	}
 }
 
-// The help cue rides the version line while the column has room for it, and
-// the cell always fills exactly leftW cells.
+// The cell always fills exactly leftW cells and ends in `?help` flush right,
+// even in a column too narrow for the version.
 func TestVersionCellEndsWithHelpCue(t *testing.T) {
 	cases := []struct {
 		name  string
 		leftW int
-		cue   bool
+		want  string
 	}{
-		{"wide column", 30, true},
-		{"narrow column", 6, false},
+		{"wide column", 30, "rerun · v9.9.9" + strings.Repeat(" ", 30-14-5) + "?help"},
+		{"narrow column", 8, "v…" + strings.Repeat(" ", 8-2-5) + "?help"},
+		{"cue only", 6, " ?help"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,8 +83,8 @@ func TestVersionCellEndsWithHelpCue(t *testing.T) {
 			if w := displayWidth(got); w != tc.leftW {
 				t.Fatalf("versionCell(%d) width = %d: %q", tc.leftW, w, got)
 			}
-			if hasCue := strings.HasSuffix(strings.TrimRight(got, " "), "· ? help"); hasCue != tc.cue {
-				t.Fatalf("versionCell(%d) = %q, cue %v, want %v", tc.leftW, got, hasCue, tc.cue)
+			if got != tc.want {
+				t.Fatalf("versionCell(%d) = %q, want %q", tc.leftW, got, tc.want)
 			}
 		})
 	}
@@ -124,36 +125,55 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 	}
 }
 
-// With t on the version row ends in the build's age, flush right; t off or no buildTime hides it.
+// With t on the version reads `version · age ago`; t off, or no usable buildTime, drops the age.
 func TestVersionRowShowsBuildAgeWithTimes(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	const ver = "rerun · dev-abc1234"
 	cases := []struct {
 		name      string
 		times     bool
 		buildTime string
-		want      string
+		left      string
 	}{
-		{"times on", true, "2026-01-02T02:53:05Z", "11m ago"},
-		{"times off", false, "2026-01-02T02:53:05Z", ""},
-		{"empty buildTime", true, "", ""},
-		{"bad buildTime", true, "yesterday", ""},
+		{"times on", true, "2026-01-02T02:53:05Z", ver + " · 11m ago"},
+		{"times off", false, "2026-01-02T02:53:05Z", ver},
+		{"empty buildTime", true, "", ver},
+		{"bad buildTime", true, "yesterday", ver},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestModel(t)
 			m.version, m.buildTime, m.now, m.showTimes = "dev-abc1234", tc.buildTime, now, tc.times
 			got := plainLine(m.versionCell(40))
-			if displayWidth(got) != 40 {
-				t.Fatalf("cell width = %d: %q", displayWidth(got), got)
+			want := tc.left + strings.Repeat(" ", 40-displayWidth(tc.left)-len("?help")) + "?help"
+			if got != want {
+				t.Fatalf("cell = %q, want %q", got, want)
 			}
-			if tc.want == "" {
-				if strings.Contains(got, "ago") {
-					t.Fatalf("cell = %q, want no age", got)
-				}
-				return
-			}
-			if !strings.HasSuffix(got, tc.want) {
-				t.Fatalf("cell = %q, want it to end in %q", got, tc.want)
+		})
+	}
+}
+
+// Narrow columns drop the age first, then cut the version; `?help` stays.
+func TestVersionRowTruncationOrder(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cases := []struct {
+		name  string
+		leftW int
+		left  string
+	}{
+		{"room for age", 30, "rerun · v9.9.9 · 11m ago"},
+		{"age dropped", 25, "rerun · v9.9.9"},
+		{"name dropped", 15, "v9.9.9"},
+		{"version cut", 8, "v…"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.version, m.buildTime, m.now, m.showTimes = "v9.9.9", "2026-01-02T02:53:05Z", now, true
+			got := plainLine(m.versionCell(tc.leftW))
+			want := tc.left + strings.Repeat(" ", tc.leftW-displayWidth(tc.left)-len("?help")) + "?help"
+			if got != want {
+				t.Fatalf("cell = %q, want %q", got, want)
 			}
 		})
 	}

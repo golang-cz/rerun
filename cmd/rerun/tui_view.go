@@ -467,8 +467,7 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	}
 	nameW = min(nameW, maxNameW)
 	leftW = nameW + m.nameMargin()
-	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
-	// the version; a narrow one shrinks to 16.
+	// A wide screen keeps 24 cells, which fits the version beside the `?help` cue; a narrow one shrinks to 16.
 	if m.width < narrowW {
 		leftW = max(16, leftW)
 	} else {
@@ -573,34 +572,25 @@ func (m *tuiModel) scrollList(delta int) {
 	m.layout.offset = m.listOffset()
 }
 
-// versionCell draws the left column's bottom line: the version text and the
-// help cue, hint styled and left aligned, with plain padding out to the
-// divider column. A column too narrow for the cue keeps the bare version.
+// versionCell draws the left column's bottom line: the version, then the build
+// age with t on, and `?help` flush right. A narrow column drops the age first,
+// then cuts the version; `?help` always stays.
 func (m *tuiModel) versionCell(leftW int) string {
-	age, ageOK := m.buildAgeText()
-	w := leftW
-	if m.showTimes && ageOK && leftW-statusW >= 8 {
-		w = leftW - statusW
-	} else {
-		age = ""
+	const cue = "?help"
+	if leftW <= displayWidth(cue) {
+		return m.styles.hint.Render(ellipsize(cue, leftW)) + strings.Repeat(" ", max(0, leftW-displayWidth(cue)))
 	}
-	cue := ""
-	switch {
-	case w >= 16:
-		cue = " · ? help"
-	case w >= 8:
-		cue = " · ?"
-	}
+	avail := leftW - displayWidth(cue) - 1 // one blank cell keeps the cue off the version
 	version := m.versionText()
-	if displayWidth(version)+displayWidth(cue) > w {
-		version = strings.TrimPrefix(version, "rerun · ") // a narrow column keeps the version, not the name
+	left := version
+	if age, ok := m.buildAgeText(); m.showTimes && ok && displayWidth(version+" · "+age) <= avail {
+		left = version + " · " + age
 	}
-	text := strings.TrimRight(ellipsize(version, w-displayWidth(cue)), " ") + cue
-	if age == "" {
-		return m.styles.hint.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
+	if displayWidth(left) > avail {
+		left = ellipsize(strings.TrimPrefix(version, "rerun · "), avail) // a narrow column keeps the version, not the name
 	}
-	text += strings.Repeat(" ", max(0, w-displayWidth(text))) + timesCell(age)
-	return m.styles.hint.Render(text)
+	pad := max(0, leftW-displayWidth(left)-displayWidth(cue))
+	return m.styles.hint.Render(left + strings.Repeat(" ", pad) + cue)
 }
 
 // versionText names the binary: the release tag, or the dev build, or the plain dev fallback.

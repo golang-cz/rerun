@@ -185,15 +185,15 @@ func assertBoxRows(t *testing.T, view string, max int, what string) {
 	}
 }
 
-// The footer's help cue is the words `? help` at the default width.
+// The version row's help cue is `?help`, flush right, at the default width.
 func TestFooterCueReadsHelp(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 90, 30
 	lines := strings.Split(ansi.Strip(m.View().Content), "\n")
 	leftW, _ := m.layoutWidths()
 	cue := strings.TrimRight(ansi.Cut(lines[len(lines)-1], 0, leftW), " ")
-	if !strings.HasSuffix(cue, "· ? help") || strings.Contains(cue, "  ") {
-		t.Errorf("footer cue = %q, want `· ? help` with single spaces", cue)
+	if !strings.HasSuffix(cue, "?help") {
+		t.Errorf("footer cue = %q, want it to end in `?help`", cue)
 	}
 }
 
