@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -150,10 +151,17 @@ func click(m *tuiModel, x, y int) tea.Cmd {
 	return cmd
 }
 
+// doubleClick is two clicks on one cell with no motion; it returns the second release's command.
+func doubleClick(m *tuiModel, x, y int) tea.Cmd {
+	click(m, x, y)
+	return click(m, x, y)
+}
+
 // slowClick expires the double-click window, so the next click reads as a
 // fresh single click.
 func slowClick(m *tuiModel) {
 	m.lastClickAt = m.lastClickAt.Add(-doubleClickWindow)
+	m.paneLastClickAt = m.paneLastClickAt.Add(-doubleClickWindow)
 }
 
 // fadeNotice expires the info notice, so the bottom line shows the state chips.
@@ -882,19 +890,19 @@ func TestMouseClicksMuteAndSolo(t *testing.T) {
 
 }
 
-func TestMouseDoubleClickStopsRunningRowAndKeepsSolo(t *testing.T) {
+func TestMouseDoubleClickRestartsRunningRowAndKeepsSolo(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.frame()
 
-	// The pair's first click solos the row; the second stops it.
+	// The pair's first click solos the row; the second restarts it, never stops it.
 	m.handleMouse(mouse(2, 1, false))
 	m.handleMouse(mouse(2, 1, false))
 
-	if m.targets[0].state != stateStopped {
-		t.Fatalf("state = %v, want stopped after a double-click", m.targets[0].state)
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("state = %v, want running after a double-click", m.targets[0].state)
 	}
-	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStop {
-		t.Fatalf("control = %v, want ctrlStop", got)
+	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlReboot {
+		t.Fatalf("control = %v, want ctrlReboot", got)
 	}
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0 (the first click's solo survives)", m.solo)
@@ -935,17 +943,17 @@ func TestMouseThirdClickIsAFreshSingle(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.frame()
 
-	// Two quick clicks stop the running row and leave it soloed.
+	// Two quick clicks restart the running row and leave it soloed.
 	m.handleMouse(mouse(2, 1, false))
 	m.handleMouse(mouse(2, 1, false))
-	queuedCtrl(t, m.targets[0].runner) // drain the stop
+	queuedCtrl(t, m.targets[0].runner) // drain the restart
 
 	m.handleMouse(mouse(2, 1, false))
 	if m.solo != 0 {
 		t.Fatalf("solo = %d, want 0 kept by the third click", m.solo)
 	}
-	if m.targets[0].state != stateStopped {
-		t.Fatalf("state = %v, want stopped still (no start on the third click)", m.targets[0].state)
+	if m.targets[0].state != stateRunning {
+		t.Fatalf("state = %v, want running still (no restart on the third click)", m.targets[0].state)
 	}
 	select {
 	case c := <-m.targets[0].runner.ctrlCh:
@@ -1581,5 +1589,93 @@ func TestGroupViewDropsSharedImportPrefix(t *testing.T) {
 	m.applyScope(-1, "")
 	if got, want := m.paneLines(), []string{"omsx/api     api-line", "omsx/worker  worker-line", "omsx/web     web-line"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("all pane = %q, want %q", got, want)
+	}
+}
+
+func rightMouse(x, y int) tea.MouseMsg {
+	return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseRight}
+}
+
+// A right-click stops a running target and moves the cursor to it.
+func TestRightClickStopsARunningTarget(t *testing.T) {
+	m := newTestModel(t, target("web"), target("api"))
+	m.frame()
+	m.cursor = 1
+	m.liveSelect()
+
+	m.handleMouse(rightMouse(2, 1))
+	if m.targets[0].state != stateStopped {
+		t.Fatalf("state = %v, want stopped after a right-click", m.targets[0].state)
+	}
+	if got := queuedCtrl(t, m.targets[0].runner); got != ctrlStop {
+		t.Fatalf("control = %v, want ctrlStop", got)
+	}
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want the right-clicked row 0", m.cursor)
+	}
+}
+
+// A right-click on a stopped target does nothing.
+func TestRightClickOnAStoppedTargetDoesNothing(t *testing.T) {
+	web := target("web")
+	web.Selected = false
+	m := newTestModel(t, web, target("api"))
+	m.frame()
+
+	m.handleMouse(rightMouse(2, 1))
+	if m.targets[0].state != stateOff {
+		t.Fatalf("state = %v, want off still", m.targets[0].state)
+	}
+	select {
+	case c := <-m.targets[0].runner.ctrlCh:
+		t.Fatalf("right-click queued %v on a stopped target", c.kind)
+	default:
+	}
+}
+
+// A right-click on a group header stops every running member.
+func TestRightClickOnAHeaderStopsItsMembers(t *testing.T) {
+	m := groupedModel(t)
+	header := -1
+	for i, r := range m.listRows() {
+		if r.header && r.schema == "backend" {
+			header = i
+		}
+	}
+	if header < 0 {
+		t.Fatal("setup: no backend header")
+	}
+	members := m.listRows()[header].members
+	outside := -1
+	for i := range m.targets {
+		if !slices.Contains(members, i) {
+			outside = i
+		}
+	}
+	before := m.targets[outside].state
+
+	m.handleMouse(rightMouse(2, header-m.layout.offset+1))
+	for _, i := range members {
+		if m.targets[i].state == stateRunning {
+			t.Fatalf("member %d still running after a right-click on its header", i)
+		}
+	}
+	if m.targets[outside].state != before {
+		t.Fatal("the right-click changed a target outside the group")
+	}
+}
+
+// A right-click in the log pane does nothing: no cursor, no expansion, no stop.
+func TestRightClickInThePaneDoesNothing(t *testing.T) {
+	m := frozenPane(t)
+	x, y := paneX(m), 2+m.titleHeight()
+	before := m.paneCurRaw
+
+	m.handleMouse(rightMouse(x, y))
+	if m.paneCurRaw != before || m.selAnchor != nil {
+		t.Fatal("a right-click in the pane moved the cursor or started a selection")
+	}
+	if len(m.expanded) != 0 {
+		t.Fatal("a right-click in the pane expanded a line")
 	}
 }

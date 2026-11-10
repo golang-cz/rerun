@@ -326,15 +326,34 @@ func buildRuleSeq(m *tuiModel) int {
 func TestBuildRuleUpdatesInPlace(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go"), buildOut("api", buildAt, "compiling")})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api building · a.go +1 more" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api building · a.go +1 more · make api" {
 		t.Fatalf("building rule = %q, want one rule", got)
 	}
 	m.applyEvents([]event{buildOK("api", 500*time.Millisecond)})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 0s · a.go +1 more" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api built 0s · a.go +1 more · make api" {
 		t.Fatalf("rule after the build = %q, want it rewritten in place", got)
 	}
 	if len(m.mergedAll()) != 1 {
 		t.Fatalf("stream holds %d lines, want the one rule", len(m.mergedAll()))
+	}
+}
+
+func TestEnterShowsBuildCommand(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	press(m, "right", "enter")
+	rows := m.paneLines()
+	cmd, out := -1, -1
+	for i, r := range rows {
+		if strings.Contains(r, "$ make api") {
+			cmd = i
+		}
+		if strings.Contains(r, "compiling") {
+			out = i
+		}
+	}
+	if cmd < 0 || out < 0 || cmd > out {
+		t.Fatalf("expanded build rule rows = %q, want the command before the output", rows)
 	}
 }
 
@@ -355,7 +374,7 @@ func TestBuildFailureAutoExpandsItsRule(t *testing.T) {
 		{kind: evBuildFailed, target: "api", dur: 6 * time.Second, code: 2, files: []string{"/x/a.go"}},
 	})
 	m.frame()
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "✗ api build failed · exit 2 · a.go" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "✗ api build failed · exit 2 · a.go · make api" {
 		t.Fatalf("failed rule = %q", got)
 	}
 	if !m.expanded[buildRuleSeq(m)] {
@@ -380,40 +399,57 @@ func TestEnterTogglesBuildRule(t *testing.T) {
 	}
 }
 
-func TestClickOnBuildIconTogglesRule(t *testing.T) {
+func TestDoubleClickOnBuildIconTogglesRule(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.frame()
 	row := m.paneCursorRow()
-	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	doubleClick(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon did not open the rule")
 	}
 }
 
-// A click anywhere on a rule line toggles it, not only on its icon.
-func TestClickOnARuleLineTogglesIt(t *testing.T) {
+// A single click on a rule places the cursor on it and never expands it.
+func TestClickOnARuleLinePlacesTheCursorOnly(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.frame()
 	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
 
-	copied := clipboardText(t, click(m, paneX(m), y))
-	if !m.expanded[buildRuleSeq(m)] {
-		t.Fatal("a click on the rule line did not open it")
+	if copied := clipboardText(t, click(m, paneX(m), y)); copied != "" {
+		t.Fatal("the click copied the rule")
 	}
-	if copied != "" {
-		t.Fatal("the click copied the rule it opened")
+	if m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a single click expanded the rule")
+	}
+	if m.paneCurRaw != slices.Index(m.visibleSeq, buildRuleSeq(m)) {
+		t.Fatal("a single click did not place the cursor on the rule")
+	}
+}
+
+// A double-click on a rule line expands it, and a second double-click collapses it.
+func TestDoubleClickOnARuleLineTogglesIt(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.frame()
+	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
+
+	if copied := clipboardText(t, doubleClick(m, paneX(m), y)); copied != "" {
+		t.Fatal("the double-click copied the rule it opened")
+	}
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("a double-click did not open the rule")
 	}
 
-	click(m, paneX(m), y)
+	doubleClick(m, paneX(m), y)
 	if m.expanded[buildRuleSeq(m)] {
-		t.Fatal("the second click did not close the rule")
+		t.Fatal("the second double-click did not close the rule")
 	}
 }
 
 // A click on a started rule whose command the pane cut short expands it to the full text.
-func TestClickOnACutCommandExpandsIt(t *testing.T) {
+func TestDoubleClickOnACutCommandExpandsIt(t *testing.T) {
 	long := "go run ./cmd/api " + strings.Repeat("--flag ", 30) + "end"
 	tg := target("api")
 	tg.Cmd = long
@@ -422,16 +458,16 @@ func TestClickOnACutCommandExpandsIt(t *testing.T) {
 	m.frame()
 	y := m.titleHeight() + m.paneCursorRow() - m.vp.YOffset()
 
-	click(m, paneX(m), y)
+	doubleClick(m, paneX(m), y)
 	if !m.expanded[m.visibleSeq[0]] {
-		t.Fatal("the click did not expand the cut command")
+		t.Fatal("the double-click did not expand the cut command")
 	}
 	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "--flag end") {
 		t.Fatalf("the expansion lacks the full command: %q", rows)
 	}
 }
 
-func TestClickOnMoreOpensFileList(t *testing.T) {
+func TestDoubleClickOnMoreOpensFileList(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt, "/x/a.go", "/x/b.go", "/x/c.go")})
 	m.frame()
@@ -441,7 +477,7 @@ func TestClickOnMoreOpensFileList(t *testing.T) {
 		t.Fatalf("more = %q, want +2 more for %q", s.more, s.label)
 	}
 	row := m.paneCursorRow()
-	click(m, m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
+	doubleClick(m, m.layout.leftW+1+end-2, m.titleHeight()+row-m.vp.YOffset())
 	if rows := strings.Join(m.paneLines(), "\n"); !strings.Contains(rows, "/x/c.go") {
 		t.Fatalf("file list not shown after +2 more: %q", rows)
 	}
@@ -484,7 +520,7 @@ func TestReplacedBuildRuleSaysReplaced(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildStart("api", buildAt.Add(time.Minute))})
 	got := buildRuleTexts(m)
-	if len(got) != 2 || got[0] != "⚙ api build replaced" || got[1] != "⚙ api building" {
+	if len(got) != 2 || got[0] != "⚙ api build replaced · make api" || got[1] != "⚙ api building · make api" {
 		t.Fatalf("rules = %q, want the old one replaced and the new one building", got)
 	}
 }
@@ -492,7 +528,7 @@ func TestReplacedBuildRuleSaysReplaced(t *testing.T) {
 func TestCancelledBuildRuleSaysCancelled(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.applyEvents([]event{buildStart("api", buildAt), {kind: evBuildCancelled, target: "api"}})
-	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api build cancelled" {
+	if got := buildRuleTexts(m); len(got) != 1 || got[0] != "⚙ api build cancelled · make api" {
 		t.Fatalf("rule = %q, want it to read cancelled", got)
 	}
 }
@@ -616,7 +652,7 @@ func TestLateOutputAfterCancelIsIgnored(t *testing.T) {
 	}
 }
 
-func TestClickRuleWhileFiltered(t *testing.T) {
+func TestDoubleClickRuleWhileFiltered(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{
 		buildStart("api", buildAt, "/x/a.go", "/x/b.go"),
@@ -641,14 +677,14 @@ func TestClickRuleWhileFiltered(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the filtered pane: %q", rawPane(m))
 	}
-	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	doubleClick(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
-		t.Fatal("a click on the rule's icon while filtered did not open it")
+		t.Fatal("a double-click on the rule's icon while filtered did not open it")
 	}
 }
 
 // With one target in view there is no name column, so the build icon is still the rule's first cells.
-func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
+func TestDoubleClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.applyScope(0, "")
@@ -662,9 +698,9 @@ func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	if row < 0 {
 		t.Fatalf("the build rule is not in the single view: %q", rawPane(m))
 	}
-	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
+	doubleClick(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
-		t.Fatal("a click on the build icon in single view did not open the rule")
+		t.Fatal("a double-click on the build icon in single view did not open the rule")
 	}
 }
 
@@ -756,4 +792,39 @@ func spinIndex(s string) int {
 		}
 	}
 	return -1
+}
+
+// The build command takes the cut on a narrow pane; the name and status stay whole.
+func TestBuildRuleCutsTheCommandNotTheStatus(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	m.frame()
+	rule := m.visibleSep[m.rowInfo(ruleRow(t, m)).raw]
+
+	got := rule.text(4 + displayWidth(rule.base+" · ") + 4) // leaves four cells for the command
+	if !strings.HasPrefix(got, "⚙ api built 1s · ") || !strings.HasSuffix(got, "…") {
+		t.Fatalf("text = %q, want the status whole and the command cut", got)
+	}
+}
+
+// A dropped target's build output stays out: no old lines, no new ones, no auto-open for a failure.
+func TestDroppedBuildStoresNoOutputAndDoesNotOpen(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
+	m.toggleDrop(0)
+	rec := m.targets[0].buildRule
+	if rec == nil {
+		t.Fatal("the drop removed the build rule")
+	}
+	if len(rec.out) != 0 || m.expanded[rec.seq] {
+		t.Fatalf("drop kept output %q or the expansion %v", rec.out, m.expanded[rec.seq])
+	}
+
+	m.applyEvents([]event{buildOut("api", buildAt, "more"), {kind: evBuildFailed, target: "api", dur: time.Second, code: 2, files: []string{"/x/a.go"}}})
+	if len(rec.out) != 0 {
+		t.Fatalf("a dropped build stored output: %q", rec.out)
+	}
+	if m.expanded[rec.seq] {
+		t.Fatal("a failed build opened its rule for a dropped target")
+	}
 }

@@ -62,24 +62,60 @@ func TestMergeKeepsArrivalOrderAcrossTargets(t *testing.T) {
 	}
 }
 
-func TestDropTrimsToTheLastHundredAndRestores(t *testing.T) {
+func TestDropClearsTheOutputAndRestores(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	for i := 0; i < 500; i++ {
 		m.addLine(0, "x")
 	}
 	m.toggleDrop(0)
-	if got := len(m.targets[0].lines); got != dropKeepLines || !m.targets[0].muted {
-		t.Fatalf("dropped: %d lines, muted=%v", got, m.targets[0].muted)
+	if got := len(m.targets[0].lines); got != 0 || !m.targets[0].muted {
+		t.Fatalf("dropped: %d lines, muted=%v, want 0 and muted", got, m.targets[0].muted)
 	}
-	if m.notice != "api dropped · earlier output gone" {
+	if m.notice != "api output dropped" {
 		t.Fatalf("notice = %q", m.notice)
 	}
 	m.toggleDrop(0)
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 5; i++ {
 		m.addLine(0, "y")
 	}
-	if got := len(m.targets[0].lines); got != 600 || m.targets[0].muted {
-		t.Fatalf("restored: %d lines, muted=%v, want 600 and unmuted", got, m.targets[0].muted)
+	if got := len(m.targets[0].lines); got != 5 || m.targets[0].muted {
+		t.Fatalf("restored: %d lines, muted=%v, want 5 and unmuted", got, m.targets[0].muted)
+	}
+	if m.notice != "api output kept again · unmuted" {
+		t.Fatalf("notice = %q", m.notice)
+	}
+}
+
+// Output that arrives while dropped is never stored, so solo shows none of it.
+func TestDroppedOutputIsNotStoredOrShownInSolo(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.addLine(0, "before")
+	m.toggleDrop(0)
+	m.solo = 0
+	m.mergedDirty = true
+	m.addLine(0, "during")
+
+	if got := len(m.targets[0].lines); got != 0 {
+		t.Fatalf("dropped target stored %d lines, want 0", got)
+	}
+	if got := m.paneRaw(); len(got) != 0 {
+		t.Fatalf("solo pane = %v, want no output", got)
+	}
+	if got := m.emptyHint(); got != "api output dropped · d to keep" {
+		t.Fatalf("empty hint = %q", got)
+	}
+}
+
+// A dropped target's rules stay: they mark the runs even with the output gone.
+func TestDropKeepsTheRules(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.addLine(0, "output")
+	m.addRule(0, startedRule("api", "sleep 1"))
+	m.toggleDrop(0)
+
+	lines := m.targets[0].lines
+	if len(lines) != 1 || !lines[0].sep.isSep() {
+		t.Fatalf("dropped lines = %+v, want only the started rule", lines)
 	}
 }
 
@@ -207,5 +243,55 @@ func TestMutedNameIsItalicGrayEvenUnderTheCursor(t *testing.T) {
 	m.targets[0].buildFailed = true
 	if line := drawnRow(t, m, "target:api"); !strings.Contains(line, "196") {
 		t.Fatalf("failed row = %q, want red over gray", line)
+	}
+}
+
+// Dropping lines above a placed cursor on a rule keeps the cursor on that rule.
+func TestDropKeepsTheCursorOnItsRule(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.addLine(0, "old1")
+	m.addLine(0, "old2")
+	m.addRule(0, startedRule("api", "sleep 1"))
+	m.addRule(0, startedRule("api", "sleep 2"))
+	m.frame()
+	m.pauseTail()
+	m.solo = 0 // a muted target's rules are hidden from group views
+	m.mergedDirty = true
+	ruleAt := func(cmd string) int {
+		m.ensurePane()
+		for row := 0; row < m.paneLen(); row++ {
+			if r := m.rowInfo(row); r.sub < 0 && m.visibleSep[r.raw].cmd() == cmd {
+				return row
+			}
+		}
+		t.Fatalf("no rule %q", cmd)
+		return -1
+	}
+	m.setPaneCursor(ruleAt("sleep 1"))
+
+	m.toggleDrop(0)
+	m.frame()
+	if got, want := m.paneCursorRow(), ruleAt("sleep 1"); got != want {
+		t.Fatalf("cursor row = %d after the drop, want the rule at %d", got, want)
+	}
+}
+
+// A drop removes every service line, so a search over them has no match left to land on.
+func TestDropClearsTheSearchWithItsLines(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	for i := 0; i < 5; i++ {
+		m.addLine(0, "match")
+	}
+	m.frame()
+	press(m, "f")
+	typeString(m, "match")
+	press(m, "enter")
+	if len(m.searchMatches) == 0 {
+		t.Fatal("setup: the search matched nothing")
+	}
+
+	m.toggleDrop(0)
+	if m.searchRow != -1 || len(m.searchMatches) != 0 {
+		t.Fatalf("after the drop: searchRow=%d matches=%v, want none", m.searchRow, m.searchMatches)
 	}
 }

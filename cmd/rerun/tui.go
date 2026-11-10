@@ -142,7 +142,7 @@ type tuiTarget struct {
 	backoffUntil time.Time
 
 	muted bool
-	// dropped is d's state: the stream is muted and its scrollback trimmed to dropKeepLines.
+	// dropped is d's state: the stream is muted and stores no service output.
 	dropped bool
 	// lines is the target's own scrollback, oldest first, bounded by its keep:; the pane merges these by seq.
 	lines []mergedLine
@@ -248,17 +248,19 @@ type tuiModel struct {
 	// selection. selEnd is the drag row's current content index. selMoved marks
 	// the press as a drag on its first motion; without it a same-cell release
 	// is a click. selCell is the press cell a click's release must land on.
-	// selSeq/selSub/selExp are the pressed line's identity — its sequence,
-	// expansion subrow, and expandability at press — so a release after the
-	// stream shifted resolves the line instead of trusting a stale index.
+	// selSeq/selSub are the pressed line's identity, its sequence and expansion
+	// subrow, so a release after the stream shifted finds the line.
 	selAnchor          *int
 	selEnd             int
 	selMoved           bool
 	selCellX, selCellY int
 	selSeq, selSub     int
-	selExp             bool
 	// selKey marks a selection grown by shift+arrows, which no pointer motion may drag.
 	selKey bool
+	// paneLastSeq, paneLastSub, and paneLastClickAt are the last same-cell pane click, for double-click.
+	paneLastSeq, paneLastSub int
+	paneLastX, paneLastY     int
+	paneLastClickAt          time.Time
 
 	// orphans are the lines of rows that left the config, oldest first; they keep their prefix but answer to no row.
 	orphans []mergedLine
@@ -513,20 +515,69 @@ func (m *tuiModel) toggleMute(i int) {
 	}
 }
 
-// toggleDrop is `d`: mutes the target and trims its scrollback to dropKeepLines; again it restores its keep: and unmutes.
+// toggleDrop is `d`: drops the target's service output and mutes it; again keeps output from then on and unmutes.
 func (m *tuiModel) toggleDrop(i int) {
+	m.ensurePane()
+	curSeq, curKept := m.cursorSeq()
 	t := m.targets[i]
 	t.dropped = !t.dropped
 	t.muted = t.dropped
 	if t.dropped {
-		m.trimTarget(i)
-		m.showNotice(t.spec.Name+" dropped · earlier output gone", false)
+		m.dropOutput(i)
+		m.showNotice(t.spec.Name+" output dropped", false)
 	} else {
-		m.showNotice(t.spec.Name+" kept again · unmuted", false)
+		m.showNotice(t.spec.Name+" output kept again · unmuted", false)
 	}
 	m.mergedDirty = true
 	m.vpDirty = true
+	m.ensurePane()
+	if curKept {
+		m.restoreCursor(curSeq)
+	}
 	m.recomputeSearch(false)
+}
+
+// cursorSeq is the seq of the line the user's cursor is on, and false while the tail follows unplaced.
+func (m *tuiModel) cursorSeq() (int, bool) {
+	if m.paneLen() == 0 || (m.follow && !m.paneCurPlaced) {
+		return 0, false
+	}
+	return m.visibleSeq[m.rowInfo(m.paneCursorRow()).raw], true
+}
+
+// restoreCursor puts the cursor back on the line with seq, or on the pane's last line when that line is gone.
+func (m *tuiModel) restoreCursor(seq int) {
+	for raw, s := range m.visibleSeq {
+		if s == seq {
+			m.setPaneCursor(m.lineRow(raw))
+			return
+		}
+	}
+	m.paneCurPlaced = false
+	if n := m.paneLen(); n > 0 {
+		m.setPaneCursor(n - 1)
+	}
+}
+
+// dropOutput forgets the target's service output and keeps its rules, which still mark the runs.
+func (m *tuiModel) dropOutput(i int) {
+	t := m.targets[i]
+	kept := make([]mergedLine, 0, len(t.lines))
+	var gone []mergedLine
+	for _, ml := range t.lines {
+		if !ml.sep.isSep() {
+			gone = append(gone, ml)
+			continue
+		}
+		kept = append(kept, ml)
+		if rec := ml.sep.build; rec != nil {
+			rec.out = nil
+			delete(m.expanded, ml.seq)
+		}
+	}
+	m.evictLines(gone, m.streamsTo(i))
+	t.lines = kept
+	m.dispDirty = true
 }
 
 // showHint posts a transient message to the pane's bottom line.
@@ -618,8 +669,11 @@ func (m *tuiModel) targetLines(i int) []string {
 }
 
 // addLine appends one line to a target's stream and to the merged view when
-// that target streams into it.
+// that target streams into it. A dropped target stores nothing, so solo shows nothing either.
 func (m *tuiModel) addLine(i int, line string) {
+	if m.targets[i].dropped {
+		return
+	}
 	m.addRow(i, line, sepLine{})
 }
 
@@ -670,7 +724,7 @@ func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 
 // The rule is in the stream before any output, so output always has a row to fold under.
 func (m *tuiModel) newBuildRule(i int, files []string) *buildRec {
-	rec := &buildRec{name: m.targets[i].spec.Name, files: files}
+	rec := &buildRec{name: m.targets[i].spec.Name, files: files, cmd: oneLine(m.targets[i].spec.Build)}
 	s := rec.sep()
 	rec.seq = m.addRow(i, s.raw(), s)
 	return rec
@@ -892,7 +946,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evBuildOutput:
 		// A line from a build that a newer one has replaced belongs to no shown build.
-		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
+		if rec := t.buildRule; !t.dropped && rec != nil && rec.phase == buildRunning && ev.buildAt.Equal(t.buildStart) {
 			rec.out = appendLimit(rec.out, printable(ev.line, false), buildLogCap)
 			m.dispDirty = m.dispDirty || m.expanded[rec.seq]
 			m.vpDirty = true
@@ -928,7 +982,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		if up {
 			rec.note = "still running the old build"
 		}
-		if m.syncBuildRule(rec) {
+		if m.syncBuildRule(rec) && !t.dropped {
 			m.expanded[rec.seq] = true
 		}
 		if !up {
@@ -1564,9 +1618,6 @@ func (m *tuiModel) rebuildMerged() {
 
 // lineLimit is the most lines the target keeps now.
 func (t *tuiTarget) lineLimit() int {
-	if t.dropped {
-		return dropKeepLines
-	}
 	return t.spec.keep().lineCap()
 }
 

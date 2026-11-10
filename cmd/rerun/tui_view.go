@@ -1323,6 +1323,9 @@ func (m *tuiModel) emptyHint() string {
 		if t.building {
 			return t.spec.Name + ": building… output appears when the run starts"
 		}
+		if t.dropped {
+			return t.spec.Name + " output dropped · d to keep"
+		}
 		return t.spec.Name + ": no output yet"
 	}
 	if m.schemaSel != "" {
@@ -1359,7 +1362,7 @@ var helpShortKeys = [][2]string{
 	{"space", "start or stop the target · pane: jump to live"},
 	{"enter", "list: focus the pane, starting a stopped target or group"},
 	{"s", "stop the target · pane: stop what the pane shows"},
-	{"r m d", "reboot · mute · d drops older output and mutes"},
+	{"r m d", "reboot · mute · d drops output and mutes"},
 	{"o i", "pick a link · pane i: original lines"},
 	{"ctrl+o", "open the current target's link"},
 	{"←/→", "expand or fold a group; → on a target focuses the log pane"},
@@ -1382,7 +1385,7 @@ var helpKeys = [][2]string{
 	{"←/→ enter", "group: expand or fold · target: its group · pane: focus"},
 	{"space", "start or stop · pane: jump to live"},
 	{"s", "stop the target · pane: stop what the pane shows"},
-	{"m d r", "mute (group: its targets) · d drops older output · r reboots"},
+	{"m d r", "mute (group: its targets) · d drops output · r reboots"},
 	{"e", "fs events (last 10 min)"},
 	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑/⇧↓ groups · b hides · t list times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
@@ -1401,9 +1404,9 @@ var helpKeys = [][2]string{
 
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
-	"click a target scopes to it; double-click starts or stops it",
-	"click a group scopes to its targets; its ▾ folds or expands it; the fs row opens the fs events",
-	"a folded group (fold: true) lists failing and recent targets; click (+) N more to expand it; a log line expands, or copies if plain",
+	"click a target scopes to it; double-click starts or restarts it; right-click stops it",
+	"click a group scopes to its targets; double-click or its ▾ folds it; right-click stops its targets; the fs row opens the fs events",
+	"a folded group (fold: true) lists failing and recent targets; click (+) N more to expand it; click a log line moves the cursor; double-click expands it, or copies a plain one",
 	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
 	"▶ on a group header: space starts its auto targets",
 	"orange ⠋ building  green ✓ built  red ✗ failed  red ∞ rebuild loop  name: orange build, green restart, red failed",

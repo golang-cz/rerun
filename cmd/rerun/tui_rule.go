@@ -32,6 +32,8 @@ type sepLine struct {
 	more string
 	// full is the command a started rule expands to when its label cuts it short.
 	full string
+	// base is a build rule's label before its command, which text cuts first.
+	base string
 }
 
 func (s sepLine) isSep() bool { return s.label != "" || s.restart != nil }
@@ -41,15 +43,34 @@ func (s sepLine) text(w int) string {
 	if s.restart != nil {
 		return s.restart.label(max(0, w-4))
 	}
-	return s.label
+	if s.base == "" {
+		return s.label
+	}
+	// The name and status outrank the command, so the command takes the cut.
+	room := w - 4 - displayWidth(s.base+" · ")
+	switch {
+	case room >= displayWidth(s.build.cmd):
+		return s.label
+	case room <= 0:
+		return ellipsize(s.base, max(0, w-4))
+	}
+	return s.base + " · " + ellipsize(s.build.cmd, room)
 }
 
 // expandable reports whether the rule has anything under it at pane width w.
 func (s sepLine) expandable(w int) bool {
 	if s.build != nil {
-		return s.build.note != "" || len(s.build.files) > 1 || len(s.build.out) > 0
+		return s.build.cmd != "" || s.build.note != "" || len(s.build.files) > 1 || len(s.build.out) > 0
 	}
 	return s.full != "" && displayWidth("── "+s.raw()+" ") > w
+}
+
+// cmd is the command a rule runs, which a copy of its single line takes instead.
+func (s sepLine) cmd() string {
+	if s.build != nil {
+		return s.build.cmd
+	}
+	return s.full
 }
 
 // raw is the rule's full text, kept as its pane line for copy and search.
@@ -127,6 +148,8 @@ type buildRec struct {
 	phase  buildPhase
 	dur    time.Duration
 	reason string
+	// cmd is the build command, the first row under the rule.
+	cmd string
 	// note is the first row under a failed build: whether the old run survived.
 	note string
 	out  []string
@@ -160,11 +183,18 @@ func (r *buildRec) sep() sepLine {
 		label += " " + s.more
 	}
 	s.label = label
+	if r.cmd != "" {
+		s.base = label
+		s.label = label + " · " + r.cmd
+	}
 	return s
 }
 
 func (r *buildRec) expansion() []string {
 	var rows []string
+	if r.cmd != "" {
+		rows = append(rows, "$ "+r.cmd)
+	}
 	if r.note != "" {
 		rows = append(rows, r.note)
 	}
@@ -227,13 +257,7 @@ func (m *tuiModel) padForPin(out []string) []string {
 		return out
 	}
 	if row, ok := m.pinTop(); ok {
-		cue := len(out)
 		for len(out) < row+m.vp.Height() {
-			// A clear's pin draws no cue: the blank pane is the whole point.
-			if len(out) == cue && !m.pinGap {
-				out = append(out, m.styles.hint.Render("pinned"))
-				continue
-			}
 			out = append(out, "")
 		}
 	}

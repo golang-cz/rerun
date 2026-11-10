@@ -1,6 +1,10 @@
 package main
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // markW is the pane cells the (+) and (−) cell takes: a space, then the glyph.
 const markW = 4
@@ -423,35 +427,35 @@ func (m *tuiModel) clickPane(x, y int) {
 		m.selMoved = false
 		m.selCellX, m.selCellY = x, y
 		m.selSeq, m.selSub = m.visibleSeq[r.raw], r.sub
-		m.selExp = r.sub < 0 && m.expandable(r.raw)
 	}
 }
 
 // pressRow resolves the armed press to its pane row by the line's identity,
 // or -1 when it left the pane; the anchor index goes stale once a rebuild or
 // an expansion above the press shifts the rows.
-func (m *tuiModel) pressRow() int {
+func (m *tuiModel) pressRow() int { return m.rowOfIdentity(m.selSeq, m.selSub) }
+
+// rowOfIdentity is the display row of the line seq (sub for its expansion row), or -1 when it left the pane.
+func (m *tuiModel) rowOfIdentity(seq, sub int) int {
 	m.ensurePane()
 	if m.paneDirect() {
-		for raw, seq := range m.visibleSeq {
-			if seq == m.selSeq {
+		for raw, s := range m.visibleSeq {
+			if s == seq {
 				return raw
 			}
 		}
 		return -1
 	}
 	for row, r := range m.disp {
-		if m.visibleSeq[r.raw] == m.selSeq && r.sub == m.selSub {
+		if m.visibleSeq[r.raw] == seq && r.sub == sub {
 			return row
 		}
 	}
 	return -1
 }
 
-// releasePane resolves a pane press: a drag copies its range, a same-cell
-// click toggles an expandable line — or collapses it on a row of its
-// expansion — and any other release copies the pressed line, as a click
-// always did.
+// releasePane resolves a pane press: a drag copies its range; a click places the
+// cursor, and a second click on its cell does what Enter does on that line.
 func (m *tuiModel) releasePane(x, y int) tea.Cmd {
 	if m.selAnchor == nil {
 		return nil
@@ -460,24 +464,52 @@ func (m *tuiModel) releasePane(x, y int) tea.Cmd {
 		return m.copySelection()
 	}
 	if x != m.selCellX || y != m.selCellY {
-		// A release off the press cell is no click; it still copies the line.
-		return m.copySelection()
+		// The pressed line may have moved under the release; only the cursor follows it.
+		if row := m.pressRow(); row >= 0 {
+			m.placePaneCursor(row)
+		}
+		m.clearSelection()
+		return nil
+	}
+	if x == m.paneLastX && y == m.paneLastY && time.Since(m.paneLastClickAt) < doubleClickWindow {
+		// Reset so a fast third click is not another double.
+		m.paneLastClickAt = time.Time{}
+		m.clearSelection()
+		return m.doubleClickPane(m.paneLastSeq, m.paneLastSub)
 	}
 	row := m.pressRow()
 	if row < 0 {
 		m.clearSelection()
 		return nil
 	}
-	r := m.rowInfo(row)
-	// Table mode shows the line as columns, so its click copies, but the (+) cell still toggles.
-	onMarker := r.obj && x-m.layout.leftW-1-m.stampGutter() >= m.vp.Width()-markW
-	if r.sub >= 0 || (m.selExp && (!m.tableHeaderOn() || onMarker)) {
-		m.clearSelection()
-		m.toggleExpand(r.raw)
+	m.placePaneCursor(row)
+	m.paneLastSeq, m.paneLastSub, m.paneLastX, m.paneLastY, m.paneLastClickAt = m.selSeq, m.selSub, x, y, time.Now()
+	m.clearSelection()
+	return nil
+}
+
+// doubleClickPane does Enter on the line seq (sub for its expansion row): a line that cannot expand copies, the rest toggle.
+func (m *tuiModel) doubleClickPane(seq, sub int) tea.Cmd {
+	row := m.rowOfIdentity(seq, sub)
+	if row < 0 {
 		return nil
 	}
-	// A line that cannot expand keeps the old click: it copies.
-	return m.copySelection()
+	m.placePaneCursor(row)
+	r := m.rowInfo(row)
+	if r.sub < 0 && !m.expandable(r.raw) {
+		m.selAnchor, m.selEnd = &row, row
+		return m.copySelection()
+	}
+	m.toggleExpand(r.raw)
+	return nil
+}
+
+// placePaneCursor moves the cursor to row; a following tail keeps following.
+func (m *tuiModel) placePaneCursor(row int) {
+	m.setPaneCursor(row)
+	if m.follow {
+		m.paneCurPlaced = true
+	}
 }
 
 func inSpan(span [2]int, x int) bool {
@@ -528,6 +560,10 @@ func (m *tuiModel) copyLines(lo, hi int) []string {
 		r := m.rowInfo(row)
 		if r.sub >= 0 {
 			continue
+		}
+		// A single rule line copies its command; a range keeps the full rule for context.
+		if cmd := m.visibleSep[r.raw].cmd(); cmd != "" && lo == hi {
+			return append(raw, cmd)
 		}
 		raw = append(raw, m.visibleRaw[r.raw])
 	}

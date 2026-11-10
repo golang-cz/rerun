@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -416,5 +417,15 @@ func TestClearInAFocusedUnscopedPaneKeepsTheView(t *testing.T) {
 	blankTop(t, m)
 	if m.solo >= 0 || m.schemaSel != "" {
 		t.Fatalf("ctrl+l changed the scope: solo=%d schema=%q", m.solo, m.schemaSel)
+	}
+}
+
+// ctrl+l also asks for a full repaint, since iTerm2's Cmd+K clears behind the app.
+func TestCtrlLRepaintsTheScreen(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.frame()
+	cmd := press(m, "ctrl+l")
+	if cmd == nil || cmd() != tea.ClearScreen() {
+		t.Fatal("ctrl+l did not return the screen repaint")
 	}
 }

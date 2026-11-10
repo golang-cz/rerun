@@ -265,7 +265,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searchJump(-1)
 
 	case "ctrl+l":
+		// iTerm2's Cmd+K clears without telling the app, so the repaint must reach every cell.
 		m.clearKey()
+		return m, tea.ClearScreen
 
 	case "[", "shift+up":
 		if m.listFocused() {
@@ -622,6 +624,11 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if _, ok := msg.(tea.MouseClickMsg); ok && e.Button == tea.MouseRight {
+		m.rightClick(e.X, e.Y)
+		return m, nil
+	}
+
 	if _, ok := msg.(tea.MouseClickMsg); !ok || e.Button != tea.MouseLeft {
 		return m, nil
 	}
@@ -673,16 +680,50 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	m.cursor = row
 	m.paneFocus = false
 	m.liveSelect()
-	// The second click of a pair starts or stops the row, keeping the selection.
+	// The second click of a pair acts on the row, keeping the selection.
 	double := m.lastClick == row && time.Since(m.lastClickAt) < doubleClickWindow
 	if double {
-		m.toggleRow(r)
+		m.doubleClickRow(row, r)
 		m.lastClick = -1 // a fast third click must not read as another double
 	} else {
 		m.lastClick = row
 	}
 	m.lastClickAt = time.Now()
 	return m, nil
+}
+
+// rightClick stops the target or group under a right-click, after moving the cursor there as a left click does.
+func (m *tuiModel) rightClick(x, y int) {
+	row := m.rowAt(x, y)
+	if row < 0 {
+		return
+	}
+	r, ok := m.listRowAt(row)
+	if !ok || r.more {
+		return
+	}
+	m.cursor = row
+	m.paneFocus = false
+	m.liveSelect()
+	if r.header {
+		m.stopTargets(r.members)
+		return
+	}
+	if m.targets[r.target].state.up() {
+		m.stopTarget(r.target)
+	}
+}
+
+// doubleClickRow is a list double-click: a header folds, a stopped target starts, a running one reboots, and none stops.
+func (m *tuiModel) doubleClickRow(row int, r listRow) {
+	switch {
+	case r.header:
+		m.toggleFold(row)
+	case !m.targets[r.target].state.up():
+		m.toggleTarget(r.target)
+	default:
+		m.rebootRow(r)
+	}
 }
 
 // clearSelection drops the frozen selection highlight and the press state.

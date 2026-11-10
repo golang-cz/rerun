@@ -233,8 +233,7 @@ func TestBottomLinePrecedence(t *testing.T) {
 
 	// Copy feedback wins next, still leaving the marker hit-testable.
 	x := paneX(m)
-	m.handleMouse(mouse(x, 2, false))
-	m.handleMouse(release(x, 2))
+	paneDoubleClick(t, m, x, 2)
 	if got := bottomPaneLine(m); !strings.Contains(got, "copied 1 line") {
 		t.Fatalf("the copy hint did not outrank the open bar: %q", got)
 	}

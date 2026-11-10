@@ -70,7 +70,9 @@ func TestTableModeKeepsCopyAndFilterOnRawLines(t *testing.T) {
 	press(m, "esc")
 
 	x, y := paneX(m), m.headerRows()
-	copied := clipboardText(t, click(m, x, y))
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(motion(x+1, y))
+	copied := mouseCopy(t, m, release(x+1, y))
 	if copied != jsonGet+"\n" {
 		t.Fatalf("copied %q, want the raw line", copied)
 	}

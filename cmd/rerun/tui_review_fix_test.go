@@ -330,20 +330,19 @@ func TestClearInTheFocusedPaneBlanksAGroupScope(t *testing.T) {
 	blankTop(t, m)
 }
 
-func TestPinnedRuleShowsCue(t *testing.T) {
+func TestPinnedRuleDrawsNoCue(t *testing.T) {
 	m := newTestModel(t, target("api"), target("web"))
 	addLines(m, "api", streamLines("api", 30)...)
 	m.frame()
 	m.cursor = 0
 	m.liveSelect()
 	m.applyEvents([]event{restartEvent("api", nil, 0, 0)})
-	found := false
+	if m.pinSeq == 0 {
+		t.Fatal("the restart rule is not pinned")
+	}
 	for _, l := range paneOf(m) {
 		if strings.Contains(l, "pinned") {
-			found = true
+			t.Fatalf("the pin drew a cue: %q", l)
 		}
-	}
-	if !found {
-		t.Fatal("no pinned cue under the held rule")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -31,6 +32,15 @@ func mouseCopy(t *testing.T, m *tuiModel, msg tea.MouseMsg) string {
 	t.Helper()
 	_, cmd := m.handleMouse(msg)
 	return clipboardText(t, cmd)
+}
+
+// paneDoubleClick clicks one pane cell twice and returns the second release's clipboard text.
+func paneDoubleClick(t *testing.T, m *tuiModel, x, y int) string {
+	t.Helper()
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x, y))
+	m.handleMouse(mouse(x, y, false))
+	return mouseCopy(t, m, release(x, y))
 }
 
 // frozenPane streams 60 lines, draws a frame, and freezes with f.
@@ -85,17 +95,51 @@ func TestFreezeKeyTogglesFollowAndHoldsTheFrame(t *testing.T) {
 	}
 }
 
-func TestFrozenClickCopiesOneRawLine(t *testing.T) {
+// A single click on a plain frozen line moves the cursor and copies nothing.
+func TestFrozenSingleClickMovesTheCursorWithoutCopying(t *testing.T) {
+	m := frozenPane(t)
+	x, y := paneX(m), 2+m.titleHeight()
+	idx := m.vp.YOffset() + y - m.titleHeight()
+
+	m.handleMouse(mouse(x, y, false))
+	if payload := mouseCopy(t, m, release(x, y)); payload != "" {
+		t.Fatalf("a single click copied: %q", payload)
+	}
+	if m.follow {
+		t.Fatal("the click resumed the tail")
+	}
+	if got := m.paneCursorRow(); got != idx {
+		t.Fatalf("cursor row = %d, want the clicked row %d", got, idx)
+	}
+}
+
+// A single click on a live pane places the cursor and keeps the tail following.
+func TestLiveSingleClickPlacesTheCursorWithoutFreezing(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents(streamEvents("web", "line", 40).events)
+	m.frame()
+	x := paneX(m)
+	idx := m.vp.YOffset() + 2
+
+	m.handleMouse(mouse(x, 2, false))
+	if payload := mouseCopy(t, m, release(x, 2)); payload != "" {
+		t.Fatalf("a single click copied: %q", payload)
+	}
+	if !m.follow || !m.paneCurPlaced {
+		t.Fatalf("follow=%v paneCurPlaced=%v, want the tail following with the cursor placed", m.follow, m.paneCurPlaced)
+	}
+	if got := m.paneCursorRow(); got != idx {
+		t.Fatalf("cursor row = %d, want the clicked row %d", got, idx)
+	}
+}
+
+func TestFrozenDoubleClickCopiesOneRawLine(t *testing.T) {
 	m := frozenPane(t)
 	x, y := paneX(m), 2+m.titleHeight()
 	idx := m.vp.YOffset() + y - m.titleHeight()
 	want := m.visibleRaw[idx]
 
-	m.handleMouse(mouse(x, y, false))
-	if m.selAnchor == nil {
-		t.Fatal("the press did not anchor a selection")
-	}
-	payload := mouseCopy(t, m, release(x, y))
+	payload := paneDoubleClick(t, m, x, y)
 
 	if m.selAnchor != nil {
 		t.Fatal("the release kept the selection")
@@ -189,9 +233,8 @@ func TestFrozenDragUpwardCopiesTheRange(t *testing.T) {
 	}
 }
 
-// A press and release in the live pane copies one raw line without freezing
-// the tail; the left pane's row clicks are unaffected.
-func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
+// A double-click in the live pane copies one raw line without freezing the tail.
+func TestLivePaneDoubleClickCopiesWithoutFreezing(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.applyEvents(streamEvents("web", "line", 40).events)
 	m.frame()
@@ -201,17 +244,28 @@ func TestLivePaneClickCopiesWithoutFreezing(t *testing.T) {
 
 	x := paneX(m)
 	want := m.visibleRaw[m.vp.YOffset()+2] + "\n"
-	m.handleMouse(mouse(x, 2, false))
-	payload := mouseCopy(t, m, release(x, 2))
+	payload := paneDoubleClick(t, m, x, 2)
 
 	if !m.follow {
-		t.Fatal("the live-pane click froze the pane")
+		t.Fatal("the live-pane double-click froze the pane")
 	}
 	if payload != want {
 		t.Fatalf("payload = %q, want %q", payload, want)
 	}
 	if m.selAnchor != nil {
 		t.Fatal("the release kept the selection")
+	}
+}
+
+// A third click within the window is not another double-click.
+func TestThirdClickIsNotADoubleClick(t *testing.T) {
+	m := frozenPane(t)
+	x, y := paneX(m), 2+m.titleHeight()
+	paneDoubleClick(t, m, x, y)
+
+	m.handleMouse(mouse(x, y, false))
+	if payload := mouseCopy(t, m, release(x, y)); payload != "" {
+		t.Fatalf("the third click copied: %q", payload)
 	}
 }
 
@@ -253,9 +307,8 @@ func TestMarkerClickResumesFollowWithTheCopyHintUp(t *testing.T) {
 	}
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 2, false))
-	if mouseCopy(t, m, release(x, 2)) == "" {
-		t.Fatal("the click did not copy")
+	if paneDoubleClick(t, m, x, 2) == "" {
+		t.Fatal("the double-click did not copy")
 	}
 	m.frame()
 
@@ -279,8 +332,7 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 	m.frame()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 2, false))
-	mouseCopy(t, m, release(x, 2))
+	paneDoubleClick(t, m, x, 2)
 
 	lines := paneOf(m)[m.titleHeight():]
 	last := lines[len(lines)-1]
@@ -314,9 +366,8 @@ func TestCopyHintBeatsTheMarkerUntilItExpires(t *testing.T) {
 func TestStaleCopyHintDoesNotResurrectOnTargetHint(t *testing.T) {
 	m := frozenPane(t)
 	x := paneX(m)
-	m.handleMouse(mouse(x, 2, false))
-	if mouseCopy(t, m, release(x, 2)) == "" {
-		t.Fatal("the click did not copy")
+	if paneDoubleClick(t, m, x, 2) == "" {
+		t.Fatal("the double-click did not copy")
 	}
 
 	// Let the copy feedback expire, then press t on a row without columns: that
@@ -366,8 +417,7 @@ func TestOverCapSingleLineReportsWithoutCopying(t *testing.T) {
 	m.pauseTail()
 
 	x := paneX(m)
-	m.handleMouse(mouse(x, 0, false))
-	if payload := mouseCopy(t, m, release(x, 0)); payload != "" {
+	if payload := paneDoubleClick(t, m, x, 0); payload != "" {
 		t.Fatalf("an over-cap line copied: %q", payload)
 	}
 	if m.copyHint != "line too long — not copied" {
@@ -478,9 +528,7 @@ func TestCopyStripsANSIFromThePayload(t *testing.T) {
 	m.frame()
 	m.pauseTail()
 
-	x := paneX(m)
-	m.handleMouse(mouse(x, 0, false))
-	got := mouseCopy(t, m, release(x, 0))
+	got := paneDoubleClick(t, m, paneX(m), 0)
 	if got != "cyan text\n" {
 		t.Fatalf("payload = %q, want %q", got, "cyan text\n")
 	}
@@ -610,5 +658,140 @@ func TestCKeyCopiesTheSelection(t *testing.T) {
 	}
 	if m.selAnchor != nil {
 		t.Fatal("the copy kept the selection")
+	}
+}
+
+// A double-click on an expandable line expands it once and never copies it.
+func TestDoubleClickOnExpandableLineTogglesItOnce(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()
+
+	if payload := paneDoubleClick(t, m, x, y); payload != "" {
+		t.Fatalf("the double-click copied the expandable line: %q", payload)
+	}
+	if !m.expanded[m.visibleSeq[0]] {
+		t.Fatal("the double-click left the line collapsed: it toggled twice")
+	}
+}
+
+// ruleRow is the display row of the first rule line in the pane.
+func ruleRow(t *testing.T, m *tuiModel) int {
+	t.Helper()
+	m.ensurePane()
+	for row := 0; row < m.paneLen(); row++ {
+		r := m.rowInfo(row)
+		if r.sub < 0 && m.visibleSep[r.raw].isSep() {
+			return row
+		}
+	}
+	t.Fatal("no rule line in the pane")
+	return -1
+}
+
+// copyRows copies display rows lo..hi as a selection and returns the clipboard text.
+func copyRows(t *testing.T, m *tuiModel, lo, hi int) string {
+	t.Helper()
+	m.ensurePane()
+	m.selAnchor, m.selEnd = &lo, hi
+	return clipboardText(t, m.copySelection())
+}
+
+func TestStartedRuleCopiesItsCommand(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents([]event{{kind: evStarted, target: "web", at: buildAt}})
+	m.frame()
+	row := ruleRow(t, m)
+
+	if got := copyRows(t, m, row, row); got != "sleep 1\n" {
+		t.Fatalf("payload = %q, want the started command", got)
+	}
+}
+
+func TestBuildRuleCopiesItsCommand(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	m.frame()
+	row := ruleRow(t, m)
+
+	if got := copyRows(t, m, row, row); got != "make api\n" {
+		t.Fatalf("payload = %q, want the build command", got)
+	}
+}
+
+// A double-click on a rule expands it, as Enter does.
+func TestDoubleClickOnBuildRuleExpandsIt(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	m.frame()
+	row := ruleRow(t, m)
+	y := m.titleHeight() + row - m.vp.YOffset()
+
+	paneDoubleClick(t, m, paneX(m), y)
+	if !m.expanded[m.visibleSeq[m.rowInfo(row).raw]] {
+		t.Fatal("the double-click did not expand the rule")
+	}
+}
+
+func TestRuleWithoutCommandHasNoCopyCommand(t *testing.T) {
+	if got := (sepLine{label: "✓ web ok"}).cmd(); got != "" {
+		t.Fatalf("cmd() = %q, want none for a status rule", got)
+	}
+}
+
+// A range that includes a rule keeps the rule's full text for context.
+func TestRangeCopyKeepsTheFullRule(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.applyEvents([]event{{kind: evStarted, target: "web", at: buildAt}, {kind: evOutput, target: "web", line: "hello"}})
+	m.frame()
+	row := ruleRow(t, m)
+
+	want := "▶ web started · sleep 1\nhello\n"
+	if got := copyRows(t, m, row, row+1); got != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+}
+
+// A double-click on a rule at the tail expands it, with View run between the two clicks.
+func TestDoubleClickOnATailRuleExpandsIt(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	addLines(m, "api", streamLines("api", 60)...)
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	m.frame()
+	if !m.follow {
+		t.Fatal("setup: the pane is not following")
+	}
+	row := ruleRow(t, m)
+	x, y := paneX(m), m.titleHeight()+row-m.vp.YOffset()
+
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x, y))
+	m.frame()
+	_ = m.View()
+
+	m.handleMouse(mouse(x, y, false))
+	if payload := mouseCopy(t, m, release(x, y)); payload != "" {
+		t.Fatalf("the double-click copied the rule: %q", payload)
+	}
+	if !m.expanded[buildRuleSeq(m)] {
+		t.Fatal("the double-click did not expand the tail rule")
+	}
+}
+
+// An off-cell release with no motion places the cursor on the pressed line and copies nothing.
+func TestOffCellReleasePlacesTheCursorWithoutCopying(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	addLines(m, "web", jsonReq, `{"status":200}`)
+	m.frame()
+	x, y := paneX(m), m.titleHeight()+1
+
+	m.handleMouse(mouse(x, y, false))
+	m.toggleExpand(0)
+	if payload := mouseCopy(t, m, release(x+1, y)); payload != "" {
+		t.Fatalf("the off-cell release copied %q", payload)
+	}
+	if m.paneCurRaw != 1 {
+		t.Fatalf("cursor on raw %d, want the pressed line 1", m.paneCurRaw)
 	}
 }

@@ -160,11 +160,12 @@ func TestClickingTheMarkerExpandsAndCollapses(t *testing.T) {
 	m.frame()
 	x, y := m.width-2, m.titleHeight()
 
-	click(m, x, y)
+	doubleClick(m, x, y)
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking (+) did not expand the line")
 	}
-	click(m, x, y)
+	slowClick(m)
+	doubleClick(m, x, y)
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking (−) did not collapse the line")
 	}
@@ -180,14 +181,15 @@ func TestClickingTheMarkerTogglesInTableMode(t *testing.T) {
 	}
 	x, y := m.width-2, m.titleHeight()
 
-	copied := clipboardText(t, click(m, x, y))
+	copied := clipboardText(t, doubleClick(m, x, y))
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatalf("clicking (+) in table mode did not expand the line:\n%s", plainPane(m))
 	}
 	if copied != "" {
 		t.Fatal("clicking (+) in table mode copied the line")
 	}
-	click(m, x, y)
+	slowClick(m)
+	doubleClick(m, x, y)
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking (−) in table mode did not collapse the line")
 	}
@@ -195,13 +197,13 @@ func TestClickingTheMarkerTogglesInTableMode(t *testing.T) {
 
 // A click — press and release on one cell, no motion — on a line that can
 // expand toggles it like →/enter and focuses the pane; it never copies.
-func TestClickTogglesAJSONLine(t *testing.T) {
+func TestDoubleClickTogglesAJSONLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.frame()
 	x, y := paneX(m), m.titleHeight()
 
-	copied := clipboardText(t, click(m, x, y))
+	copied := clipboardText(t, doubleClick(m, x, y))
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatalf("the click did not expand the line:\n%s", plainPane(m))
 	}
@@ -212,21 +214,22 @@ func TestClickTogglesAJSONLine(t *testing.T) {
 		t.Fatal("the click copied the line it expanded")
 	}
 
-	click(m, x, y)
+	slowClick(m)
+	doubleClick(m, x, y)
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the second click did not collapse the line")
 	}
 }
 
 // A click on any row of an open expansion collapses the line, like ←.
-func TestClickOnAnExpansionRowCollapsesIt(t *testing.T) {
+func TestDoubleClickOnAnExpansionRowCollapsesIt(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.frame()
 	m.toggleExpand(0)
 
 	// The indent cells of the first expansion row are neither key nor value.
-	click(m, m.layout.leftW+1, m.titleHeight()+1)
+	doubleClick(m, m.layout.leftW+1, m.titleHeight()+1)
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("clicking an expansion row did not collapse the line")
 	}
@@ -524,8 +527,11 @@ func TestReleaseResolvesThePressedLineAfterRowsShift(t *testing.T) {
 	if !m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the mid-press expansion closed")
 	}
-	if !m.expanded[m.visibleSeq[1]] {
-		t.Fatal("the release did not expand the pressed line after its row shifted")
+	if m.paneCurRaw != 1 {
+		t.Fatalf("cursor on raw %d, want the pressed line 1 after its row shifted", m.paneCurRaw)
+	}
+	if m.expanded[m.visibleSeq[1]] {
+		t.Fatal("a single click expanded the pressed line")
 	}
 }
 
@@ -585,7 +591,7 @@ func TestUnmovedWheelKeepsThePress(t *testing.T) {
 	m.handleMouse(wheelDown(x, y)) // already at the bottom: nothing moves
 	m.handleMouse(release(x, y))
 
-	if !m.expanded[m.visibleSeq[0]] {
+	if m.paneLastClickAt.IsZero() {
 		t.Fatal("the unmoved wheel ate the click")
 	}
 }
@@ -613,7 +619,7 @@ func TestMovedWheelClearsThePress(t *testing.T) {
 
 // A release one cell off the press, with no motion between, is no click but
 // still copies the pressed line, as a release always did.
-func TestReleaseOnADifferentCellCopies(t *testing.T) {
+func TestReleaseOnADifferentCellOnlyPlacesTheCursor(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", jsonReq)
 	m.frame()
@@ -625,8 +631,11 @@ func TestReleaseOnADifferentCellCopies(t *testing.T) {
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the off-cell release expanded the line")
 	}
-	if copied != m.visibleRaw[0]+"\n" {
-		t.Fatalf("payload = %q, want the pressed line", copied)
+	if copied != "" {
+		t.Fatalf("payload = %q, want no copy from an off-cell release", copied)
+	}
+	if m.paneCurRaw != 0 {
+		t.Fatalf("cursor on raw %d, want the pressed line 0", m.paneCurRaw)
 	}
 }
 
@@ -641,8 +650,11 @@ func TestSameCellMotionStaysAClick(t *testing.T) {
 	m.handleMouse(motion(x, y))
 	copied := mouseCopy(t, m, release(x, y))
 
-	if !m.expanded[m.visibleSeq[0]] {
+	if m.paneLastClickAt.IsZero() {
 		t.Fatal("a same-cell motion turned the click into a drag")
+	}
+	if m.expanded[m.visibleSeq[0]] {
+		t.Fatal("a single click expanded the line")
 	}
 	if copied != "" {
 		t.Fatal("a same-cell motion made the release copy")
@@ -665,8 +677,8 @@ func TestNewPressClearsAStalePress(t *testing.T) {
 	if m.expanded[m.visibleSeq[0]] {
 		t.Fatal("the stale press on the first line toggled it")
 	}
-	if !m.expanded[m.visibleSeq[1]] {
-		t.Fatal("the second press did not click its line")
+	if m.paneCurRaw != 1 {
+		t.Fatalf("cursor on raw %d, want the second press's line 1", m.paneCurRaw)
 	}
 }
 
@@ -908,5 +920,29 @@ func TestPlacedCursorFallsBackToNewestWhenScrolledOut(t *testing.T) {
 	}
 	if got := m.paneCursorRow(); got != m.paneLen()-1 {
 		t.Fatalf("cursor on row %d, want the newest row %d", got, m.paneLen()-1)
+	}
+}
+
+// A single click on an open rule places the cursor on it and leaves it open.
+func TestSingleClickOnAnOpenRuleKeepsItExpanded(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", 1)})
+	m.addLine(0, "a")
+	m.addLine(0, "b")
+	m.frame()
+	rule := ruleRow(t, m)
+	m.expanded[m.visibleSeq[m.rowInfo(rule).raw]] = true
+	m.frame()
+
+	rule = ruleRow(t, m)
+	x, y := paneX(m), m.titleHeight()+rule-m.vp.YOffset()
+	m.handleMouse(mouse(x, y, false))
+	m.handleMouse(release(x, y))
+
+	if !m.expanded[m.visibleSeq[m.rowInfo(rule).raw]] {
+		t.Fatal("a single click collapsed the rule")
+	}
+	if got := m.paneCursorRow(); got != rule {
+		t.Fatalf("cursor row = %d, want the rule at %d", got, rule)
 	}
 }

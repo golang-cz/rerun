@@ -14,9 +14,6 @@ const defaultKeepLines = 10_000
 // keepAgeLineCap bounds a time-based keep, so a chatty target cannot grow without limit.
 const keepAgeLineCap = 200_000
 
-// dropKeepLines is what a runtime drop (d) trims a target's scrollback to.
-const dropKeepLines = 100
-
 // keepSpec is a `keep:` value: a line count, or an age with a hidden line cap.
 type keepSpec struct {
 	lines int
