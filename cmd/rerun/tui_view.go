@@ -1193,12 +1193,30 @@ func (m *tuiModel) copyHintActive() bool {
 // syncContent rebuilds the viewport only when its content changed, and keeps
 // it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
+	m.syncContentOnce()
+	// The (+) cell follows the cursor, which the sync itself may have moved.
+	if m.cursorMarkRaw() != m.markedRaw {
+		m.vpDirty = true
+		m.syncContentOnce()
+	}
+}
+
+// cursorMarkRaw is the shown line the cursor is on, or -1.
+func (m *tuiModel) cursorMarkRaw() int {
+	if m.paneLen() == 0 {
+		return -1
+	}
+	return m.rowInfo(m.paneCursorRow()).raw
+}
+
+func (m *tuiModel) syncContentOnce() {
 	// A scroll-up drops the pin, and the padding it needed must go with it.
 	if !m.follow && m.pinSeq != 0 {
 		m.unpin()
 		m.vpDirty = true
 	}
 	if m.vpDirty {
+		m.markedRaw = m.cursorMarkRaw()
 		lines := m.paintPills(m.paintLevels(m.sepLines(m.tableLines(m.paneLines()))))
 		m.paneCol = m.clampPaneCol(lines)
 		content := strings.Join(m.padForPin(m.markLines(m.panLines(lines))), "\n")

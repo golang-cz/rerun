@@ -369,8 +369,8 @@ func (m *tuiModel) pickCursorValue() {
 	m.pickValue(f)
 }
 
-// markLines draws the (+) or (−) cell at the pane's right edge on each JSON line.
-// The line's content gives way to the cell with an ellipsis, never under it.
+// markLines draws the (+) or (−) cell at the pane's right edge on the cursor's JSON line.
+// Every JSON line's content gives way to the cell with an ellipsis, never under it.
 func (m *tuiModel) markLines(lines []string) []string {
 	w := m.vp.Width()
 	if w < markW {
@@ -386,6 +386,10 @@ func (m *tuiModel) markLines(lines []string) []string {
 		glyph := "(+)"
 		if r.open {
 			glyph = "(−)"
+		}
+		if r.raw != m.markedRaw {
+			out[row] = ellipsize(lines[row], w-markW)
+			continue
 		}
 		content := padRight(ellipsize(lines[row], w-markW), w-markW)
 		out[row] = content + " " + glyph

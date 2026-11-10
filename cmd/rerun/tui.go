@@ -307,6 +307,8 @@ type tuiModel struct {
 	inBatch  bool
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
+	// markedRaw is the shown line wearing the (+) cell, -1 for none.
+	markedRaw int
 	// frameRows is the list drawn by the frame in progress; nil between frames.
 	frameRows []listRow
 	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.

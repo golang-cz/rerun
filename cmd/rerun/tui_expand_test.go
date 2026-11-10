@@ -37,22 +37,32 @@ func plainPane(m *tuiModel) string {
 	return b.String()
 }
 
-// A JSON object line ends in the (+) cell at the pane's right edge; other lines do not.
-func TestJSONLinesGetMarkerAtRightEdge(t *testing.T) {
+// The cursor's JSON line ends in the (+) cell at the pane's right edge; other lines do not.
+func TestJSONLineGetsMarkerOnlyOnTheCursorLine(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	addLines(m, "web", jsonReq, "plain text")
-	lines := paneOf(m)
+	addLines(m, "web", jsonReq, jsonReq, "plain text")
+	m.moveCursorRow(-1)
+	m.frame()
 	_, rightW := m.layoutWidths()
+	rowAt := func(i int) string { return ansi.Strip(paneOf(m)[m.titleHeight()+i]) }
 
-	row := ansi.Strip(lines[m.titleHeight()])
-	if !strings.HasSuffix(row, " (+)") {
-		t.Fatalf("JSON row = %q, want the (+) cell at the right edge", row)
+	if row := rowAt(1); !strings.HasSuffix(row, " (+)") {
+		t.Fatalf("cursor row = %q, want the (+) cell at the right edge", row)
 	}
-	if got := displayWidth(lines[m.titleHeight()]); got != rightW {
-		t.Fatalf("JSON row is %d cells, want the full pane width %d", got, rightW)
+	if got := displayWidth(paneOf(m)[m.titleHeight()+1]); got != rightW {
+		t.Fatalf("cursor row is %d cells, want the full pane width %d", got, rightW)
 	}
-	if plain := ansi.Strip(lines[m.titleHeight()+1]); strings.Contains(plain, "(+)") {
-		t.Fatalf("plain row = %q, want no marker", plain)
+	if row := rowAt(0); strings.Contains(row, "(+)") {
+		t.Fatalf("other JSON row = %q, want no marker", row)
+	}
+	if row := rowAt(2); strings.Contains(row, "(+)") {
+		t.Fatalf("plain row = %q, want no marker", row)
+	}
+
+	m.moveCursorRow(-1)
+	m.frame()
+	if !strings.HasSuffix(rowAt(0), " (+)") || strings.Contains(rowAt(1), "(+)") {
+		t.Fatalf("rows = %q, %q, want the marker to follow the cursor", rowAt(0), rowAt(1))
 	}
 }
 
