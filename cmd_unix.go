@@ -3,8 +3,11 @@
 package rerun
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -33,11 +36,14 @@ func newPlatformCmd(cmdline []string, grace time.Duration, opts ...Option) Comma
 	return newCommand(cmdline, grace, opts...)
 }
 
-func newExecCmd(cmdline []string) *exec.Cmd {
+func newExecCmd(cmdline []string, opts ...Option) *exec.Cmd {
 	script := ShellScript(cmdline)
+	// Options such as WithDir decide where a relative program path resolves, so read them first.
+	probe := &exec.Cmd{}
+	applyOptions(probe, opts)
 	var cmd *exec.Cmd
-	if argv, ok := plainArgv(script); ok {
-		// exec.Command resolves argv[0] itself and keeps the typed word in Args.
+	if argv, ok := plainArgv(script, probe.Dir); ok {
+		// exec.Command keeps the typed word in Args; the child resolves a relative path after chdir.
 		cmd = exec.Command(argv[0], argv[1:]...)
 	} else {
 		cmd = exec.Command("/bin/sh", "-c", script)
@@ -48,11 +54,29 @@ func newExecCmd(cmdline []string) *exec.Cmd {
 	cmd.Env = childEnv(os.Environ())
 	// Own process group, so one signal reaches the shell and everything it spawned.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	applyOptions(cmd, opts)
 	return cmd
 }
 
+func applyOptions(cmd *exec.Cmd, opts []Option) {
+	for _, opt := range opts {
+		opt(cmd)
+	}
+}
+
+// execMagic lists the file starts the kernel execs directly. Anything else, such as
+// a script without #!, needs sh's ENOEXEC fallback.
+var execMagic = [][]byte{
+	[]byte("#!"),
+	[]byte("\x7fELF"),
+	{0xfe, 0xed, 0xfa, 0xce}, {0xfe, 0xed, 0xfa, 0xcf}, // Mach-O, big endian
+	{0xce, 0xfa, 0xed, 0xfe}, {0xcf, 0xfa, 0xed, 0xfe}, // Mach-O, little endian
+	{0xca, 0xfe, 0xba, 0xbe}, {0xbe, 0xba, 0xfe, 0xca}, // Mach-O universal
+}
+
 // plainArgv returns the words of a script that needs no shell, or false to keep /bin/sh.
-func plainArgv(script string) ([]string, bool) {
+// dir is the child's working directory; a relative program path resolves against it.
+func plainArgv(script, dir string) ([]string, bool) {
 	if strings.ContainsAny(script, shellMeta+"\n\r") {
 		return nil, false
 	}
@@ -60,11 +84,34 @@ func plainArgv(script string) ([]string, bool) {
 	if len(words) == 0 || strings.Contains(words[0], "=") || shellBuiltins[words[0]] {
 		return nil, false
 	}
+	prog := words[0]
+	if strings.Contains(prog, "/") && dir != "" && !filepath.IsAbs(prog) {
+		prog = filepath.Join(dir, prog)
+	}
 	// A missing or non-executable program stays on sh so its error text is unchanged.
-	if _, err := exec.LookPath(words[0]); err != nil {
+	found, err := exec.LookPath(prog)
+	if err != nil || !hasExecMagic(found) {
 		return nil, false
 	}
 	return words, true
+}
+
+// hasExecMagic reports whether the file starts with a format the kernel execs directly.
+// A read error reports false, which keeps the sh path.
+func hasExecMagic(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var head [4]byte
+	n, _ := io.ReadFull(f, head[:])
+	for _, magic := range execMagic {
+		if n >= len(magic) && bytes.HasPrefix(head[:n], magic) {
+			return true
+		}
+	}
+	return false
 }
 
 // quoteWord single-quotes a word the shell would otherwise split or expand.

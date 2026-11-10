@@ -106,10 +106,7 @@ func (c *command) Start() error {
 		return ErrAlreadyRunning
 	}
 
-	cmd := newExecCmd(c.cmdline)
-	for _, opt := range c.opts {
-		opt(cmd)
-	}
+	cmd := newExecCmd(c.cmdline, c.opts...)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
