@@ -372,6 +372,49 @@ func (m *tuiModel) setBuildState(i int, building, failed bool) {
 	t.building, t.buildFailed = building, failed
 }
 
+// followArrow points a joined target at its shared build's owner row: ↑ when the owner is above,
+// ↓ below. "" when the owner is not listed.
+func (m *tuiModel) followArrow(row, follower int) string {
+	rows := m.listRows()
+	owner := m.targetIndex(m.targets[follower].buildOwner)
+	at := m.ownerLine(rows, owner)
+	switch {
+	case owner < 0 || at < 0 || row < 0 || row >= len(rows) || at == row:
+		return ""
+	case at < row:
+		return "↑"
+	}
+	return "↓"
+}
+
+// ownerLine is the list row that shows target owner: its own row, or the `(+) N more` row that folds it away.
+func (m *tuiModel) ownerLine(rows []listRow, owner int) int {
+	if owner < 0 {
+		return -1
+	}
+	for k, r := range rows {
+		if !r.header && !r.more && r.target == owner {
+			return k
+		}
+	}
+	// A folded owner has no row, so its section's `(+) N more` row stands for it.
+	top := ""
+	for _, r := range m.allRows() {
+		if r.header && r.depth == 0 {
+			top = r.schema
+		}
+		if !r.header && r.target == owner {
+			break
+		}
+	}
+	for k, r := range rows {
+		if r.more && r.schema == top {
+			return k
+		}
+	}
+	return -1
+}
+
 // schemaMembers is the target indices a group key names, in list order.
 func (m *tuiModel) schemaMembers(schema string) []int {
 	var members []int

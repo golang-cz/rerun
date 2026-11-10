@@ -2,8 +2,11 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // sharedBuildTarget runs one shared command, so every target built with it shares one run.
@@ -16,6 +19,20 @@ func sharedBuildTarget(name string) Target {
 // sharedStart is the event a target gets when the run owner launched starts.
 func sharedStart(name, owner string) event {
 	return event{kind: evBuildStarted, target: name, owner: owner, at: buildAt}
+}
+
+// targetCell is a target's row as the left pane draws it, without styling.
+func targetCell(t *testing.T, m *tuiModel, name string) string {
+	t.Helper()
+	m.frame()
+	leftW, _ := m.layoutWidths()
+	for k, r := range m.listRows() {
+		if !r.header && m.targets[r.target].spec.Name == name {
+			return ansi.Strip(m.targetLine(k, r, leftW))
+		}
+	}
+	t.Fatalf("no listed row for %q", name)
+	return ""
 }
 
 func TestSharedBuildIsOneRowNamingEveryTarget(t *testing.T) {
@@ -81,4 +98,51 @@ func TestCancelledJoinerLeavesTheOwnerRule(t *testing.T) {
 	if got, want := buildRuleTexts(m), []string{"⚙ api building · go build ./cmd/app"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rules = %q, want %q", got, want)
 	}
+}
+
+func TestJoinedTargetArrowPointsUpAtOwnerAbove(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api")})
+	if cell := targetCell(t, m, "worker"); !strings.Contains(cell, "↑") {
+		t.Fatalf("worker row = %q, want ↑ toward api above it", cell)
+	}
+	if cell := targetCell(t, m, "api"); strings.ContainsAny(cell, "↑↓") {
+		t.Fatalf("owner row = %q, want no arrow", cell)
+	}
+	m.applyEvents([]event{buildOK("api", time.Second), buildOK("worker", time.Second)})
+	if cell := targetCell(t, m, "worker"); strings.ContainsAny(cell, "↑↓") {
+		t.Fatalf("worker row after the build = %q, want the arrow gone", cell)
+	}
+}
+
+func TestJoinedTargetArrowPointsDownAtOwnerBelow(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("worker"), sharedBuildTarget("api"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api")})
+	if cell := targetCell(t, m, "worker"); !strings.Contains(cell, "↓") {
+		t.Fatalf("worker row = %q, want ↓ toward api below it", cell)
+	}
+}
+
+func TestFoldedOwnerArrowPointsAtItsMoreRow(t *testing.T) {
+	api, worker := sharedBuildTarget("api"), sharedBuildTarget("worker")
+	api.Schema, worker.Schema = "ops", "ops"
+	api.AutoFold, worker.AutoFold = true, true
+	api.Start, worker.Start = startManual, startManual
+	m := newTestModel(t, sharedBuildTarget("web"), api, worker)
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("web", "api")})
+	if rows := nestedRows(m); !slicesContain(rows, "(+) 2 more") || slicesContain(rows, "api") {
+		t.Fatalf("rows = %v, want api folded into the more row", rows)
+	}
+	if cell := targetCell(t, m, "web"); !strings.Contains(cell, "↓") {
+		t.Fatalf("web row = %q, want ↓ toward the folded owner's more row", cell)
+	}
+}
+
+func slicesContain(xs []string, want string) bool {
+	for _, x := range xs {
+		if strings.Contains(x, want) {
+			return true
+		}
+	}
+	return false
 }

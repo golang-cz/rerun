@@ -802,12 +802,18 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 			name.color = colorMutedName
 		}
 	}
+	cell := buildCell(t, m.now, m.spin)
+	if t.building && t.buildOwner != "" {
+		if a := m.followArrow(row, r.target); a != "" {
+			cell = seg{text: a, color: runYellow}
+		}
+	}
 	segs = append(segs,
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
 		name,
 		seg{text: " "},
-		buildCell(t, m.now, m.spin),
+		cell,
 	)
 	if m.showTimes {
 		// The times column stays on the right edge, however short the names are.

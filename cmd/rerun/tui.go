@@ -165,6 +165,8 @@ type tuiTarget struct {
 	loopFile string
 	// buildRule is the target's latest build, whose rule and output the next build event updates.
 	buildRule *buildRec
+	// buildOwner is the target whose row shows this target's shared build; empty when it owns its own.
+	buildOwner string
 	// health is the live run's probe state; lastRule is the restart rule it may still complete.
 	health   healthState
 	lastRule *restartRule
@@ -597,6 +599,7 @@ func (m *tuiModel) cancelBuild(i int) {
 			m.syncBuildRule(rec)
 		}
 	}
+	t.buildOwner = ""
 	m.setBuildState(i, false, t.buildFailed)
 }
 
@@ -954,6 +957,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	case evBuildStarted:
 		t.loopFile = ""
 		t.buildStart = eventTime(ev, m.now)
+		t.buildOwner = ""
 		m.setBuildState(i, true, false)
 		if old := t.buildRule; old != nil && old.name == t.spec.Name {
 			if old.phase == buildRunning {
@@ -967,7 +971,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		}
 		if rec := m.sharedRow(t, ev); rec != nil {
 			// The owner's rule already shows this run, so the target joins it instead of adding one.
-			t.buildRule = rec
+			t.buildRule, t.buildOwner = rec, ev.owner
 			if !slices.Contains(rec.members, t.spec.Name) {
 				rec.members = append(rec.members, t.spec.Name)
 			}
@@ -990,6 +994,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		}
 		at := eventTime(ev, m.now)
 		t.buildOKAt = at
+		t.buildOwner = ""
 		m.setBuildState(i, false, false)
 		if rec := t.buildRule; rec != nil && rec.phase == buildRunning && rec.name == t.spec.Name {
 			rec.phase, rec.dur = buildPassed, ev.dur
@@ -1003,6 +1008,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		// The failure opens its rule, so the reason and the output show without a click.
 		up := t.runStarted && t.state.up()
 		m.setBuildState(i, false, true)
+		t.buildOwner = ""
 		t.restartBatch = 0
 		// A joined target's failure is the owner's rule's to show, once.
 		if rec := t.buildRule; rec == nil || rec.name == t.spec.Name {
