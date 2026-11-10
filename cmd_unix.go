@@ -64,8 +64,7 @@ func applyOptions(cmd *exec.Cmd, opts []Option) {
 	}
 }
 
-// execMagic lists the file starts the kernel execs directly. Anything else, such as
-// a script without #!, needs sh's ENOEXEC fallback.
+// execMagic lists file starts the kernel execs; anything else needs sh's ENOEXEC fallback.
 var execMagic = [][]byte{
 	[]byte("#!"),
 	[]byte("\x7fELF"),
