@@ -52,3 +52,14 @@ func TestPlainSinkSingleTargetBuildIsUnchanged(t *testing.T) {
 		t.Fatalf("ok = %q, want %q", got, want)
 	}
 }
+
+// The owner's log line covers a shared build, so no target's output lines print under its own label.
+func TestPlainSinkRendersNoSharedBuildOutputPerTarget(t *testing.T) {
+	s := newPlainSink(nil)
+	for _, name := range []string{"api", "worker"} {
+		ev := event{kind: evBuildOutput, target: name, owner: "api", line: "compiling", buildAt: time.Now()}
+		if got := s.render(ev); got != "" {
+			t.Errorf("%s: render = %q, want no line", name, got)
+		}
+	}
+}

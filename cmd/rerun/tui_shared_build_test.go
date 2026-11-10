@@ -174,3 +174,57 @@ func TestOwnerCancelHandsSharedRowToNextMember(t *testing.T) {
 		t.Fatalf("rules after the build = %q, want %q", got, want)
 	}
 }
+
+func TestFollowerArrowClearsWhenOwnerRulePasses(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api"), buildOK("api", time.Second)})
+	if cell := targetCell(t, m, "worker"); strings.ContainsAny(cell, "↑↓") {
+		t.Fatalf("worker row = %q, want no arrow once the owner's rule passed", cell)
+	}
+}
+
+func TestCancelledJoinerDropsItsRuleLink(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api"), {kind: evBuildCancelled, target: "worker"}})
+	if rule := m.targets[m.targetIndex("worker")].buildRule; rule != nil {
+		t.Fatalf("worker still links to the owner's rule after cancelling")
+	}
+}
+
+func TestJoinedFailureDropsItsRuleLink(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api"), buildFail("worker", time.Second)})
+	if rule := m.targets[m.targetIndex("worker")].buildRule; rule != nil {
+		t.Fatalf("worker still links to the owner's rule after failing")
+	}
+}
+
+func TestJoinedSuccessDropsItsRuleLink(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api"), buildOK("worker", time.Second)})
+	if rule := m.targets[m.targetIndex("worker")].buildRule; rule != nil {
+		t.Fatalf("worker still links to the owner's rule after passing")
+	}
+}
+
+func TestOwnerLeavingHandsRuleToMemberWithARow(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"), sharedBuildTarget("worker"))
+	m.applyEvents([]event{sharedStart("api", "api"), sharedStart("worker", "api")})
+	rec := m.targets[m.targetIndex("api")].buildRule
+	rec.members = []string{"api", "ghost", "worker"}
+	m.applyEvents([]event{{kind: evBuildCancelled, target: "api"}})
+	if rec.owner != "worker" {
+		t.Fatalf("owner = %q, want worker, the first member with a row", rec.owner)
+	}
+}
+
+func TestOwnerLeavingWithNoListedMemberDropsRule(t *testing.T) {
+	m := newTestModel(t, sharedBuildTarget("api"))
+	m.applyEvents([]event{sharedStart("api", "api")})
+	rec := m.targets[m.targetIndex("api")].buildRule
+	rec.members = []string{"api", "ghost"}
+	m.applyEvents([]event{{kind: evBuildCancelled, target: "api"}})
+	if rec.phase != buildDropped {
+		t.Fatalf("rule phase = %v, want dropped when no member has a row", rec.phase)
+	}
+}

@@ -375,7 +375,7 @@ func (m *tuiModel) setBuildState(i int, building, failed bool) {
 // followArrow points a joined target at its shared build's owner row: ↑ when the owner is above,
 // ↓ below. "" when the owner is not listed.
 func (m *tuiModel) followArrow(row, follower int) string {
-	rows := m.listRows()
+	rows := m.frameListRows()
 	owner := m.targetIndex(m.targets[follower].buildOwner)
 	at := m.ownerLine(rows, owner)
 	switch {
@@ -450,7 +450,7 @@ func (m *tuiModel) enclosingHeader(idx int) int {
 
 // listRowAt is the list row at idx, if idx names one.
 func (m *tuiModel) listRowAt(idx int) (listRow, bool) {
-	rows := m.listRows()
+	rows := m.frameListRows()
 	if idx < 0 || idx >= len(rows) {
 		return listRow{}, false
 	}
@@ -872,4 +872,12 @@ func (m *tuiModel) allMutedIn(members []int) bool {
 		}
 	}
 	return true
+}
+
+// frameListRows is the list for the frame being drawn, built once per frame instead of per row.
+func (m *tuiModel) frameListRows() []listRow {
+	if m.frameRows != nil {
+		return m.frameRows
+	}
+	return m.listRows()
 }

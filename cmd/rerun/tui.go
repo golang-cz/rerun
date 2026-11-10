@@ -317,6 +317,8 @@ type tuiModel struct {
 	disp      []dispRow
 	dispText  []string
 	dispDirty bool
+	// frameRows is the list drawn by the frame in progress; nil between frames.
+	frameRows []listRow
 	// edits are the unsaved column picks, one per schema or target node.
 	edits []colEdit
 
@@ -595,6 +597,7 @@ func (m *tuiModel) cancelBuild(i int) {
 	if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
 		switch {
 		case rec.owner != t.spec.Name:
+			t.buildRule = nil
 			rec.members = slices.DeleteFunc(rec.members, func(n string) bool { return n == t.spec.Name })
 			m.syncBuildRule(rec)
 		case len(rec.members) > 1:
@@ -611,12 +614,15 @@ func (m *tuiModel) cancelBuild(i int) {
 // handOver makes the next member of a shared run its owner after from leaves; the rule and its output carry on.
 func (m *tuiModel) handOver(rec *buildRec, from string) {
 	rec.members = slices.DeleteFunc(rec.members, func(n string) bool { return n == from })
-	rec.owner = rec.members[0]
-	if ni := m.targetIndex(rec.owner); ni >= 0 {
-		m.targets[ni].buildRule, m.targets[ni].buildOwner = rec, ""
+	heir := slices.IndexFunc(rec.members, func(n string) bool { return m.targetIndex(n) >= 0 })
+	if heir < 0 {
+		m.dropBuild(rec, "cancelled")
+		return
 	}
-	for _, n := range rec.members[1:] {
-		if fi := m.targetIndex(n); fi >= 0 {
+	rec.owner = rec.members[heir]
+	m.targets[m.targetIndex(rec.owner)].buildRule, m.targets[m.targetIndex(rec.owner)].buildOwner = rec, ""
+	for _, n := range rec.members {
+		if fi := m.targetIndex(n); fi >= 0 && n != rec.owner {
 			m.targets[fi].buildOwner = rec.owner
 		}
 	}
@@ -1020,6 +1026,9 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 			rec.phase, rec.dur = buildPassed, ev.dur
 			m.syncBuildRule(rec)
 		}
+		if rec := t.buildRule; rec != nil && rec.owner != t.spec.Name {
+			t.buildRule = nil
+		}
 
 	case evBuildCancelled:
 		m.cancelBuild(i)
@@ -1044,6 +1053,9 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 			if m.syncBuildRule(rec) && !t.dropped {
 				m.expanded[rec.seq] = true
 			}
+		}
+		if rec := t.buildRule; rec != nil && rec.owner != t.spec.Name {
+			t.buildRule = nil
 		}
 		if !up {
 			t.state = stateExited

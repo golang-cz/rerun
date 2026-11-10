@@ -163,6 +163,9 @@ func (m *tuiModel) frame() string {
 		divider, glyph = m.styles.dividerFocus, "┃"
 	}
 
+	m.frameRows = m.listRows()
+	defer func() { m.frameRows = nil }()
+
 	var b strings.Builder
 	for y := 0; y < m.height; y++ {
 		if m.listShown() {
@@ -803,7 +806,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		}
 	}
 	cell := buildCell(t, m.now, m.spin)
-	if t.building && t.buildOwner != "" {
+	if t.building && t.buildOwner != "" && t.buildRule != nil && t.buildRule.phase == buildRunning {
 		if a := m.followArrow(row, r.target); a != "" {
 			cell = seg{text: a, color: runYellow}
 		}
