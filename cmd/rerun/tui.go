@@ -151,8 +151,8 @@ type tuiTarget struct {
 	// lastChange is the newest change batch the target reacted to, which the
 	// pane's title line counts.
 	lastChange rerun.ChangeSet
-	// flashUntil ends the glyph flash a file-triggered restart leaves behind.
-	flashUntil time.Time
+	// restartedAt is when a file-triggered restart landed, which the green name tint counts from.
+	restartedAt time.Time
 
 	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
 	restartBatch int
@@ -162,8 +162,6 @@ type tuiTarget struct {
 	buildFailed bool
 	// buildOKAt is when the last build passed, which the build cell's ✓ counts from.
 	buildOKAt time.Time
-	// buildFlashUntil ends the build cell's flash for a build a file change started.
-	buildFlashUntil time.Time
 	// loopFile names the file a core rebuild loop keeps re-triggering; empty when not looping.
 	loopFile string
 	// buildRule is the target's latest build, whose rule and output the next build event updates.
@@ -292,6 +290,13 @@ type tuiModel struct {
 	visibleSep []sepLine
 	// visibleLvl mirrors visible with each line's JSON level.
 	visibleLvl []levelHit
+	// visibleAt mirrors visible with each line's arrival second since startAt.
+	visibleAt []uint32
+	// startAt and clock stamp lines: one clock read per ingested batch, whole seconds since startAt.
+	startAt time.Time
+	clock   func() time.Time
+	batchAt uint32
+	inBatch bool
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
 	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.
@@ -426,6 +431,8 @@ func newTUI(targets []Target) *tuiModel {
 		solo:       -1,
 		follow:     true,
 		now:        time.Now(),
+		startAt:    time.Now(),
+		clock:      time.Now,
 		lastClick:  -1,
 		hover:      -1,
 		searchRow:  -1,
@@ -625,7 +632,7 @@ func (m *tuiModel) addRule(i int, s sepLine) {
 func (m *tuiModel) addRow(i int, line string, sep sepLine) int {
 	t := m.targets[i]
 	m.nextSeq++
-	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep}
+	ml := mergedLine{target: i, name: t.spec.Name, text: line, seq: m.nextSeq, obj: isJSONObject(line), sep: sep, at: m.arrivalAt()}
 	if ml.obj {
 		ml.lvl = jsonLevel(line)
 	}
@@ -688,6 +695,7 @@ func (m *tuiModel) showLine(ml mergedLine) {
 	m.visibleObj = appendCapped(m.visibleObj, ml.obj)
 	m.visibleSep = appendCapped(m.visibleSep, ml.sep)
 	m.visibleLvl = appendCapped(m.visibleLvl, ml.lvl)
+	m.visibleAt = appendCapped(m.visibleAt, ml.at)
 	m.dispDirty = true
 	// The bar's kept/total counts track arrivals even without a filter.
 	m.paneSelDirty = true
@@ -725,7 +733,22 @@ func (m *tuiModel) paneWidth() int {
 		return 0
 	}
 	leftW, _ := m.layoutWidths()
-	return m.width - leftW - 1
+	return m.width - leftW - 1 - m.stampGutter()
+}
+
+// stampW is the cells a line's clock time and its space take in the pane's left gutter.
+const stampW = len("15:04:05 ")
+
+// stampGutter is the width of the pane's time gutter: stampW with `t` on and room to spare, else 0.
+func (m *tuiModel) stampGutter() int {
+	if !m.showTimes || m.width <= 0 {
+		return 0
+	}
+	leftW, _ := m.layoutWidths()
+	if m.width-leftW-1 < stampW+20 {
+		return 0
+	}
+	return stampW
 }
 
 // appendCapped keeps the newest cap lines. The slice is re-sliced rather than
@@ -739,7 +762,31 @@ func appendLimit[T any](lines []T, line T, limit int) []T {
 	return append(lines, line)
 }
 
+// arrivalAt stamps a new line: the batch's shared second, or a fresh read outside a batch.
+func (m *tuiModel) arrivalAt() uint32 {
+	if m.inBatch {
+		return m.batchAt
+	}
+	return m.stampNow()
+}
+
+// stampNow is the whole seconds since the TUI started.
+func (m *tuiModel) stampNow() uint32 {
+	now := time.Now
+	if m.clock != nil {
+		now = m.clock
+	}
+	return uint32(max(0, now().Sub(m.startAt)) / time.Second)
+}
+
+// stampText is the wall-clock time of an arrival second.
+func (m *tuiModel) stampText(at uint32) string {
+	return m.startAt.Add(time.Duration(at) * time.Second).Format("15:04:05")
+}
+
 func (m *tuiModel) applyEvents(events []event) tea.Cmd {
+	m.batchAt, m.inBatch = m.stampNow(), true
+	defer func() { m.inBatch = false }()
 	var cmds []tea.Cmd
 	for _, ev := range events {
 		cmds = append(cmds, m.applyEvent(ev))
@@ -816,9 +863,6 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	case evBuildStarted:
 		t.loopFile = ""
 		t.buildStart = eventTime(ev, m.now)
-		if len(ev.files) > 0 {
-			t.buildFlashUntil = t.buildStart.Add(flashWindow)
-		}
 		m.setBuildState(i, true, false)
 		if old := t.buildRule; old != nil {
 			if old.phase == buildRunning {
@@ -914,7 +958,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 			}
 		} else {
 			t.lastRule = nil
-			m.addRule(i, startedRule(t.spec.Name, eventTime(ev, m.now), oneLine(t.spec.Cmd)))
+			m.addRule(i, startedRule(t.spec.Name, oneLine(t.spec.Cmd)))
 		}
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
@@ -1394,6 +1438,8 @@ type mergedLine struct {
 	sep    sepLine
 	// lvl is the JSON level behind the line, zero for plain text.
 	lvl levelHit
+	// at is the second the line arrived, counted from the TUI's start.
+	at uint32
 }
 
 func (m *tuiModel) prefixed(line mergedLine) string {
@@ -1463,6 +1509,7 @@ func (m *tuiModel) rebuildMerged() {
 	m.visibleObj = m.visibleObj[:0]
 	m.visibleSep = m.visibleSep[:0]
 	m.visibleLvl = m.visibleLvl[:0]
+	m.visibleAt = m.visibleAt[:0]
 	for _, line := range m.merged {
 		if m.streamsTo(line.target) {
 			m.showLine(line)

@@ -25,8 +25,8 @@ const feedJoin = 150 * time.Millisecond
 // configJoin is how far back a config reload looks for the batch that holds rerun.yml.
 const configJoin = 2 * time.Second
 
-// flashWindow is how long a file-triggered restart's glyph or build cell stays reversed.
-const flashWindow = time.Second
+// tintWindow is how long the name stays orange after a build starts, or green after a file restart.
+const tintWindow = 2 * time.Second
 
 // configTarget is the pseudo-target a rerun.yml reload is listed under.
 const configTarget = "config"
@@ -123,7 +123,7 @@ func isDirPath(path string) bool {
 func (m *tuiModel) feedRestart(t *tuiTarget, at time.Time) {
 	id := t.restartBatch
 	t.restartBatch = 0
-	t.flashUntil = at.Add(flashWindow)
+	t.restartedAt = at
 	for i := range m.feed {
 		if m.feed[i].id == id && !slices.Contains(m.feed[i].targets, t.spec.Name) {
 			m.feed[i].targets = append(m.feed[i].targets, t.spec.Name)
@@ -373,8 +373,19 @@ func absDuration(d time.Duration) time.Duration {
 	return d
 }
 
-// flashing reports whether a file-triggered restart's glyph is still reversed.
-func (t *tuiTarget) flashing(now time.Time) bool { return now.Before(t.flashUntil) }
+// nameColor tints the name: red for a failed build or a loop, else orange just after a build starts,
+// else green just after a file restart. It is empty when the name stays plain.
+func (t *tuiTarget) nameColor(now time.Time) string {
+	switch {
+	case t.buildFailed || t.looping():
+		return runRed
+	case t.building && now.Sub(t.buildStart) < tintWindow:
+		return runYellow
+	case !t.restartedAt.IsZero() && now.Sub(t.restartedAt) < tintWindow:
+		return runGreen
+	}
+	return ""
+}
 
 // looping reports a core rebuild loop, which stays until the target resumes.
 func (t *tuiTarget) looping() bool { return t.loopFile != "" }

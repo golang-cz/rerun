@@ -48,11 +48,11 @@ func TestRulesNameTheCommand(t *testing.T) {
 
 func TestRestartRuleLabelCutsMetaBeforeCommand(t *testing.T) {
 	rr := &restartRule{name: "api", at: restartAt, built: 2 * time.Second, cmd: "go run ./api"}
-	full := "↻ api restarted 15:04:05 · built 2s"
+	full := "↻ api restarted · built 2s"
 	if got := rr.label(1 << 16); got != full+" · go run ./api" {
 		t.Errorf("label = %q", got)
 	}
-	short := "↻ api restarted 15:04:05"
+	short := "↻ api restarted"
 	if got := rr.label(displayWidth(short) + 2); got != short+" · go run ./api" {
 		t.Errorf("narrow label = %q, want the build segment cut and the command kept", got)
 	}
@@ -60,7 +60,7 @@ func TestRestartRuleLabelCutsMetaBeforeCommand(t *testing.T) {
 
 func TestRestartRuleWithoutBuildOmitsIt(t *testing.T) {
 	rr := &restartRule{name: "api", at: restartAt, cmd: "go run ./api"}
-	if got := rr.label(1 << 16); got != "↻ api restarted 15:04:05 · go run ./api" {
+	if got := rr.label(1 << 16); got != "↻ api restarted · go run ./api" {
 		t.Errorf("label = %q, want no build segment", got)
 	}
 }

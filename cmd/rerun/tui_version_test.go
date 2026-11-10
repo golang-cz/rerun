@@ -21,14 +21,7 @@ func TestVersionText(t *testing.T) {
 		want      string
 	}{
 		{"release tag", "v1.2.3", "", "rerun · v1.2.3"},
-		{"release tag ignores the age", "v1.2.3", "2020-01-01T00:00:00Z", "rerun · v1.2.3"},
-		{"dev just now", "dev-abc1234", "2026-01-02T03:04:00Z", "rerun · dev-abc1234 (just now)"},
-		{"dev minutes", "dev-abc1234", "2026-01-02T03:01:05Z", "rerun · dev-abc1234 (3m ago)"},
-		{"dev hours", "dev-abc1234", "2026-01-02T00:04:05Z", "rerun · dev-abc1234 (3h ago)"},
-		{"dev days", "dev-abc1234", "2025-12-31T03:04:05Z", "rerun · dev-abc1234 (2d ago)"},
-		{"dev without a stamp", "dev-abc1234", "", "rerun · dev-abc1234"},
-		{"dev with a bad stamp", "dev-abc1234", "yesterday", "rerun · dev-abc1234"},
-		{"future stamp", "dev-abc1234", "2027-01-02T03:04:05Z", "rerun · dev-abc1234 (just now)"},
+		{"dev build", "dev-abc1234", "2026-01-02T03:01:05Z", "rerun · dev-abc1234"},
 		{"unbuilt", "", "", "rerun · dev"},
 		{"bare dev", "dev", "", "rerun · dev"},
 	}
@@ -128,5 +121,40 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 		if strings.Contains(bottom, tg.Name) {
 			t.Fatalf("version line %q shows target %q", bottom, tg.Name)
 		}
+	}
+}
+
+// With t on the version row ends in the build's age, flush right; t off or no buildTime hides it.
+func TestVersionRowShowsBuildAgeWithTimes(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	cases := []struct {
+		name      string
+		times     bool
+		buildTime string
+		want      string
+	}{
+		{"times on", true, "2026-01-02T02:53:05Z", "11m ago"},
+		{"times off", false, "2026-01-02T02:53:05Z", ""},
+		{"empty buildTime", true, "", ""},
+		{"bad buildTime", true, "yesterday", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.version, m.buildTime, m.now, m.showTimes = "dev-abc1234", tc.buildTime, now, tc.times
+			got := plainLine(m.versionCell(40))
+			if displayWidth(got) != 40 {
+				t.Fatalf("cell width = %d: %q", displayWidth(got), got)
+			}
+			if tc.want == "" {
+				if strings.Contains(got, "ago") {
+					t.Fatalf("cell = %q, want no age", got)
+				}
+				return
+			}
+			if !strings.HasSuffix(got, tc.want) {
+				t.Fatalf("cell = %q, want it to end in %q", got, tc.want)
+			}
+		})
 	}
 }

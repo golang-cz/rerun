@@ -101,7 +101,7 @@ func TestMakeOnlyConfigOpensTheFinderOnFirstFrame(t *testing.T) {
 // listed reports whether the named target has a row in the list as drawn.
 func listed(m *tuiModel, name string) bool {
 	for _, r := range m.listRows() {
-		if !r.header && m.targets[r.target].spec.Name == name {
+		if !r.header && !r.more && m.targets[r.target].spec.Name == name {
 			return true
 		}
 	}

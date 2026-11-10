@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/fsnotify/fsnotify"
 )
 
 // autoGroup is a target in the `ops` group that auto-hides when idle.
@@ -181,15 +182,33 @@ func TestHDoesNothingWithoutHiddenMembers(t *testing.T) {
 	}
 }
 
-func TestFoldedHeaderCountsHiddenMembers(t *testing.T) {
+func TestCollapsedHeaderRendersAsTwoRows(t *testing.T) {
 	m := autoHideFixture(t)
 	m.toggleCollapse(0)
-	if got, want := nestedRows(m), []string{"▸ops"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▸ops", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("folded rows = %v, want %v", got, want)
 	}
 	leftW, _ := m.layoutWidths()
-	if line := ansi.Strip(m.leftLine(1, leftW)); !strings.Contains(line, "· 2 hidden") || strings.Contains(line, "hidd ") {
-		t.Fatalf("folded header = %q, want the hidden count", line)
+	if line := ansi.Strip(m.leftLine(1, leftW)); strings.Contains(line, "hidden") {
+		t.Fatalf("folded header = %q, want no hidden suffix", line)
+	}
+	if line := strings.TrimSpace(ansi.Strip(m.leftLine(2, leftW))); line != "(+) 2 more" {
+		t.Fatalf("more row = %q", line)
+	}
+}
+
+func TestEnterOnCollapsedMoreRowExpandsGroup(t *testing.T) {
+	m := autoHideFixture(t)
+	m.toggleCollapse(0)
+	m.cursor = 1
+	m.enterRow()
+	if m.collapsed["ops"] || m.revealed["ops"] {
+		t.Fatalf("collapsed = %v, revealed = %v, want expanded and not revealed", m.collapsed["ops"], m.revealed["ops"])
+	}
+	m.toggleCollapse(0)
+	m.cursor = 0
+	if !m.treeRight() || m.collapsed["ops"] {
+		t.Fatal("-> on the header did not expand the group")
 	}
 }
 
@@ -304,5 +323,32 @@ func TestHOnImportHeaderTogglesEverySubGroup(t *testing.T) {
 	toggle()
 	if got := shown(); slices.Contains(got, "omsx/api") || slices.Contains(got, "omsx/web") {
 		t.Fatalf("h with all revealed: listed %v, want all hidden", got)
+	}
+}
+
+// Every value of the right column ends flush at the list's right edge.
+func TestRightColumnValuesShareOneRightEdge(t *testing.T) {
+	a, b, c := target("run"), target("done"), target("man")
+	for _, tg := range []*Target{&a, &b, &c} {
+		tg.Schema = "ops"
+	}
+	m := newTestModel(t, a, b, c)
+	m.showTimes = true
+	m.now = spawnClock
+	m.targets[0].state = stateRunning
+	m.targets[1].state, m.targets[1].exitCode, m.targets[1].exitLabel = stateExited, 0, "exit 0"
+	m.targets[2].state = stateManual
+	changeAt(m, "run", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.now = spawnClock.Add(4 * time.Second)
+	m.frame()
+	leftW, _ := m.layoutWidths()
+	for y, want := range []string{"idle", "1/3", "4s", "exit 0", "manual"} {
+		line := strings.TrimRight(ansi.Strip(m.leftLine(y, leftW)), " ")
+		if y == 0 {
+			want = "4s"
+		}
+		if displayWidth(ansi.Strip(m.leftLine(y, leftW))) != leftW || !strings.HasSuffix(strings.TrimRight(ansi.Strip(m.leftLine(y, leftW)), " "), want) {
+			t.Fatalf("row %d = %q, want %q flush at column %d", y, line, want, leftW)
+		}
 	}
 }

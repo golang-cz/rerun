@@ -249,6 +249,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleList()
 	case "t":
 		m.showTimes = !m.showTimes
+		m.dispDirty, m.vpDirty = true, true // the pane's rules gain or lose their clock times
 
 	case "h":
 		if m.listFocused() {
@@ -629,7 +630,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if r.more {
 		m.cursor = row
-		m.setRevealed(r.schema, !r.revealed)
+		m.expandMore(r)
 		m.cursor = m.indexOfKey(m.rowKey(r))
 		return m, nil
 	}

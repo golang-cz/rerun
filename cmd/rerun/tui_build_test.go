@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,16 +80,16 @@ func TestBuildStatusTextPerState(t *testing.T) {
 		t.Fatalf("idle row = %q, want the uptime", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "4s") || strings.Count(got, "⚙") != 1 {
-		t.Fatalf("building row = %q, want the run mark, 4s, and one ⚙", got)
+	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "4s") || spinCount(got) != 1 {
+		t.Fatalf("building row = %q, want the run mark, 4s, and one spinner", got)
 	}
 	m.now = buildAt.Add(64 * time.Second)
 	if got := row(); !strings.HasSuffix(got, "1m04s") {
 		t.Fatalf("long build row = %q, want 1m04s", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
-	if got := row(); !strings.HasSuffix(got, "✗ build") || strings.Count(got, "⚙") != 0 || strings.Count(got, "✗") != 3 {
-		t.Fatalf("failed row = %q, want ✗ glyph, ✗ cell and ✗ build, no ⚙", got)
+	if got := row(); !strings.HasSuffix(got, "✗ build") || spinCount(got) != 0 || strings.Count(got, "✗") != 3 {
+		t.Fatalf("failed row = %q, want ✗ glyph, ✗ cell and ✗ build, no spinner", got)
 	}
 }
 
@@ -111,7 +112,7 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 	}
 }
 
-// The duration must start in the same cell whether the gear shows or not.
+// The duration must end at the right edge whether the spinner shows or not.
 func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.showTimes = true
@@ -125,12 +126,12 @@ func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
 		if idx < 0 {
 			t.Fatalf("row = %q, want the 4s duration", line)
 		}
-		return displayWidth(line[:idx])
+		return displayWidth(line[:idx+len("4s")])
 	}
 	idle := durCol()
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if building := durCol(); building != idle || idle != leftW-statusW {
-		t.Fatalf("duration column: idle = %d, building = %d, want both %d", idle, building, leftW-statusW)
+	if building := durCol(); building != idle || idle != leftW {
+		t.Fatalf("duration column: idle = %d, building = %d, want both %d", idle, building, leftW)
 	}
 }
 
@@ -675,8 +676,8 @@ func TestBuildCellShowsGearOnlyWhileBuilding(t *testing.T) {
 		t.Fatalf("idle build cell = %+v, want blank", c)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if c := buildCell(tg, m.now); c.text != "⚙" || c.color != runYellow {
-		t.Fatalf("building cell = %+v, want an orange ⚙", c)
+	if c := buildCell(tg, m.now); !slices.Contains(spinnerFrames, c.text) || c.color != runYellow {
+		t.Fatalf("building cell = %+v, want an orange spinner", c)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	if c := buildCell(tg, m.now); c.text != "✗" || c.color != runRed {
@@ -701,8 +702,8 @@ func TestBuildCellKeepsNameWidth(t *testing.T) {
 		t.Fatalf("leftW = %d while building, want %d", w, leftW)
 	}
 	at := func(line string) int { return displayWidth(line[:strings.Index(line, "api")]) }
-	if at(idle) != at(building) || strings.Contains(idle, "⚙") || !strings.Contains(building, "⚙") {
-		t.Fatalf("idle %q and building %q: want the name in one cell, the gear only while building", idle, building)
+	if at(idle) != at(building) || spinCount(idle) != 0 || spinCount(building) == 0 {
+		t.Fatalf("idle %q and building %q: want the name in one cell, the spinner only while building", idle, building)
 	}
 }
 
@@ -714,7 +715,7 @@ func TestBuildCellAlignsAfterLongestName(t *testing.T) {
 	m.frame()
 	cellAt := func(i int) int {
 		line := leftLineRaw(m, i)
-		return displayWidth(line[:strings.Index(line, "⚙")])
+		return displayWidth(line[:spinIndex(line)])
 	}
 	want := displayWidth("  service 2") + 1
 	if got := cellAt(0); got != want {
@@ -723,7 +724,7 @@ func TestBuildCellAlignsAfterLongestName(t *testing.T) {
 	if got := cellAt(2); got != want {
 		t.Fatalf("svc3 cell at %d, want %d", got, want)
 	}
-	if strings.Contains(leftLineRaw(m, 1), "⚙") {
+	if spinCount(leftLineRaw(m, 1)) != 0 {
 		t.Fatal("idle row shows a build cell")
 	}
 	leftW, _ := m.layoutWidths()
@@ -736,4 +737,23 @@ func TestBuildCellAlignsAfterLongestName(t *testing.T) {
 			t.Fatalf("row %d gap after the build cell = %q, want blank cells before the times", i, gap)
 		}
 	}
+}
+
+// spinCount is how many spinner frames a rendered row holds.
+func spinCount(s string) int {
+	n := 0
+	for _, f := range spinnerFrames {
+		n += strings.Count(s, f)
+	}
+	return n
+}
+
+// spinIndex is the byte offset of the row's spinner frame, or -1.
+func spinIndex(s string) int {
+	for _, f := range spinnerFrames {
+		if i := strings.Index(s, f); i >= 0 {
+			return i
+		}
+	}
+	return -1
 }

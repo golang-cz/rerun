@@ -73,7 +73,7 @@ type restartRule struct {
 
 // label cuts meta from the end so the name survives; renderSep cuts the command.
 func (r *restartRule) label(maxW int) string {
-	segs := []string{fmt.Sprintf("↻ %s restarted %s", r.name, r.at.Format("15:04:05"))}
+	segs := []string{fmt.Sprintf("↻ %s restarted", r.name)}
 	if f := filesSummary(r.files); f != "" {
 		segs = append(segs, f)
 	}
@@ -185,8 +185,8 @@ func buildReason(ev event) string {
 }
 
 // startedRule names the run and its command; a command too long for the pane expands to the full one.
-func startedRule(name string, at time.Time, cmd string) sepLine {
-	s := sepLine{label: fmt.Sprintf("▶ %s started %s", name, at.Format("15:04:05"))}
+func startedRule(name, cmd string) sepLine {
+	s := sepLine{label: fmt.Sprintf("▶ %s started", name)}
 	if cmd != "" {
 		s.label += " · " + cmd
 		s.full = cmd

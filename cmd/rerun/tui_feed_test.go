@@ -207,20 +207,6 @@ func TestFeedCreatedDirectoryHeadsItsFiles(t *testing.T) {
 	}
 }
 
-// A file-triggered restart reverses the target's glyph for about a second.
-func TestRestartFlashExpires(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
-
-	web := m.targets[0]
-	if !web.flashing(spawnClock.Add(500 * time.Millisecond)) {
-		t.Fatalf("glyph not flashing 500ms after the restart")
-	}
-	if web.flashing(spawnClock.Add(1500 * time.Millisecond)) {
-		t.Fatalf("glyph still flashing 1.5s after the restart")
-	}
-}
-
 // A stopped target's changes still feed the feed, but it restarted nothing,
 // so the batch names no target.
 func TestStoppedTargetFeedsTheFeedWithoutNamingItself(t *testing.T) {

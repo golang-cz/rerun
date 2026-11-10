@@ -39,6 +39,7 @@ type listRow struct {
 	// more is the (+) N hidden row that shows or hides a block's auto-hidden members.
 	more     bool
 	revealed bool // the block's hidden members are shown, so the row reads (−) hide N
+	unfold   bool // the more row under a collapsed header: it expands the header
 	// dim is an auto-hidden target the list shows because its group is revealed.
 	dim bool
 }
@@ -202,6 +203,9 @@ func (m *tuiModel) listRows() []listRow {
 		}
 		if r.header {
 			out = append(out, r)
+			if n := m.hiddenIn(r.members); r.collapsed && n > 0 {
+				out = append(out, listRow{schema: r.schema, target: -1, depth: r.depth + 1, more: true, unfold: true, label: fmt.Sprintf("(+) %d more", n)})
+			}
 			continue
 		}
 		if hidden := m.autoHidden(r.target); !hidden || m.revealed[r.schema] {
@@ -474,6 +478,13 @@ func (m *tuiModel) treeLeft() {
 		m.setRevealed(r.schema, false)
 		return
 	}
+	if r.more && r.unfold {
+		if i := m.enclosingHeader(m.cursor); i >= 0 {
+			m.cursor = i
+			m.liveSelect()
+		}
+		return
+	}
 	if i := m.enclosingHeader(m.cursor); i >= 0 {
 		m.cursor = i
 		m.liveSelect()
@@ -483,6 +494,10 @@ func (m *tuiModel) treeLeft() {
 // treeRight is → on the list: unfold a folded header. It reports false on any other row.
 func (m *tuiModel) treeRight() bool {
 	r, ok := m.cursorRow()
+	if ok && r.more && r.unfold {
+		m.toggleCollapse(m.headerIndex(r.schema))
+		return true
+	}
 	if ok && r.more && !r.revealed {
 		m.setRevealed(r.schema, true)
 		return true
@@ -604,7 +619,7 @@ func (m *tuiModel) toggleRow(r listRow) {
 // enterRow is enter on the list: focuses the pane, starting a stopped row first.
 func (m *tuiModel) enterRow() {
 	if r, ok := m.cursorRow(); ok && r.more {
-		m.setRevealed(r.schema, !r.revealed)
+		m.expandMore(r)
 		return
 	}
 	if r, ok := m.cursorRow(); ok {
@@ -617,6 +632,20 @@ func (m *tuiModel) enterRow() {
 		m.applyRowScope(r)
 	}
 	m.focusPane()
+}
+
+// expandMore is enter or a click on a `(+) N more` row: it unfolds a collapsed header, else toggles the block's hidden members.
+func (m *tuiModel) expandMore(r listRow) {
+	if r.unfold {
+		m.toggleCollapse(m.headerIndex(r.schema))
+		return
+	}
+	m.setRevealed(r.schema, !r.revealed)
+}
+
+// headerIndex is the list index of a group's header, or -1 when it is not listed.
+func (m *tuiModel) headerIndex(schema string) int {
+	return slices.IndexFunc(m.listRows(), func(r listRow) bool { return r.header && r.schema == schema })
 }
 
 // stopRow is `s`: stops the focused pane's scope, else the cursor's row. Never a toggle.
@@ -841,7 +870,6 @@ func (m *tuiModel) muteTargets(members []int) {
 }
 
 // schemaLine draws `▾ backend` with its running/total count and its unsaved-columns marker.
-// A folded header with hidden members trades its count for `· N hidden`, which fits the status cell.
 func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	running := 0
 	for _, i := range r.members {
@@ -858,14 +886,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	case m.startsOnSpace(r.members):
 		glyph = playGlyph
 	}
-	n := m.hiddenIn(r.members)
-	folded := r.collapsed && n > 0
-	suffix := fmt.Sprintf("· %d hidden", n)
 	name := ellipsizeMiddle(r.label, nameW)
-	if folded && !m.showTimes {
-		tail := truncate(" "+suffix, nameW)
-		name = ellipsizeMiddle(r.label, max(0, nameW-displayWidth(tail))) + tail
-	}
 	segs := []seg{
 		{text: strings.Repeat(" ", indent)},
 		{text: glyph, faint: glyph == playGlyph},
@@ -875,11 +896,9 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		{text: " "},
 	}
 	if m.showTimes {
-		status := fmt.Sprintf("%d/%d", running, len(r.members))
-		if folded {
-			status = suffix
-		}
-		segs = append(segs, seg{text: padRight(truncate(status, statusW), statusW)})
+		// The header has no build cell, so the fill pushes its count to the rows' right edge.
+		fill := max(0, leftW-(indent+2+nameW+2+1)-statusW)
+		segs = append(segs, seg{text: strings.Repeat(" ", fill)}, seg{text: timesCell(fmt.Sprintf("%d/%d", running, len(r.members)))})
 	}
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }

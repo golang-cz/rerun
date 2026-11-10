@@ -21,14 +21,14 @@ func hintRow(m *tuiModel) string {
 // With no batch in the last 10 seconds the row reads idle, and with no batch at all too.
 func TestFsHintReadsIdleWithoutBatches(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	if got := hintRow(m); got != "idle" {
+	if got := hintRow(m); got != "fs idle" {
 		t.Fatalf("hint = %q, want idle with no batches", got)
 	}
 
 	changeAt(m, "web", spawnClock.Add(-2*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
 	m.now = spawnClock
-	if got := hintRow(m); got != "idle" {
-		t.Fatalf("hint after the batch aged out = %q, want idle", got)
+	if got := hintRow(m); got != "fs idle" {
+		t.Fatalf("hint after the batch aged out = %q, want fs idle", got)
 	}
 }
 
@@ -151,8 +151,8 @@ func TestFsHintShortensTheFailureText(t *testing.T) {
 	}
 
 	m.now = spawnClock.Add(2 * time.Minute)
-	if got := hintRow(m); got != "idle" {
-		t.Fatalf("hint after the error batch aged out = %q, want idle", got)
+	if got := hintRow(m); got != "fs idle" {
+		t.Fatalf("hint after the error batch aged out = %q, want fs idle", got)
 	}
 }
 
@@ -209,7 +209,7 @@ func TestHiddenListWatchFailureShowsOnBottomLine(t *testing.T) {
 	}
 }
 
-// With times shown, the age starts in the times column, where the rows' durations start.
+// With times shown, the age ends at the right edge, where the rows' durations end.
 func TestFsHintAgeLinesUpWithRowTimes(t *testing.T) {
 	// The long target name widens the column, so the file name is not cut.
 	m := newTestModel(t, buildTarget("backoffice-webapp"))
@@ -225,15 +225,15 @@ func TestFsHintAgeLinesUpWithRowTimes(t *testing.T) {
 		if idx < 0 {
 			t.Fatalf("line %q has no 4s", line)
 		}
-		return displayWidth(line[:idx])
+		return displayWidth(line[:idx+len("4s")])
 	}
 	hint := hintRow(m)
 	row := leftLineRaw(m, 0)
 	if !strings.HasPrefix(hint, "server.gen.go") || !strings.HasSuffix(hint, "4s") {
 		t.Fatalf("hint = %q, want the file then the 4s age", hint)
 	}
-	if col(hint) != leftW-statusW || col(row) != leftW-statusW {
-		t.Fatalf("hint age at %d, row duration at %d, want both at %d", col(hint), col(row), leftW-statusW)
+	if col(hint) != leftW || col(row) != leftW {
+		t.Fatalf("hint age ends at %d, row duration at %d, want both at %d", col(hint), col(row), leftW)
 	}
 }
 

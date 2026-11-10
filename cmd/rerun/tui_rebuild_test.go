@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -118,51 +119,115 @@ func TestFsHintGoesIdleAfterTenSeconds(t *testing.T) {
 		t.Fatalf("hint 9s after the batch = %q, want a.go", got)
 	}
 	m.now = spawnClock.Add(11 * time.Second)
-	if got := hintRow(m); got != "idle" {
-		t.Fatalf("hint 11s after the batch = %q, want idle", got)
+	if got := hintRow(m); got != "fs idle" {
+		t.Fatalf("hint 11s after the batch = %q, want fs idle", got)
 	}
 }
 
-// A file-triggered build flashes only its gear, for one second.
-func TestBuildFlashReversesOnlyTheGear(t *testing.T) {
+// tinted is the foreground color of a target's name at one instant.
+func tinted(tg *tuiTarget, now time.Time) string { return tg.nameColor(now) }
+
+// Every build start tints the name orange for 2 s and shows the spinner while it builds.
+func TestBuildStartTintsNameOrangeThenPlain(t *testing.T) {
+	for name, files := range map[string][]string{"file-triggered": {"a.go"}, "manual": nil} {
+		t.Run(name, func(t *testing.T) {
+			m := newTestModel(t, buildTarget("api"))
+			m.now = buildAt
+			tg := m.targets[0]
+			m.applyEvents([]event{buildStart("api", buildAt, files...)})
+			if got := tinted(tg, buildAt.Add(time.Second)); got != runYellow {
+				t.Fatalf("name 1s into a build = %q, want orange", got)
+			}
+			if got := tinted(tg, buildAt.Add(3*time.Second)); got != "" {
+				t.Fatalf("name 3s into a build = %q, want plain", got)
+			}
+			c := buildCell(tg, buildAt.Add(3*time.Second))
+			if !slices.Contains(spinnerFrames, c.text) || c.color != runYellow {
+				t.Fatalf("cell while building = %+v, want an orange spinner frame", c)
+			}
+			if buildCell(tg, buildAt.Add(4*time.Second)).text == c.text {
+				t.Fatal("spinner did not advance with the clock")
+			}
+		})
+	}
+}
+
+// A passed build leaves the name plain and shows a green ✓ for 10 s.
+func TestBuildOKNamePlainAndCheckFor10s(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	tg := m.targets[0]
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	rbBuildDone(m, "api", buildAt.Add(time.Second))
+	at := buildAt.Add(time.Second)
+	if got := tinted(tg, at); got != "" {
+		t.Fatalf("name after OK = %q, want plain", got)
+	}
+	if c := buildCell(tg, at.Add(9*time.Second)); c.text != "✓" || c.color != runGreen {
+		t.Fatalf("cell 9s after OK = %+v, want a green ✓", c)
+	}
+	if c := buildCell(tg, at.Add(11*time.Second)); c.text != " " {
+		t.Fatalf("cell 11s after OK = %+v, want blank", c)
+	}
+}
+
+// A failed build keeps the name red until the next build; red beats orange and green.
+func TestFailedBuildNameRedBeatsOtherTints(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.now = buildAt
 	tg := m.targets[0]
-	m.applyEvents([]event{buildStart("api", buildAt, "a.go")})
-	if c := buildCell(tg, buildAt.Add(500*time.Millisecond)); !c.reverse || c.text != "⚙" {
-		t.Fatalf("gear 500ms into a file-triggered build = %+v, want a reversed ⚙", c)
+	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
+	tg.restartedAt = buildAt
+	if got := tinted(tg, buildAt.Add(500*time.Millisecond)); got != runRed {
+		t.Fatalf("name right after a failure = %q, want red over green", got)
 	}
-	if c := buildCell(tg, buildAt.Add(1500*time.Millisecond)); c.reverse || c.text != "⚙" {
-		t.Fatalf("gear 1.5s into a file-triggered build = %+v, want a plain ⚙", c)
+	if got := tinted(tg, buildAt.Add(time.Hour)); got != runRed {
+		t.Fatalf("name an hour later = %q, want red", got)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt.Add(time.Hour))})
+	if got := tinted(tg, buildAt.Add(time.Hour+time.Second)); got != runYellow {
+		t.Fatalf("name in the next build = %q, want orange", got)
 	}
 }
 
-// A manual build, with no file behind it, does not flash its gear.
-func TestManualBuildDoesNotFlash(t *testing.T) {
+// A loop paints the name red, beating a fresh restart's green.
+func TestLoopNameRed(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.now = buildAt
-	m.applyEvents([]event{buildStart("api", buildAt)})
-	if c := buildCell(m.targets[0], buildAt.Add(100*time.Millisecond)); c.reverse {
-		t.Fatalf("gear of a manual build = %+v, want no flash", c)
+	tg := m.targets[0]
+	tg.restartedAt = buildAt
+	m.applyEvent(event{kind: evLoop, target: "api", line: "a.go", files: []string{"a.go"}})
+	if got := tinted(tg, buildAt); got != runRed {
+		t.Fatalf("name while looping = %q, want red", got)
 	}
 }
 
-// A restart flashes the state glyph alone; the name and the rest of the row stay plain.
-func TestRestartFlashIsTheGlyphOnly(t *testing.T) {
-	m := newTestModel(t, target("web"), target("api"))
-	m.cursor = 1 // keep the cursor off the flashing row, so its own reverse cannot mix in
+// A file restart tints the name green for 2 s; the glyph and build cell stay as they were.
+func TestRestartTintsNameGreen(t *testing.T) {
+	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	web := m.targets[0]
+	if got := tinted(web, spawnClock.Add(time.Second)); got != runGreen {
+		t.Fatalf("name 1s after a restart = %q, want green", got)
+	}
+	if got := tinted(web, spawnClock.Add(3*time.Second)); got != "" {
+		t.Fatalf("name 3s after a restart = %q, want plain", got)
+	}
+}
 
-	m.now = spawnClock.Add(500 * time.Millisecond)
+// Only the cursor and selections draw in reverse: no list row flashes.
+func TestNoListRowIsReversedOffTheCursor(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), buildTarget("web"))
+	m.cursor = 1
+	m.now = buildAt
+	changeAt(m, "api", buildAt, map[string]fsnotify.Op{"a.go": fsnotify.Write})
+	m.applyEvents([]event{buildStart("api", buildAt, "a.go")})
+	m.now = buildAt.Add(500 * time.Millisecond)
 	m.frame()
 	leftW, _ := m.layoutWidths()
-	line := m.leftLine(1, leftW) // web is the first row under the fs hint
-	if got := reversedRun(line); got != "●" {
-		t.Fatalf("reversed run while the restart flashes = %q, want the state glyph alone", got)
-	}
-	m.now = spawnClock.Add(1500 * time.Millisecond)
-	if got := reversedRun(m.leftLine(1, leftW)); got != "" {
-		t.Fatalf("reversed run 1.5s after the restart = %q, want none", got)
+	for y := 1; y <= 2; y++ {
+		if got := reversedRun(m.leftLine(y, leftW)); got != "" {
+			t.Fatalf("row %d reversed run = %q, want none", y, got)
+		}
 	}
 }
 

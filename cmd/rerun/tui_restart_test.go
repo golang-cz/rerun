@@ -31,15 +31,15 @@ func TestRestartRuleTextAndOmissions(t *testing.T) {
 		rr   *restartRule
 		want string
 	}{
-		{"all segments", full, "↻ api restarted 15:04:05 · handler.go +2 · built 6s · was up 3m12s"},
+		{"all segments", full, "↻ api restarted · handler.go +2 · built 6s · was up 3m12s"},
 		{"no files", &restartRule{name: "api", at: restartAt, built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second},
-			"↻ api restarted 15:04:05 · built 6s · was up 3m12s"},
+			"↻ api restarted · built 6s · was up 3m12s"},
 		{"no build", &restartRule{name: "api", at: restartAt, files: []string{"a.go"}, upFor: 3*time.Minute + 12*time.Second},
-			"↻ api restarted 15:04:05 · a.go · was up 3m12s"},
+			"↻ api restarted · a.go · was up 3m12s"},
 		{"no previous run", &restartRule{name: "api", at: restartAt, files: []string{"a.go"}, built: 6 * time.Second},
-			"↻ api restarted 15:04:05 · a.go · built 6s"},
+			"↻ api restarted · a.go · built 6s"},
 		{"one file", &restartRule{name: "api", at: restartAt, files: []string{"/x/only.go"}},
-			"↻ api restarted 15:04:05 · only.go"},
+			"↻ api restarted · only.go"},
 	}
 	for _, c := range cases {
 		if got := c.rr.label(200); got != c.want {
@@ -48,14 +48,14 @@ func TestRestartRuleTextAndOmissions(t *testing.T) {
 	}
 }
 
-func TestRestartRuleTruncatesRestLastAndKeepsNameAndTime(t *testing.T) {
+func TestRestartRuleTruncatesRestLastAndKeepsName(t *testing.T) {
 	full := &restartRule{name: "api", at: restartAt, files: []string{"/src/handler.go", "/src/a.go"},
 		built: 6 * time.Second, upFor: 3*time.Minute + 12*time.Second}
-	headFiles := "↻ api restarted 15:04:05 · handler.go +1"
+	headFiles := "↻ api restarted · handler.go +1"
 	if got := full.label(displayWidth(headFiles)); got != headFiles {
 		t.Errorf("label at name+time+files width = %q, want %q (the rest dropped first)", got, headFiles)
 	}
-	if got := full.label(displayWidth(headFiles) - 1); got != "↻ api restarted 15:04:05" {
+	if got := full.label(displayWidth(headFiles) - 1); got != "↻ api restarted" {
 		t.Errorf("one cell narrower = %q, want the files segment dropped as a unit", got)
 	}
 	if got := full.label(10); !strings.HasPrefix(got, "↻ api") {
@@ -120,7 +120,7 @@ func TestFirstStartRuleNamesItsBuild(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	m.applyEvents([]event{{kind: evStarted, target: "api", at: restartAt, buildDur: 6 * time.Second}})
 	m.frame()
-	if rules := rawRules(m); len(rules) != 1 || !strings.HasPrefix(rules[0], "▶ api started 15:04:05") || strings.Contains(rules[0], "built") {
+	if rules := rawRules(m); len(rules) != 1 || !strings.HasPrefix(rules[0], "▶ api started") || strings.Contains(rules[0], "built") {
 		t.Fatalf("rules = %q, want the first start without its build", rules)
 	}
 }

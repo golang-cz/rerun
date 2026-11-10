@@ -89,11 +89,10 @@ func newTUIStyles(isDark bool) tuiStyles {
 
 // seg is one styled piece of a row. color == "" keeps the row's own style.
 type seg struct {
-	text    string
-	color   string
-	link    string
-	faint   bool
-	reverse bool
+	text  string
+	color string
+	link  string
+	faint bool
 }
 
 // rect is a cell area on screen, used for mouse hit testing.
@@ -520,6 +519,12 @@ func (m *tuiModel) buildColW(leftW int) int {
 	return min(w, m.nameWidth(leftW))
 }
 
+// timesCell right-aligns a times-column value in statusW cells, so every row's value ends at the list's right edge.
+func timesCell(s string) string {
+	s = truncate(s, statusW)
+	return strings.Repeat(" ", statusW-displayWidth(s)) + s
+}
+
 // marker is the two cells after a name: `*` when its columns await ctrl+s, else blank,
 // so the status never shifts.
 func marker(dirty bool) string {
@@ -572,56 +577,48 @@ func (m *tuiModel) scrollList(delta int) {
 // help cue, hint styled and left aligned, with plain padding out to the
 // divider column. A column too narrow for the cue keeps the bare version.
 func (m *tuiModel) versionCell(leftW int) string {
+	age, ageOK := m.buildAgeText()
+	w := leftW
+	if m.showTimes && ageOK && leftW-statusW >= 8 {
+		w = leftW - statusW
+	} else {
+		age = ""
+	}
 	cue := ""
 	switch {
-	case leftW >= 16:
+	case w >= 16:
 		cue = " · ? help"
-	case leftW >= 8:
+	case w >= 8:
 		cue = " · ?"
 	}
 	version := m.versionText()
-	if displayWidth(version)+displayWidth(cue) > leftW {
+	if displayWidth(version)+displayWidth(cue) > w {
 		version = strings.TrimPrefix(version, "rerun · ") // a narrow column keeps the version, not the name
 	}
-	text := strings.TrimRight(ellipsize(version, leftW-displayWidth(cue)), " ") + cue
-	return m.styles.hint.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
+	text := strings.TrimRight(ellipsize(version, w-displayWidth(cue)), " ") + cue
+	if age == "" {
+		return m.styles.hint.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
+	}
+	text += strings.Repeat(" ", max(0, w-displayWidth(text))) + timesCell(age)
+	return m.styles.hint.Render(text)
 }
 
-// versionText names the binary: the release tag, the dev build with its age,
-// or the plain dev fallback. A missing or unparseable buildTime drops the age.
+// versionText names the binary: the release tag, or the dev build, or the plain dev fallback.
 func (m *tuiModel) versionText() string {
 	switch {
-	case strings.HasPrefix(m.version, "v"):
-		return "rerun · " + m.version
-	case strings.HasPrefix(m.version, "dev-"):
-		if age, ok := buildAge(m.buildTime, m.now); ok {
-			return fmt.Sprintf("rerun · %s (%s)", m.version, age)
-		}
+	case strings.HasPrefix(m.version, "v"), strings.HasPrefix(m.version, "dev-"):
 		return "rerun · " + m.version
 	}
 	return "rerun · dev"
 }
 
-// buildAge renders how long ago the binary was built. A build time in the
-// future reads as `just now`, the way a clock skew should.
-func buildAge(buildTime string, now time.Time) (string, bool) {
-	built, err := time.Parse(time.RFC3339, buildTime)
+// buildAgeText is how long ago the binary was built, like `11m ago`; false when buildTime is empty or unparsable.
+func (m *tuiModel) buildAgeText() (string, bool) {
+	built, err := time.Parse(time.RFC3339, m.buildTime)
 	if err != nil {
 		return "", false
 	}
-	d := now.Sub(built)
-	if d < 0 {
-		d = 0
-	}
-	switch {
-	case d < time.Minute:
-		return "just now", true
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes())), true
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours())), true
-	}
-	return fmt.Sprintf("%dd ago", int(d.Hours())/24), true
+	return fmtDur(m.now.Sub(built)) + " ago", true
 }
 
 // opGlyph is the fsnotify op as one glyph: created, written or renamed, and
@@ -672,7 +669,7 @@ func (m *tuiModel) leftLine(y, leftW int) string {
 	return m.targetLine(idx, r, leftW)
 }
 
-// moreLine draws a block's `(+) N hidden` row, which the cursor and the mouse can act on.
+// moreLine draws a block's `(+) N more` row, which the cursor and the mouse can act on.
 func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	style := m.styles.muted
 	if row == m.cursor {
@@ -681,10 +678,10 @@ func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
-// feedHintCell is the fs row: a rebuild loop's file in red, else the newest batch's file, `idle` past recentWindow.
+// feedHintCell is the fs row: a rebuild loop's file in red, else the newest batch's file, `fs idle` past recentWindow.
 func (m *tuiModel) feedHintCell(leftW int) string {
 	style := m.styles.hint
-	text := "idle"
+	text := "fs idle"
 	if t, ok := m.loopingTarget(); ok {
 		_, name := feedSplit(m.feedPath(t.loopFile, t.spec))
 		text = ellipsize("loop: "+fitFsName(name, "", leftW-len("loop: ")), leftW)
@@ -712,7 +709,7 @@ func (m *tuiModel) fsHintText(b feedBatch, leftW int) string {
 	}
 	col := leftW - statusW
 	// The blank cell before the age column keeps the name off the age.
-	return padRight(fitFsName(name, more, col-1), col) + padRight(fmtDur(m.now.Sub(b.at)), statusW)
+	return padRight(fitFsName(name, more, col-1), col) + timesCell(fmtDur(m.now.Sub(b.at)))
 }
 
 // fitFsName fits a name and its `+N` into w cells, cutting the stem before the extension.
@@ -797,9 +794,9 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
 	}
 	segs = append(segs,
-		seg{text: t.glyph(), color: stateColor(t), reverse: t.flashing(m.now)},
+		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
-		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link()},
+		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)},
 		seg{text: " "},
 		buildCell(t, m.now),
 		seg{text: marker(m.targetDirty(t))},
@@ -808,7 +805,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		// The times column stays on the right edge, however short the names are.
 		fill := max(0, leftW-statusW-m.buildColW(leftW)-6)
 		segs = append(segs, seg{text: strings.Repeat(" ", fill)})
-		segs = append(segs, seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)})
+		segs = append(segs, seg{text: timesCell(m.status(t)), color: statusColor(t)})
 	}
 	style := m.rowStyle(row, r)
 	if r.dim && row != m.cursor {
@@ -913,13 +910,16 @@ func stateColor(t *tuiTarget) string {
 	return colorGray
 }
 
+// spinnerFrames is the braille spinner a build shows, one frame per tick.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // buildCell is the build indicator; it stays reserved when idle, so the names never shift.
 func buildCell(t *tuiTarget, now time.Time) seg {
 	switch {
 	case t.looping():
 		return seg{text: "∞", color: runRed}
 	case t.building:
-		return seg{text: "⚙", color: runYellow, reverse: now.Before(t.buildFlashUntil)}
+		return seg{text: spinnerFrames[int(now.Unix()%int64(len(spinnerFrames)))], color: runYellow}
 	case t.buildFailed:
 		return seg{text: "✗", color: runRed}
 	case !t.buildOKAt.IsZero() && now.Sub(t.buildOKAt) <= recentWindow:
@@ -958,9 +958,6 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 		if s.faint {
 			style = style.Faint(true)
 		}
-		if s.reverse {
-			style = style.Reverse(true)
-		}
 		text := truncate(s.text, width-cells)
 		if text == "" {
 			continue
@@ -982,7 +979,8 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 // bottom line carries the new-lines marker, else a hint.
 func (m *tuiModel) rightLines(w int) []string {
 	headH := m.headerRows()
-	m.vp.SetWidth(w)
+	gutter := m.stampGutter()
+	m.vp.SetWidth(w - gutter)
 	m.vp.SetHeight(max(1, m.height-headH))
 	m.syncContent()
 
@@ -997,7 +995,7 @@ func (m *tuiModel) rightLines(w int) []string {
 	out := strings.Split(m.vp.View(), "\n")
 
 	if idx := m.paneCursorRow() - m.vp.YOffset(); m.paneFocus && m.paneLen() > 0 && idx >= 0 && idx < len(out) {
-		out[idx] = m.styles.paneCursor.Render(padRight(out[idx], w))
+		out[idx] = m.styles.paneCursor.Render(padRight(out[idx], w-gutter))
 	}
 
 	// Selection is line-granular and styled before the bottom line's own
@@ -1010,6 +1008,10 @@ func (m *tuiModel) rightLines(w int) []string {
 			}
 			out[row] = m.styles.marker.Render(out[row])
 		}
+	}
+
+	if gutter > 0 {
+		m.stampRows(out)
 	}
 
 	if len(out) > 0 {
@@ -1061,6 +1063,21 @@ func (m *tuiModel) rightLines(w int) []string {
 		lines = append(lines, strings.Repeat(" ", w))
 	}
 	return lines[:m.height]
+}
+
+// stampRows puts each line's arrival time in a dim gutter before its pane row. The time is drawn here,
+// outside the viewport, so selection, copy and search never see it; an expansion row stays blank.
+func (m *tuiModel) stampRows(out []string) {
+	blank := strings.Repeat(" ", stampW)
+	for i := range out {
+		gut := blank
+		if idx := m.vp.YOffset() + i; idx < m.paneLen() {
+			if r := m.rowInfo(idx); r.sub < 0 && r.raw < len(m.visibleAt) {
+				gut = m.stampText(m.visibleAt[r.raw]) + " "
+			}
+		}
+		out[i] = m.styles.hint.Render(gut) + out[i]
+	}
 }
 
 // selectionRange is the selected display-row range, or ok == false when
@@ -1377,10 +1394,10 @@ var helpKeys = [][2]string{
 var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
 	"click a group scopes to its targets; its ▾ folds it; the fs row opens the fs events",
-	"click a +N row reveals its hidden targets; a log line expands, or copies if plain",
+	"click a (+) N more row reveals its hidden targets or unfolds its group; a log line expands, or copies if plain",
 	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
 	"▶ on a group header: space starts its auto targets",
-	"orange ⚙ building  green ✓ built  red ✗ failed  red ∞ rebuild loop",
+	"orange ⠋ building  green ✓ built  red ✗ failed  red ∞ rebuild loop  name: orange build, green restart, red failed",
 	"● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",
 }

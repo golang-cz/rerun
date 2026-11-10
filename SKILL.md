@@ -71,7 +71,7 @@ the longest target so messages start in a fixed column. A `muted: true` field in
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
-More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name and the fs row's age. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
+More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows times: list durations, the fs hint age, the build age and every log line (`HH:MM:SS` in a dim column before it; selection, copy and search never include it). `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
 `/` or `f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
@@ -113,11 +113,11 @@ is refused with a footer error (edit rerun.yml by hand). Writes keep the file's 
 and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
-The build cell after each name shows an orange `⚙` while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. A file-triggered build flashes its `⚙` for a second, and a file-triggered restart flashes the row's state glyph for a second; the name and the rest of the row never reverse. A rebuild loop is the core detector's pause: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three. The modal never auto-opens.
+The build cell after each name shows an orange braille spinner while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. The name itself tints orange for 2 seconds after a build starts, green for 2 seconds after a file-triggered restart, and red while the build is failed or the target loops; red wins. Nothing draws in reverse except the cursor and a selection. A rebuild loop is the core detector's pause: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three. The modal never auto-opens.
 
 The fs row at the top of the left column names the newest change batch's first
-file (`server.go +2`, `+N` for the other files in the batch, `idle` past 10 seconds); `t`
-adds the batch's age in the times column, updates in place with no flash, and turns red `fs ! <error>`
+file (`server.go +2`, `+N` for the other files in the batch, `fs idle` past 10 seconds); `t`
+adds the batch's age in the times column, updates in place, and turns red `fs ! <error>`
 after a watcher error; a click (or `e`) opens the fs events modal. The modal lists the last 10 minutes' batches (events
 within 150ms of each other), newest first: the time, the first changed file with
 `+N` for the rest, and the targets the batch restarted after a 2-space gap and a `↻` mark.
@@ -135,7 +135,7 @@ A target that exits non-zero stays visible.
 
 - A target the pane shows stays listed, so it never vanishes under the cursor.
 - A group's last row counts its hidden members: `(+) 12 more`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) collapse`.
-- `h` shows or hides the cursor's group's hidden members from any row of that group. A collapsed header reads `▸ make · 2 running · 12 hidden`.
+- `h` shows or hides the cursor's group's hidden members from any row of that group. A collapsed header reads `▸ make` with its `running/total` count, and a dim `(+) 12 more` row under it that `→`, `enter` or a click expands.
 - `ctrl+k` still finds hidden targets. Running one makes it visible.
 - A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
 

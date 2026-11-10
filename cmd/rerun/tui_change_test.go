@@ -66,7 +66,7 @@ func TestRestartNamesTheTargetOnlyWhenItsSpawnLands(t *testing.T) {
 	if got := m.feed[0].targets; len(got) != 0 {
 		t.Fatalf("targets after a failed spawn = %v, want none", got)
 	}
-	if web := m.targets[0]; web.flashing(spawnClock.Add(500 * time.Millisecond)) {
-		t.Fatalf("a failed spawn flashed the row")
+	if web := m.targets[0]; web.nameColor(spawnClock.Add(500*time.Millisecond)) != "" {
+		t.Fatalf("a failed spawn tinted the name")
 	}
 }

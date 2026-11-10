@@ -414,7 +414,7 @@ func TestNewLinesCollectWhileFiltered(t *testing.T) {
 func TestMatchCountsCachedAndSkipRunRules(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "keep-0", "drop-0", "keep-1")
-	m.addRule(0, startedRule("web", m.now, "sleep 1"))
+	m.addRule(0, startedRule("web", "sleep 1"))
 	m.frame()
 	if kept, total := m.matchCounts(); kept != 3 || total != 3 {
 		t.Fatalf("counts = %d/%d, want 3/3 with the run rule out of both", kept, total)

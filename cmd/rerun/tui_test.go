@@ -22,7 +22,7 @@ func target(name string) Target {
 	return Target{Name: name, Cmd: "sleep 1", Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 }
 
-func newTestModel(t *testing.T, targets ...Target) *tuiModel {
+func newTestModel(t testing.TB, targets ...Target) *tuiModel {
 	t.Helper()
 	if len(targets) == 0 {
 		targets = []Target{target("web"), target("api"), target("worker")}
