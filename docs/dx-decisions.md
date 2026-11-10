@@ -22,7 +22,7 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · go to lands in the pane, and a runnable row shows `▶` with `enter run`: the footer names what enter does. Why: a jump should show the log, and a run should not look like a jump.
 - 2026-11-09 · fs events services start one 2-space gap after the longest path, and no `·` separator: the `↻` names the restarts. Why: a right-aligned list drifted with every path length.
 - 2026-11-09 · fuzzy matches use fzf's sage green, readable on light and dark. Why: fzf users already read that color as a match.
-- 2026-11-09 · the fs row moves to the top of the left list and names the newest batch's file: `4s · server.go +1`, or `idle`. Why: the bottom row sat under the list, where a long list hid it.
+- 2026-11-09 · the fs row moves to the top of the left list and names the newest batch's file: `server.go +1`, or `idle`. Why: the bottom row sat under the list, where a long list hid it.
 - 2026-11-09 · `ctrl+o` on a target with no `open:` says so. Why: a silent `ctrl+o` looked broken.
 - 2026-11-09 · `open:` is the target's link or command, and `open-on-start:` runs it at startup: one field for what `o` does, one for when. Why: a `url:` that could not run a command, and a boolean `open:` that did not open anything, misled readers.
 - 2026-11-09 · the pills row takes focus with `↑`, and `←`/`→` stay in the input: arrows keep one job per focus. Why: the input jump to pills fired when the cursor merely reached the start.
@@ -33,4 +33,4 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · startup scopes the pane to the cursor's row: the first group or target shows only its logs. Why: the highlighted row must match the logs.
 - 2026-11-09 · `i` inspects a line's original or JSON form; `o` always opens links. Why: one key, one job, in every pane.
 - 2026-11-09 · alt+z undoes and alt+y redoes edits in every text input (⌘Z/⌘Y via Ghostty). Why: typing mistakes should cost one key.
-- 2026-11-10 · the fs hint shows the last batch for 1 min, then `idle`, and never flashes; the events modal keeps 10 min. Why: a calm, compact hint, with history one key away.
+- 2026-11-10 · the fs hint is `file +N` and shows the last batch for 1 min, then `idle`; `t` adds the batch's age in the times column, lined up with the row durations. A long name keeps its extension (`ser….gen.go`). The hint never flashes, and the events modal keeps 10 min. Why: a calm, compact hint, with history one key away.

@@ -71,7 +71,7 @@ the longest target so messages start in a fixed column. A `muted: true` field in
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
-More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
+More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name and the fs row's age. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
 `/` or `f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
@@ -114,8 +114,8 @@ and line endings, and follow a symlink to the file it names. `cmd+s` works only 
 forwards it.
 
 The fs row at the top of the left column names the newest change batch's first
-file and its age (`4s · server.go +2`, `+N` for the other files in the batch, `idle`
-past a minute), updates in place with no flash, and turns red `fs ! <error>`
+file (`server.go +2`, `+N` for the other files in the batch, `idle` past a minute); `t`
+adds the batch's age in the times column, updates in place with no flash, and turns red `fs ! <error>`
 after a watcher error; a click (or `e`) opens the fs events modal. The modal lists the last 10 minutes' batches (events
 within 150ms of each other), newest first: the time, the first changed file with
 `+N` for the rest, and the targets the batch restarted after a 2-space gap and a `↻` mark.

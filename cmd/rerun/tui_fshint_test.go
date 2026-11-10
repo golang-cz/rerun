@@ -32,19 +32,19 @@ func TestFsHintReadsIdleWithoutBatches(t *testing.T) {
 	}
 }
 
-// The row names the newest batch's file and ages it in fmtDur style.
-func TestFsHintAgesTheNewestBatch(t *testing.T) {
+// With times hidden the row names the newest batch's file, and no age.
+func TestFsHintNamesTheNewestBatchWithoutTimes(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	m.now = spawnClock.Add(4 * time.Second)
-	if got := hintRow(m); got != "4s · a.go" {
-		t.Fatalf("hint = %q, want the age and the file", got)
+	if got := hintRow(m); got != "a.go" {
+		t.Fatalf("hint = %q, want the file alone", got)
 	}
 
 	changeAt(m, "web", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 	m.now = spawnClock.Add(5 * time.Second)
-	if got := hintRow(m); got != "1s · b.go" {
-		t.Fatalf("hint = %q, want the newer batch's age and file", got)
+	if got := hintRow(m); got != "b.go" {
+		t.Fatalf("hint = %q, want the newer batch's file", got)
 	}
 }
 
@@ -55,21 +55,22 @@ func TestFsHintCountsTheRestOfABatch(t *testing.T) {
 		"server.go": fsnotify.Write, "routes.go": fsnotify.Write, "zz.go": fsnotify.Write,
 	})
 	m.now = spawnClock.Add(4 * time.Second)
-	if got := hintRow(m); got != "4s · routes.go +2" {
+	if got := hintRow(m); got != "routes.go +2" {
 		t.Fatalf("hint = %q, want the first file in sort order with +2", got)
 	}
 }
 
-// A long file name shrinks before the age does.
+// A long file name shrinks to the full width when times are hidden.
 func TestFsHintEllipsizesTheFileName(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.width, m.height = 80, 24
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"internal/very_long_handler_name.go": fsnotify.Write})
 	m.now = spawnClock.Add(4 * time.Second)
 
+	leftW, _ := m.layoutWidths()
 	got := hintRow(m)
-	if !strings.HasPrefix(got, "4s · very_") || !strings.HasSuffix(got, "…") {
-		t.Fatalf("hint = %q, want the age kept and the name cut with an ellipsis", got)
+	if !strings.HasSuffix(got, "….go") || displayWidth(got) > leftW {
+		t.Fatalf("hint = %q, want the stem cut with an ellipsis, the .go kept, within %d cells", got, leftW)
 	}
 }
 
@@ -119,7 +120,7 @@ func TestFsHintTurnsRedOnAWatchError(t *testing.T) {
 
 	changeAt(m, "backoffice-webapp", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 	m.now = spawnClock.Add(5 * time.Second)
-	if got := hintRow(m); got != "1s · b.go" {
+	if got := hintRow(m); got != "b.go" {
 		t.Fatalf("hint after the next good batch = %q, want the failure cleared", got)
 	}
 }
@@ -205,5 +206,76 @@ func TestHiddenListWatchFailureShowsOnBottomLine(t *testing.T) {
 	red := m.styles.hint.Foreground(lipgloss.Color(colorRed)).Render("x")
 	if !strings.Contains(bottom, red[:strings.Index(red, "x")]) {
 		t.Fatalf("bottom line %q is not red", bottom)
+	}
+}
+
+// With times shown, the age starts in the times column, where the rows' durations start.
+func TestFsHintAgeLinesUpWithRowTimes(t *testing.T) {
+	// The long target name widens the column, so the file name is not cut.
+	m := newTestModel(t, buildTarget("backoffice-webapp"))
+	m.showTimes = true
+	m.targets[0].state = stateRunning
+	m.targets[0].lastStart = buildAt
+	changeAt(m, "backoffice-webapp", buildAt, map[string]fsnotify.Op{"server.gen.go": fsnotify.Write})
+	m.now = buildAt.Add(4 * time.Second)
+
+	leftW, _ := m.layoutWidths()
+	col := func(line string) int {
+		idx := strings.LastIndex(line, "4s")
+		if idx < 0 {
+			t.Fatalf("line %q has no 4s", line)
+		}
+		return displayWidth(line[:idx])
+	}
+	hint := hintRow(m)
+	row := leftLineRaw(m, 0)
+	if !strings.HasPrefix(hint, "server.gen.go") || !strings.HasSuffix(hint, "4s") {
+		t.Fatalf("hint = %q, want the file then the 4s age", hint)
+	}
+	if col(hint) != leftW-statusW || col(row) != leftW-statusW {
+		t.Fatalf("hint age at %d, row duration at %d, want both at %d", col(hint), col(row), leftW-statusW)
+	}
+}
+
+// With times hidden the age is gone, and the batch's +N stays in the row.
+func TestFsHintKeepsPlusNWithTimesHiddenAndShown(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write, "b.go": fsnotify.Write})
+	m.now = spawnClock.Add(4 * time.Second)
+	if got := hintRow(m); got != "a.go +1" {
+		t.Fatalf("hidden hint = %q, want a.go +1", got)
+	}
+	m.showTimes = true
+	if got := hintRow(m); !strings.HasPrefix(got, "a.go +1") || !strings.HasSuffix(got, "4s") {
+		t.Fatalf("shown hint = %q, want a.go +1 then the 4s age", got)
+	}
+}
+
+// The name's extension survives every cut, and a name that cannot keep it tail-cuts.
+func TestTruncateNameKeepsTheExtension(t *testing.T) {
+	cases := []struct {
+		name string
+		w    int
+		want string
+	}{
+		{"server.gen.go", 13, "server.gen.go"},
+		{"server.gen.go", 11, "ser….gen.go"},
+		{"very-long-component-name.test.tsx", 17, "very-lo….test.tsx"},
+		{"a.verylongextension", 5, "a.ve…"},
+		{".eslintrc.json", 8, ".eslint…"},
+		{"Makefile", 5, "Make…"},
+		{"a.go", 3, "a.…"},
+	}
+	for _, c := range cases {
+		if got := truncateName(c.name, c.w); got != c.want {
+			t.Errorf("truncateName(%q, %d) = %q, want %q", c.name, c.w, got, c.want)
+		}
+	}
+}
+
+// fitFsName cuts the name to make room for +N, which stays whole.
+func TestFitFsNameKeepsPlusN(t *testing.T) {
+	if got := fitFsName("server.gen.go", " +2", 12); got != "s….gen.go +2" {
+		t.Fatalf("fitFsName = %q, want the name cut and +2 kept", got)
 	}
 }

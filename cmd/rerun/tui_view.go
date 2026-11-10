@@ -680,7 +680,7 @@ func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
-// feedHintCell is the fs row: the newest batch's age and file, `idle` past feedHintWindow.
+// feedHintCell is the fs row: the newest batch's file, `idle` past feedHintWindow.
 func (m *tuiModel) feedHintCell(leftW int) string {
 	style := m.styles.hint
 	text := "idle"
@@ -689,25 +689,47 @@ func (m *tuiModel) feedHintCell(leftW int) string {
 			text = ellipsize("fs ! "+b.err.Error(), leftW)
 			style = style.Foreground(lipgloss.Color(colorRed))
 		} else {
-			text = fsHintText(b, fmtDur(m.now.Sub(b.at)), leftW)
+			text = m.fsHintText(b, leftW)
 		}
 	}
 	return style.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
 }
 
-// fsHintText is `<age> · <file> +N`; the file name is cut first so the age stays.
-func fsHintText(b feedBatch, age string, leftW int) string {
+// fsHintText is `file +N`, plus the batch's age in the times column when shown.
+func (m *tuiModel) fsHintText(b feedBatch, leftW int) string {
 	_, name := feedSplit(strings.TrimSuffix(feedFirstFile(b), "/"))
 	more := ""
 	if n := len(b.files) - 1; n > 0 {
 		more = fmt.Sprintf(" +%d", n)
 	}
-	head := age + " · "
-	room := leftW - displayWidth(head+more)
-	if room < 1 {
-		return truncate(head+name+more, leftW)
+	if !m.showTimes || leftW <= statusW {
+		return fitFsName(name, more, leftW)
 	}
-	return head + ellipsize(name, room) + more
+	col := leftW - statusW
+	// The blank cell before the age column keeps the name off the age.
+	return padRight(fitFsName(name, more, col-1), col) + padRight(fmtDur(m.now.Sub(b.at)), statusW)
+}
+
+// fitFsName fits a name and its `+N` into w cells, cutting the stem before the extension.
+func fitFsName(name, more string, w int) string {
+	room := w - displayWidth(more)
+	if room < 1 {
+		return truncate(more, w)
+	}
+	return truncateName(name, room) + more
+}
+
+// truncateName cuts a name to w cells, keeping the extension from its first dot.
+func truncateName(name string, w int) string {
+	if displayWidth(name) <= w {
+		return name
+	}
+	dot := strings.Index(name, ".")
+	if dot <= 0 || displayWidth(name[dot:])+2 > w {
+		return ellipsize(name, w)
+	}
+	ext := name[dot:]
+	return ellipsize(name[:dot], w-displayWidth(ext)) + ext
 }
 
 // ellipsize cuts s to w cells, ending a cut string with an ellipsis.

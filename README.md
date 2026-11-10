@@ -30,7 +30,7 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
-`e` fs events (last 10 min), `m` mute a stream. `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
+`e` fs events (last 10 min), `m` mute a stream. `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name and the fs row's age. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 The row whose logs the pane shows is bold. On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
@@ -104,9 +104,10 @@ last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `collapsed: true` starts its header collapsed; `→` or a click expands it. Folding is a start state; a reload keeps your collapse for groups already shown.
-The first row of the left column is the fs row: `4s · server.go +1` gives the newest
-change batch's age and first file, with `+N` for the other files in the batch. It reads
-`idle` when no batch landed in the last minute. It updates in place, with no flash, and
+The first row of the left column is the fs row: `server.go +1` gives the newest
+change batch's first file, with `+N` for the other files in the batch. A long name cuts its
+stem with `…` and keeps its extension (`ser….gen.go`). `t` adds the batch's age in the times
+column, lined up with the row durations. It reads `idle` when no batch landed in the last minute. It updates in place, with no flash, and
 turns red `fs ! too many open files` after a watcher error, for the same minute. A click
 opens the fs events modal, like `e`. The modal keeps the last 10 minutes of batches, newest first: `22:32:00  path +N` with
 the targets it restarted, after a 2-space gap and a `↻` mark (`config` for a rerun.yml

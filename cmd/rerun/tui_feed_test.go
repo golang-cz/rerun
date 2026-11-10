@@ -314,7 +314,7 @@ func TestVersionLineOwnsTheBottomRow(t *testing.T) {
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
 		t.Fatalf("the bottom row is not the version line: %q", got)
 	}
-	if got := lines[0]; !strings.HasPrefix(got, "0s · a.go") {
+	if got := lines[0]; !strings.HasPrefix(got, "a.go") {
 		t.Fatalf("the top row = %q, want the fs row", got)
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {
