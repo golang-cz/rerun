@@ -88,11 +88,11 @@ func TestBuildCheckShowsForTenSeconds(t *testing.T) {
 	rbBuildDone(m, "api", buildAt.Add(time.Second))
 
 	m.now = buildAt.Add(time.Second + 9*time.Second)
-	if c := buildCell(tg, m.now); c.text != "✓" || c.color != runGreen {
+	if c := buildCell(tg, m.now, 0); c.text != "✓" || c.color != runGreen {
 		t.Fatalf("cell 9s after a good build = %+v, want a green ✓", c)
 	}
 	m.now = buildAt.Add(time.Second + 10*time.Second + time.Millisecond)
-	if c := buildCell(tg, m.now); c.text != " " {
+	if c := buildCell(tg, m.now, 0); c.text != " " {
 		t.Fatalf("cell 10s after a good build = %+v, want blank", c)
 	}
 }
@@ -104,7 +104,7 @@ func TestBuildFailureStaysUntilNextBuild(t *testing.T) {
 	m.now = buildAt
 	m.applyEvents([]event{buildStart("api", buildAt), buildFail("api", time.Second)})
 	m.now = buildAt.Add(time.Minute)
-	if c := buildCell(tg, m.now); c.text != "✗" {
+	if c := buildCell(tg, m.now, 0); c.text != "✗" {
 		t.Fatalf("cell a minute after a failed build = %+v, want the red ✗", c)
 	}
 }
@@ -141,11 +141,11 @@ func TestBuildStartTintsNameOrangeThenPlain(t *testing.T) {
 			if got := tinted(tg, buildAt.Add(3*time.Second)); got != "" {
 				t.Fatalf("name 3s into a build = %q, want plain", got)
 			}
-			c := buildCell(tg, buildAt.Add(3*time.Second))
+			c := buildCell(tg, buildAt.Add(3*time.Second), 0)
 			if !slices.Contains(spinnerFrames, c.text) || c.color != runYellow {
 				t.Fatalf("cell while building = %+v, want an orange spinner frame", c)
 			}
-			if buildCell(tg, buildAt.Add(4*time.Second)).text == c.text {
+			if buildCell(tg, buildAt.Add(4*time.Second), 1).text == c.text {
 				t.Fatal("spinner did not advance with the clock")
 			}
 		})
@@ -162,10 +162,10 @@ func TestBuildOKNamePlainAndCheckFor10s(t *testing.T) {
 	if got := tinted(tg, at); got != "" {
 		t.Fatalf("name after OK = %q, want plain", got)
 	}
-	if c := buildCell(tg, at.Add(9*time.Second)); c.text != "✓" || c.color != runGreen {
+	if c := buildCell(tg, at.Add(9*time.Second), 0); c.text != "✓" || c.color != runGreen {
 		t.Fatalf("cell 9s after OK = %+v, want a green ✓", c)
 	}
-	if c := buildCell(tg, at.Add(11*time.Second)); c.text != " " {
+	if c := buildCell(tg, at.Add(11*time.Second), 0); c.text != " " {
 		t.Fatalf("cell 11s after OK = %+v, want blank", c)
 	}
 }
@@ -238,7 +238,7 @@ func TestCoreLoopEventShowsLoopState(t *testing.T) {
 	tg := m.targets[0]
 	m.applyEvent(event{kind: evLoop, target: "api", line: "a.go", files: []string{"a.go"}})
 
-	if c := buildCell(tg, m.now); c.text != "∞" || c.color != runRed {
+	if c := buildCell(tg, m.now, 0); c.text != "∞" || c.color != runRed {
 		t.Fatalf("build cell while the core loop pauses = %+v, want a red ∞", c)
 	}
 	if got := ansi.Strip(m.feedHintCell(30)); !strings.Contains(got, "loop: a.go") {
@@ -270,12 +270,34 @@ func TestCoreResumeClearsLoopState(t *testing.T) {
 			if tg.looping() {
 				t.Fatal("loop still on after the target resumed")
 			}
-			if c := buildCell(tg, m.now); c.text == "∞" {
+			if c := buildCell(tg, m.now, 0); c.text == "∞" {
 				t.Fatalf("build cell after resume = %+v, want no ∞", c)
 			}
 			if got := ansi.Strip(m.feedHintCell(30)); strings.Contains(got, "loop:") {
 				t.Fatalf("hint after resume = %q, want no loop line", got)
 			}
 		})
+	}
+}
+
+// The fast spinner tick starts with a build, advances the frame, and stops with the last build.
+func TestSpinTickRunsOnlyWhileBuilding(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	if cmd := m.startSpin(); cmd != nil || m.spinning {
+		t.Fatal("spin tick started with no build")
+	}
+	if cmd := m.applyEvents([]event{buildStart("api", buildAt)}); cmd == nil || !m.spinning {
+		t.Fatalf("build start did not start the spin tick (spinning = %v)", m.spinning)
+	}
+	if cmd := m.applyEvents([]event{buildStart("api", buildAt)}); cmd != nil {
+		t.Fatal("a second batch started a second spin tick")
+	}
+	_, next := m.Update(spinTickMsg{})
+	if m.spin != 1 || next == nil {
+		t.Fatalf("spin = %d, next = %v, want the frame advanced and the tick kept", m.spin, next)
+	}
+	m.applyEvents([]event{buildOK("api", time.Second)})
+	if _, next = m.Update(spinTickMsg{}); next != nil || m.spinning || m.spin != 1 {
+		t.Fatalf("tick after the last build: next = %v, spinning = %v, spin = %d, want it stopped", next, m.spinning, m.spin)
 	}
 }

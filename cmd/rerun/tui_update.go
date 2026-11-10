@@ -18,12 +18,39 @@ const doubleClickWindow = 400 * time.Millisecond
 
 type (
 	tickMsg      time.Time
+	spinTickMsg  struct{}
 	interruptMsg struct{}
 	eventsMsg    struct{ events []event }
 )
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+// spinInterval is the spinner's frame time; the fast tick runs only while a build does.
+const spinInterval = 120 * time.Millisecond
+
+func spinCmd() tea.Cmd {
+	return tea.Tick(spinInterval, func(time.Time) tea.Msg { return spinTickMsg{} })
+}
+
+// anyBuilding reports whether a build is in flight.
+func (m *tuiModel) anyBuilding() bool {
+	for _, t := range m.targets {
+		if t.building {
+			return true
+		}
+	}
+	return false
+}
+
+// startSpin starts the fast tick when a build runs and none is ticking.
+func (m *tuiModel) startSpin() tea.Cmd {
+	if m.spinning || !m.anyBuilding() {
+		return nil
+	}
+	m.spinning = true
+	return spinCmd()
 }
 
 // waitForEvents reads the next batch of runner events. Batching keeps a
@@ -75,6 +102,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.isDark = msg.IsDark()
 		m.styles = newTUIStyles(m.isDark)
 		return m, nil
+
+	case spinTickMsg:
+		if !m.anyBuilding() {
+			m.spinning = false
+			return m, nil
+		}
+		m.spin++
+		return m, spinCmd()
 
 	case tickMsg:
 		m.now = time.Time(msg)

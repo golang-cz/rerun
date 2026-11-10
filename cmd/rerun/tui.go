@@ -296,7 +296,10 @@ type tuiModel struct {
 	startAt time.Time
 	clock   func() time.Time
 	batchAt uint32
-	inBatch bool
+	// spin is the spinner frame; spinning marks the fast tick as running.
+	spin     int
+	spinning bool
+	inBatch  bool
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
 	// blockCache keeps each expanded line's YAML rows, so redrawing one costs no re-render.
@@ -795,6 +798,7 @@ func (m *tuiModel) applyEvents(events []event) tea.Cmd {
 		m.recomputeSearch(false)
 	}
 	m.fitEvents()
+	cmds = append(cmds, m.startSpin())
 	return tea.Batch(cmds...)
 }
 

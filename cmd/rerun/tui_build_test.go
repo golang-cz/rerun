@@ -672,19 +672,19 @@ func TestBuildCellShowsGearOnlyWhileBuilding(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
 	m.now = buildAt
 	tg := m.targets[0]
-	if c := buildCell(tg, m.now); c.text != " " {
+	if c := buildCell(tg, m.now, 0); c.text != " " {
 		t.Fatalf("idle build cell = %+v, want blank", c)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if c := buildCell(tg, m.now); !slices.Contains(spinnerFrames, c.text) || c.color != runYellow {
+	if c := buildCell(tg, m.now, 0); !slices.Contains(spinnerFrames, c.text) || c.color != runYellow {
 		t.Fatalf("building cell = %+v, want an orange spinner", c)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
-	if c := buildCell(tg, m.now); c.text != "✗" || c.color != runRed {
+	if c := buildCell(tg, m.now, 0); c.text != "✗" || c.color != runRed {
 		t.Fatalf("failed cell = %+v, want a red ✗", c)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
-	if c := buildCell(tg, m.now); c.text != "✓" || c.color != runGreen {
+	if c := buildCell(tg, m.now, 0); c.text != "✓" || c.color != runGreen {
 		t.Fatalf("cell after a good build = %+v, want a green ✓", c)
 	}
 }

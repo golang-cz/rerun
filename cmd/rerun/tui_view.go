@@ -798,7 +798,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		seg{text: " "},
 		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)},
 		seg{text: " "},
-		buildCell(t, m.now),
+		buildCell(t, m.now, m.spin),
 		seg{text: marker(m.targetDirty(t))},
 	)
 	if m.showTimes {
@@ -910,16 +910,16 @@ func stateColor(t *tuiTarget) string {
 	return colorGray
 }
 
-// spinnerFrames is the braille spinner a build shows, one frame per tick.
+// spinnerFrames is the braille spinner a build shows, one frame per spinTick.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // buildCell is the build indicator; it stays reserved when idle, so the names never shift.
-func buildCell(t *tuiTarget, now time.Time) seg {
+func buildCell(t *tuiTarget, now time.Time, frame int) seg {
 	switch {
 	case t.looping():
 		return seg{text: "∞", color: runRed}
 	case t.building:
-		return seg{text: spinnerFrames[int(now.Unix()%int64(len(spinnerFrames)))], color: runYellow}
+		return seg{text: spinnerFrames[frame%len(spinnerFrames)], color: runYellow}
 	case t.buildFailed:
 		return seg{text: "✗", color: runRed}
 	case !t.buildOKAt.IsZero() && now.Sub(t.buildOKAt) <= recentWindow:
