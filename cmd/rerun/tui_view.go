@@ -680,14 +680,11 @@ func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
-// feedHintCell is the left column's fs row: the newest batch's first file and
-// age, `idle` when none landed in the last minute, and a red watcher error until
-// the next good batch. A 1s highlight marks a landed batch; a click opens the fs events modal.
+// feedHintCell is the fs row: the newest batch's age and file, `idle` past feedHintWindow.
 func (m *tuiModel) feedHintCell(leftW int) string {
 	style := m.styles.hint
-	text := "fs · idle"
-	if batches, dim := m.feedVisible(); !dim && len(batches) > 0 {
-		b := batches[0]
+	text := "idle"
+	if b, ok := m.feedHintBatch(); ok {
 		if b.err != nil {
 			text = ellipsize("fs ! "+b.err.Error(), leftW)
 			style = style.Foreground(lipgloss.Color(colorRed))
@@ -695,26 +692,22 @@ func (m *tuiModel) feedHintCell(leftW int) string {
 			text = fsHintText(b, fmtDur(m.now.Sub(b.at)), leftW)
 		}
 	}
-	if m.now.Before(m.feedFlashUntil) {
-		style = style.Reverse(true)
-	}
 	return style.Render(text) + strings.Repeat(" ", max(0, leftW-displayWidth(text)))
 }
 
-// fsHintText is `fs · <file> · <age>`, with `+N` after the file for the rest of
-// the batch. The file name is cut first so the age always shows.
+// fsHintText is `<age> · <file> +N`; the file name is cut first so the age stays.
 func fsHintText(b feedBatch, age string, leftW int) string {
 	_, name := feedSplit(strings.TrimSuffix(feedFirstFile(b), "/"))
 	more := ""
 	if n := len(b.files) - 1; n > 0 {
 		more = fmt.Sprintf(" +%d", n)
 	}
-	tail := more + " · " + age
-	room := leftW - displayWidth("fs · "+tail)
+	head := age + " · "
+	room := leftW - displayWidth(head+more)
 	if room < 1 {
-		return truncate("fs · "+name+tail, leftW)
+		return truncate(head+name+more, leftW)
 	}
-	return "fs · " + ellipsize(name, room) + tail
+	return head + ellipsize(name, room) + more
 }
 
 // ellipsize cuts s to w cells, ending a cut string with an ellipsis.
@@ -1315,7 +1308,7 @@ var helpShortKeys = [][2]string{
 	{"ctrl+o", "open the current target's link"},
 	{"← →", "expand or collapse a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
-	{"e", "fs events (last minute)"},
+	{"e", "fs events (last 10 min)"},
 	{"enter → a =", "pane: → expand · ← collapse · a adds key, = filters value"},
 	{"c", "copies the line or selection"},
 	{"/ f", "query bar: enter adds a pill (level=error, -skip, .yq)"},
@@ -1334,7 +1327,7 @@ var helpKeys = [][2]string{
 	{"space", "start or stop · pane: jump to live"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r h", "mute (group: its targets) · r reboots · h shows idle targets"},
-	{"e", "fs events (last minute)"},
+	{"e", "fs events (last 10 min)"},
 	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
 	{"o i ctrl+o", "pick a link to open · ctrl+o: target's link · i: original lines"},

@@ -30,14 +30,14 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
-`e` fs events (last minute), `m` mute a stream. `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
+`e` fs events (last 10 min), `m` mute a stream. `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
 The row whose logs the pane shows is bold. On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` or `f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
 always shows them as a table. 
-More keys: `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it. Copy sends the text through the terminal's OSC 52 clipboard sequence, which Ghostty and herdr pass through.
+More keys: `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last 10 min), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it. Copy sends the text through the terminal's OSC 52 clipboard sequence, which Ghostty and herdr pass through.
 
 The query bar's pills AND together, and one input can hold several: `level=error -healthz` adds two on `enter`.
 Each pill is a filter (`[text]`, solid) or a highlight (`⟨text⟩`, dim): a filter pill hides non-matching lines, a
@@ -104,12 +104,11 @@ last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `collapsed: true` starts its header collapsed; `→` or a click expands it. Folding is a start state; a reload keeps your collapse for groups already shown.
-The first row of the left column is the fs row: `fs · server.go · 4s` names the
-newest change batch's first file and its age, with `+N` for the rest of the batch,
-and reads `fs · idle` when none landed in the last minute. It highlights for a second
-when a batch lands, turns red `fs ! too many open files` after a watcher error until the
-next successful batch, and a click opens the fs events modal, like `e`. The
-modal lists the last minute's batches, newest first: `22:32:00  path +N` with
+The first row of the left column is the fs row: `4s · server.go +1` gives the newest
+change batch's age and first file, with `+N` for the other files in the batch. It reads
+`idle` when no batch landed in the last minute. It updates in place, with no flash, and
+turns red `fs ! too many open files` after a watcher error, for the same minute. A click
+opens the fs events modal, like `e`. The modal keeps the last 10 minutes of batches, newest first: `22:32:00  path +N` with
 the targets it restarted, after a 2-space gap and a `↻` mark (`config` for a rerun.yml
 reload). A batch is every change within 150ms of its first event, so one save
 across several targets is one line. The path is the first changed file relative

@@ -14,7 +14,10 @@ import (
 )
 
 // feedWindow is how long a batch stays in the fs events modal.
-const feedWindow = time.Minute
+const feedWindow = 10 * time.Minute
+
+// feedHintWindow is how long the fs hint names the newest batch before it reads idle.
+const feedHintWindow = time.Minute
 
 // feedJoin is how far a change may sit from its batch's first event and still join it.
 const feedJoin = 150 * time.Millisecond
@@ -22,14 +25,8 @@ const feedJoin = 150 * time.Millisecond
 // configJoin is how far back a config reload looks for the batch that holds rerun.yml.
 const configJoin = 2 * time.Second
 
-// feedCap bounds the stored batches; the window drops them sooner.
-const feedCap = 100
-
 // restartFlash is how long a restarted target's row stays highlighted.
 const restartFlash = time.Second
-
-// feedHintFlash is how long the fs events line stays highlighted after a batch lands.
-const feedHintFlash = time.Second
 
 // configTarget is the pseudo-target a rerun.yml reload is listed under.
 const configTarget = "config"
@@ -80,7 +77,6 @@ func (m *tuiModel) recordFeed(cs rerun.ChangeSet, at time.Time, owner Target) in
 	if n := len(m.feed); n == 0 || absDuration(at.Sub(m.feed[n-1].at)) > feedJoin || (m.feed[n-1].err != nil) != isErr {
 		m.feedSeq++
 		m.feed = append(m.feed, feedBatch{id: m.feedSeq, at: at, files: map[string]byte{}, dirs: map[string]bool{}, svc: map[string][]string{}})
-		m.feedFlashUntil = at.Add(feedHintFlash)
 	}
 	b := &m.feed[len(m.feed)-1]
 	if cs.Error != nil {
@@ -158,14 +154,24 @@ func (m *tuiModel) recordConfigFeed(at time.Time) {
 		id: m.feedSeq, at: at, files: map[string]byte{key: '~'}, dirs: map[string]bool{},
 		targets: []string{configTarget}, svc: map[string][]string{key: {configTarget}},
 	})
-	m.feedFlashUntil = at.Add(feedHintFlash)
 	m.trimFeed()
 }
 
+// trimFeed drops batches past feedWindow; arrival order puts them first.
 func (m *tuiModel) trimFeed() {
-	if over := len(m.feed) - feedCap; over > 0 {
-		m.feed = m.feed[over:]
+	i := 0
+	for i < len(m.feed) && m.now.Sub(m.feed[i].at) > feedWindow {
+		i++
 	}
+	m.feed = m.feed[i:]
+}
+
+// feedHintBatch is the newest batch while it landed within feedHintWindow.
+func (m *tuiModel) feedHintBatch() (feedBatch, bool) {
+	if n := len(m.feed); n > 0 && m.now.Sub(m.feed[n-1].at) <= feedHintWindow {
+		return m.feed[n-1], true
+	}
+	return feedBatch{}, false
 }
 
 // feedPath keys a changed file relative to its owner's dir, with an import's

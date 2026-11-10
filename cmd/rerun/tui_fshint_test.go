@@ -18,16 +18,16 @@ func hintRow(m *tuiModel) string {
 	return strings.TrimRight(ansi.Strip(m.leftLine(0, leftW)), " ")
 }
 
-// With no batch in the last minute the row reads idle.
+// With no batch in the last minute the row reads idle, and with no batch at all too.
 func TestFsHintReadsIdleWithoutBatches(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	if got := hintRow(m); got != "fs · idle" {
-		t.Fatalf("hint = %q, want the idle row", got)
+	if got := hintRow(m); got != "idle" {
+		t.Fatalf("hint = %q, want idle with no batches", got)
 	}
 
 	changeAt(m, "web", spawnClock.Add(-2*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
 	m.now = spawnClock
-	if got := hintRow(m); got != "fs · idle" {
+	if got := hintRow(m); got != "idle" {
 		t.Fatalf("hint after the batch aged out = %q, want idle", got)
 	}
 }
@@ -37,14 +37,14 @@ func TestFsHintAgesTheNewestBatch(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	m.now = spawnClock.Add(4 * time.Second)
-	if got := hintRow(m); got != "fs · a.go · 4s" {
-		t.Fatalf("hint = %q, want the file and the batch age", got)
+	if got := hintRow(m); got != "4s · a.go" {
+		t.Fatalf("hint = %q, want the age and the file", got)
 	}
 
 	changeAt(m, "web", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 	m.now = spawnClock.Add(5 * time.Second)
-	if got := hintRow(m); got != "fs · b.go · 1s" {
-		t.Fatalf("hint = %q, want the newer batch's file and age", got)
+	if got := hintRow(m); got != "1s · b.go" {
+		t.Fatalf("hint = %q, want the newer batch's age and file", got)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestFsHintCountsTheRestOfABatch(t *testing.T) {
 		"server.go": fsnotify.Write, "routes.go": fsnotify.Write, "zz.go": fsnotify.Write,
 	})
 	m.now = spawnClock.Add(4 * time.Second)
-	if got := hintRow(m); got != "fs · routes.go +2 · 4s" {
+	if got := hintRow(m); got != "4s · routes.go +2" {
 		t.Fatalf("hint = %q, want the first file in sort order with +2", got)
 	}
 }
@@ -68,28 +68,30 @@ func TestFsHintEllipsizesTheFileName(t *testing.T) {
 	m.now = spawnClock.Add(4 * time.Second)
 
 	got := hintRow(m)
-	if !strings.HasPrefix(got, "fs · very_") || !strings.Contains(got, "…") || !strings.HasSuffix(got, " · 4s") {
-		t.Fatalf("hint = %q, want the name cut with an ellipsis and the age kept", got)
+	if !strings.HasPrefix(got, "4s · very_") || !strings.HasSuffix(got, "…") {
+		t.Fatalf("hint = %q, want the age kept and the name cut with an ellipsis", got)
 	}
 }
 
-// A new batch highlights the row for a second.
-func TestFsHintFlashesOnANewBatch(t *testing.T) {
+// A new batch sets the row in place: no reverse video, at landing or after.
+func TestFsHintDoesNotFlashOnANewBatch(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 	m.now = spawnClock
 
+	reverse := m.styles.hint.Reverse(true).Render("x")
+	reversed := reverse[:strings.Index(reverse, "x")]
+	if reversed == "" {
+		t.Fatal("reverse style renders no escape, so the check below proves nothing")
+	}
 	m.frame()
 	leftW, _ := m.layoutWidths()
-	flash := m.styles.hint.Reverse(true).Render("x")
-	if line := m.leftLine(0, leftW); !strings.Contains(line, flash[:strings.Index(flash, "x")]) {
-		t.Fatalf("hint right after the batch = %q, want the reverse highlight", ansi.Strip(line))
-	}
-
-	m.now = spawnClock.Add(2 * time.Second)
-	m.frame()
-	if line := m.leftLine(0, leftW); strings.Contains(line, flash[:strings.Index(flash, "x")]) {
-		t.Fatalf("hint 2s after the batch = %q, want the highlight gone", ansi.Strip(line))
+	for _, at := range []time.Duration{0, 500 * time.Millisecond, 2 * time.Second} {
+		m.now = spawnClock.Add(at)
+		m.frame()
+		if line := m.leftLine(0, leftW); strings.Contains(line, reversed) {
+			t.Fatalf("hint %v after the batch = %q, want no reverse highlight", at, ansi.Strip(line))
+		}
 	}
 }
 
@@ -117,7 +119,7 @@ func TestFsHintTurnsRedOnAWatchError(t *testing.T) {
 
 	changeAt(m, "backoffice-webapp", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 	m.now = spawnClock.Add(5 * time.Second)
-	if got := hintRow(m); got != "fs · b.go · 1s" {
+	if got := hintRow(m); got != "1s · b.go" {
 		t.Fatalf("hint after the next good batch = %q, want the failure cleared", got)
 	}
 }
@@ -148,7 +150,7 @@ func TestFsHintShortensTheFailureText(t *testing.T) {
 	}
 
 	m.now = spawnClock.Add(2 * time.Minute)
-	if got := hintRow(m); got != "fs · idle" {
+	if got := hintRow(m); got != "idle" {
 		t.Fatalf("hint after the error batch aged out = %q, want idle", got)
 	}
 }

@@ -213,8 +213,6 @@ type tuiModel struct {
 	// feed is the change batches the fs events modal lists, oldest first.
 	feed    []feedBatch
 	feedSeq int
-	// feedFlashUntil ends the fs events line's highlight a landed batch leaves behind.
-	feedFlashUntil time.Time
 
 	// version and buildTime are the ldflags stamp, rendered on the left
 	// column's bottom line; buildTime is empty in a dev binary.
@@ -311,7 +309,7 @@ type tuiModel struct {
 	revealed map[string]bool
 	// finder is the Ctrl+K popup over targets and groups.
 	finder finderState
-	// eventsModal is the `e` fs events modal over the last minute's change batches.
+	// eventsModal is the `e` fs events modal over the last 10 minutes' change batches.
 	eventsModal eventsState
 	// original is the `o` modal over the pane's raw lines.
 	original originalState

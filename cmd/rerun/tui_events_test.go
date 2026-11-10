@@ -609,11 +609,11 @@ func TestHelpNamesFsEvents(t *testing.T) {
 	m := newTestModel(t)
 	m.width, m.height = 100, 30
 	press(m, "?")
-	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "fs events (last minute)") {
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "fs events (last 10 min)") {
 		t.Fatalf("short help does not name e:\n%s", view)
 	}
 	press(m, "?")
-	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "fs events (last minute)") {
+	if view := ansi.Strip(m.View().Content); !strings.Contains(view, "fs events (last 10 min)") {
 		t.Fatalf("full help does not name e:\n%s", view)
 	}
 }
@@ -675,7 +675,7 @@ func TestEventsModalEmptyFeedPlaceholder(t *testing.T) {
 	m.width, m.height = 80, 24
 	press(m, "e")
 
-	if body := strings.Join(eventsBody(m), "\n"); !strings.Contains(body, "no fs events in the last minute") {
+	if body := strings.Join(eventsBody(m), "\n"); !strings.Contains(body, "no fs events in the last 10 minutes") {
 		t.Fatalf("empty feed body = %q, want the placeholder", body)
 	}
 }

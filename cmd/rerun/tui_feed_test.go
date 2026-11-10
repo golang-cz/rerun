@@ -113,11 +113,11 @@ func TestFeedConfigReloadJoinsItsBatchOrOpensOne(t *testing.T) {
 	}
 }
 
-// Batches older than a minute drop off; with none left the newest stays, dimmed.
-func TestFeedExpiresAfterAMinuteAndKeepsTheLatestDimmed(t *testing.T) {
+// Batches older than ten minutes drop off; with none left the newest stays, dimmed.
+func TestFeedExpiresAfterTenMinutesAndKeepsTheLatestDimmed(t *testing.T) {
 	m := newTestModel(t, target("web"))
-	changeAt(m, "web", spawnClock.Add(-2*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
-	changeAt(m, "web", spawnClock.Add(-30*time.Second), map[string]fsnotify.Op{"new.go": fsnotify.Write})
+	changeAt(m, "web", spawnClock.Add(-11*time.Minute), map[string]fsnotify.Op{"old.go": fsnotify.Write})
+	changeAt(m, "web", spawnClock.Add(-5*time.Minute), map[string]fsnotify.Op{"new.go": fsnotify.Write})
 	m.now = spawnClock
 
 	batches, dim := m.feedVisible()
@@ -125,10 +125,32 @@ func TestFeedExpiresAfterAMinuteAndKeepsTheLatestDimmed(t *testing.T) {
 		t.Fatalf("visible = %d batches (dim %v), want only new.go undimmed", len(batches), dim)
 	}
 
-	m.now = spawnClock.Add(5 * time.Minute)
+	m.now = spawnClock.Add(6 * time.Minute)
 	batches, dim = m.feedVisible()
 	if !dim || len(batches) != 1 || batches[0].files["new.go"] == 0 {
 		t.Fatalf("visible = %d batches (dim %v), want the dimmed latest batch", len(batches), dim)
+	}
+}
+
+// Batches are kept by age alone: none is dropped while it is inside the window.
+func TestFeedPrunesByAgeNotCount(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	for i := range 150 {
+		at := spawnClock.Add(time.Duration(i) * time.Second)
+		changeAt(m, "web", at, map[string]fsnotify.Op{fmt.Sprintf("f%03d.go", i): fsnotify.Write})
+	}
+	if got := len(m.feed); got != 150 {
+		t.Fatalf("feed = %d batches, want all 150 kept inside the window", got)
+	}
+
+	changeAt(m, "web", spawnClock.Add(10*time.Minute+time.Second), map[string]fsnotify.Op{"late.go": fsnotify.Write})
+	if got, want := m.feed[0].at, spawnClock.Add(time.Second); !got.Equal(want) {
+		t.Fatalf("oldest kept batch at %v, want %v: the batch at spawnClock aged past 10 minutes", got, want)
+	}
+	m.now = spawnClock.Add(10*time.Minute + time.Second)
+	batches, dim := m.feedVisible()
+	if dim || len(batches) != len(m.feed) {
+		t.Fatalf("visible = %d (dim %v), want every kept batch undimmed", len(batches), dim)
 	}
 }
 
@@ -292,7 +314,7 @@ func TestVersionLineOwnsTheBottomRow(t *testing.T) {
 	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
 		t.Fatalf("the bottom row is not the version line: %q", got)
 	}
-	if got := lines[0]; !strings.HasPrefix(got, "fs · ") {
+	if got := lines[0]; !strings.HasPrefix(got, "0s · a.go") {
 		t.Fatalf("the top row = %q, want the fs row", got)
 	}
 	if got := m.rowAt(2, m.height-1); got != -1 {

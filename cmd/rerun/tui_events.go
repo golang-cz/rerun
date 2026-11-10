@@ -25,9 +25,9 @@ const eventsLabelCol = 10
 const eventsServicesCapPct = 60
 
 // eventsEmpty is the modal's placeholder while no batch sits in the window.
-const eventsEmpty = "no fs events in the last minute"
+const eventsEmpty = "no fs events in the last 10 minutes"
 
-// eventsState is the `e` fs events modal: the last minute's change batches read
+// eventsState is the `e` fs events modal: the last 10 minutes' change batches read
 // over the live frame. cursor and openID name batches, never indexes, so a batch
 // that arrives while the modal is open cannot move the cursor off its own row.
 type eventsState struct {
