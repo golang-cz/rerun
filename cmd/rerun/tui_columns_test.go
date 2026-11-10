@@ -20,7 +20,7 @@ func namedColumns(name string, cols ...string) Target {
 func tableRows(m *tuiModel) []string {
 	var rows []string
 	for _, line := range paneOf(m)[m.titleHeight():] {
-		rows = append(rows, dropMarker(ansi.Strip(line)))
+		rows = append(rows, dropMarker(dropStamp(ansi.Strip(line))))
 	}
 	return rows
 }

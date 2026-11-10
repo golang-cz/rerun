@@ -278,7 +278,7 @@ func TestMoreRowFitsEightyColumnsInEveryListMode(t *testing.T) {
 	}
 }
 
-// Every value of the right column ends flush at the list's right edge.
+// Every value of the right column ends flush at the list's right edge, before the padding cell.
 func TestRightColumnValuesShareOneRightEdge(t *testing.T) {
 	a, b, c := target("run"), target("done"), target("man")
 	for _, tg := range []*Target{&a, &b, &c} {
@@ -294,7 +294,7 @@ func TestRightColumnValuesShareOneRightEdge(t *testing.T) {
 	m.now = spawnClock.Add(4 * time.Second)
 	m.frame()
 	leftW, _ := m.layoutWidths()
-	for y, want := range []string{"idle", "1/3", "4s", "exit 0", "manual"} {
+	for y, want := range []string{"idle", "1/3", "4s", "exit 0"} {
 		line := strings.TrimRight(ansi.Strip(m.leftLine(y, leftW)), " ")
 		if y == 0 {
 			want = "4s"

@@ -297,7 +297,7 @@ func TestVersionLineOwnsTheBottomRow(t *testing.T) {
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"apps/a.go": fsnotify.Write})
 	lines := leftPane(m)
 
-	if got := lines[m.height-1]; !strings.Contains(got, "rerun") {
+	if got := lines[m.height-1]; !strings.Contains(got, "?help") {
 		t.Fatalf("the bottom row is not the version line: %q", got)
 	}
 	if got := lines[0]; !strings.HasPrefix(got, "a.go") {

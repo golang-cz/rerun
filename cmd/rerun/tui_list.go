@@ -765,14 +765,16 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		{text: strings.Repeat(" ", indent)},
 		{text: glyph, faint: glyph == playGlyph},
 		{text: " "},
-		{text: padRight(name, nameW)},
-		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
-		{text: " "},
+		{text: name},
 	}
+	// The header has no build cell; the fill pushes its count to the rows' right edge.
+	fill := max(0, leftW-1-(indent+2+displayWidth(name)))
 	if m.showTimes {
-		// The header has no build cell, so the fill pushes its count to the rows' right edge.
-		fill := max(0, leftW-(indent+2+nameW+2+1)-statusW)
+		fill = max(0, fill-statusW)
 		segs = append(segs, seg{text: strings.Repeat(" ", fill)}, seg{text: timesCell(fmt.Sprintf("%d/%d", running, len(r.members)))})
+	} else {
+		segs = append(segs, seg{text: strings.Repeat(" ", fill)})
 	}
+	segs = append(segs, seg{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)})
 	return renderSegs(segs, m.rowStyle(row, r), leftW)
 }

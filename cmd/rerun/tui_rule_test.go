@@ -52,7 +52,7 @@ func TestRunRuleFillsThePaneOnResize(t *testing.T) {
 	ruleWidth := func() int {
 		for _, line := range paneOf(m) {
 			if plain := ansi.Strip(line); strings.Contains(plain, "▶ web started") {
-				return displayWidth(strings.TrimRight(plain, " "))
+				return displayWidth(strings.TrimRight(dropStamp(plain), " "))
 			}
 		}
 		t.Fatal("no run rule on screen")
@@ -77,7 +77,7 @@ func TestRunRuleIsNotATableRow(t *testing.T) {
 	if !m.tableOn() {
 		t.Fatal("expected table mode")
 	}
-	if got := ansi.Strip(paneOf(m)[m.titleHeight()+1]); !strings.HasPrefix(got, "── ▶ web started") {
+	if got := dropStamp(ansi.Strip(paneOf(m)[m.titleHeight()+1])); !strings.HasPrefix(got, "── ▶ web started") {
 		t.Fatalf("rule row = %q, want the run rule unchanged at the left edge", got)
 	}
 }
@@ -143,8 +143,8 @@ func TestLinesFromOneBatchShareAStamp(t *testing.T) {
 	}
 }
 
-// With t on every pane line, service output and rerun's own rules alike, shows its time in front; off shows none.
-func TestPaneLinesShowTimeOnlyWithT(t *testing.T) {
+// Every pane line, service output and rerun's own rules alike, shows its time in front, whatever t says.
+func TestPaneLinesAlwaysShowTime(t *testing.T) {
 	m, now := stampModel(t, buildTarget("web"))
 	*now = now.Add(5 * time.Second)
 	m.applyEvents([]event{
@@ -164,8 +164,8 @@ func TestPaneLinesShowTimeOnlyWithT(t *testing.T) {
 		for _, l := range paneRowsText(m) {
 			if strings.Contains(l, "hello") || strings.Contains(l, "started") || strings.Contains(l, "restarted") || strings.Contains(l, "built") || strings.Contains(l, "build failed") || strings.Contains(l, "exit 1") {
 				n++
-				if got := strings.HasPrefix(l, "12:00:05 "); got != times || (!times && strings.Contains(l, "12:00:05")) {
-					t.Fatalf("times=%v: row %q, want the stamp in front iff t is on", times, l)
+				if !strings.HasPrefix(l, "12:00:05 ") {
+					t.Fatalf("times=%v: row %q, want the stamp in front", times, l)
 				}
 			}
 		}

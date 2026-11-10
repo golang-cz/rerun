@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -16,10 +17,24 @@ func paneOf(m *tuiModel) []string {
 	return m.rightLines(rightW)
 }
 
+var stampPrefix = regexp.MustCompile(`^\d\d:\d\d:\d\d `)
+
+// dropStamp removes the pane's clock gutter from a styling-free row.
+func dropStamp(s string) string { return stampPrefix.ReplaceAllString(s, "") }
+
+// paneBody is the pane's rows below the title, styling and clock gutter stripped.
+func paneBody(m *tuiModel) []string {
+	var out []string
+	for _, l := range paneOf(m)[m.titleHeight():] {
+		out = append(out, dropStamp(ansi.Strip(l)))
+	}
+	return out
+}
+
 // newestPaneLine is the last pane line on screen, styling stripped.
 func newestPaneLine(m *tuiModel) string {
 	lines := paneOf(m)
-	return strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " ")
+	return strings.TrimRight(dropStamp(ansi.Strip(lines[len(lines)-1])), " ")
 }
 
 // streamEvents builds one batch of output for a target.

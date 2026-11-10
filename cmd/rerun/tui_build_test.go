@@ -130,8 +130,8 @@ func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
 	}
 	idle := durCol()
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if building := durCol(); building != idle || idle != leftW {
-		t.Fatalf("duration column: idle = %d, building = %d, want both %d", idle, building, leftW)
+	if building := durCol(); building != idle || idle != leftW-1 {
+		t.Fatalf("duration column: idle = %d, building = %d, want both %d", idle, building, leftW-1)
 	}
 }
 
@@ -569,7 +569,7 @@ func TestResizeNarrowingMakesRuleExpandable(t *testing.T) {
 	if m.expandable(raw) {
 		t.Fatal("a short command is expandable on a wide pane")
 	}
-	m.Update(tea.WindowSizeMsg{Width: 40, Height: 20})
+	m.Update(tea.WindowSizeMsg{Width: 30, Height: 20})
 	m.frame()
 	if !m.expandable(raw) {
 		t.Fatal("narrowing did not make the cut command expandable")

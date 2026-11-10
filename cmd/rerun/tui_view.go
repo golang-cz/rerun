@@ -452,27 +452,35 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 		// -1 puts the pane's first cell in column 0, with no divider in front of it.
 		return -1, max(1, m.width)
 	}
-	nameW := 1
+	rowW := 1
 	for _, r := range m.listRows() {
 		w := r.indent()
-		if r.header || r.more {
+		extra := 4 // glyph, space, then the gap and build cell after the name
+		switch {
+		case r.more:
 			w += displayWidth(r.label)
-		} else {
+			extra = 0
+		case r.header:
+			w += displayWidth(r.label)
+			extra = 2
+		default:
 			w += displayWidth(m.targets[r.target].spec.localName())
 		}
-		nameW = max(nameW, w)
+		rowW = max(rowW, min(w, maxNameW)+extra)
+	}
+	for _, mi := range m.missing {
+		rowW = max(rowW, min(displayWidth(mi.Group+" (not found)"), maxNameW))
 	}
 	if m.hasGroups() {
-		nameW = max(nameW, displayWidth(groupLabel(ungrouped)))
+		rowW = max(rowW, min(displayWidth(groupLabel(ungrouped)), maxNameW)+2)
 	}
-	nameW = min(nameW, maxNameW)
-	leftW = nameW + m.nameMargin()
-	// A wide screen keeps 24 cells, which fits the version beside the `?help` cue; a narrow one shrinks to 16.
-	if m.width < narrowW {
-		leftW = max(16, leftW)
-	} else {
-		leftW = max(24, leftW)
+	// The last cell is padding before the divider; it also holds the unsaved-columns marker.
+	leftW = rowW + 1
+	if m.showTimes {
+		leftW += statusW
 	}
+	// The floor keeps `?help` and a short version legible beside tiny names.
+	leftW = max(12, leftW)
 	if limit := max(8, m.width/2); leftW > limit {
 		leftW = limit
 	}
@@ -493,9 +501,9 @@ func (m *tuiModel) toggleList() {
 
 func (m *tuiModel) listShown() bool { return !m.listHidden }
 
-// nameMargin is the cells a row keeps beside its name: glyph, space, marker, build cell, and the times column when shown.
+// nameMargin is the cells a row keeps beside its name: glyph, space, gap, build cell, the padding cell, and the times column when shown.
 func (m *tuiModel) nameMargin() int {
-	margin := 6
+	margin := 5
 	if m.showTimes {
 		margin += statusW
 	}
@@ -524,13 +532,12 @@ func timesCell(s string) string {
 	return strings.Repeat(" ", statusW-displayWidth(s)) + s
 }
 
-// marker is the two cells after a name: `*` when its columns await ctrl+s, else blank,
-// so the status never shifts.
+// marker is the row's last cell: `*` when its columns await ctrl+s, else blank.
 func marker(dirty bool) string {
 	if dirty {
-		return "* "
+		return "*"
 	}
-	return "  "
+	return " "
 }
 
 // listLen counts the list's screen lines: schema headers and targets.
@@ -572,9 +579,8 @@ func (m *tuiModel) scrollList(delta int) {
 	m.layout.offset = m.listOffset()
 }
 
-// versionCell draws the left column's bottom line: the version, then the build
-// age with t on, and `?help` flush right. A narrow column drops the age first,
-// then cuts the version; `?help` always stays.
+// versionCell draws the left column's bottom line: the version on the left and `?help` flush right.
+// With t on the build age follows the version; a narrow column cuts the version first, then the age. `?help` always stays.
 func (m *tuiModel) versionCell(leftW int) string {
 	const cue = "?help"
 	if leftW <= displayWidth(cue) {
@@ -582,12 +588,17 @@ func (m *tuiModel) versionCell(leftW int) string {
 	}
 	avail := leftW - displayWidth(cue) - 1 // one blank cell keeps the cue off the version
 	version := m.versionText()
-	left := version
-	if age, ok := m.buildAgeText(); m.showTimes && ok && displayWidth(version+" · "+age) <= avail {
-		left = version + " · " + age
-	}
-	if displayWidth(left) > avail {
-		left = ellipsize(strings.TrimPrefix(version, "rerun · "), avail) // a narrow column keeps the version, not the name
+	left := ellipsize(version, avail)
+	if age, ok := m.buildAgeText(); m.showTimes && ok {
+		const sep = " · "
+		switch room := avail - displayWidth(age) - len(sep); {
+		case room >= displayWidth(version):
+			left = version + sep + age
+		case room >= 2:
+			left = ellipsize(version, room) + sep + age
+		default:
+			left = ellipsize(age, avail)
+		}
 	}
 	pad := max(0, leftW-displayWidth(left)-displayWidth(cue))
 	return m.styles.hint.Render(left + strings.Repeat(" ", pad) + cue)
@@ -597,9 +608,9 @@ func (m *tuiModel) versionCell(leftW int) string {
 func (m *tuiModel) versionText() string {
 	switch {
 	case strings.HasPrefix(m.version, "v"), strings.HasPrefix(m.version, "dev-"):
-		return "rerun · " + m.version
+		return m.version
 	}
-	return "rerun · dev"
+	return "dev"
 }
 
 // buildAgeText is how long ago the binary was built, like `11m ago`; false when buildTime is empty or unparsable.
@@ -694,10 +705,10 @@ func (m *tuiModel) fsHintText(b feedBatch, leftW int) string {
 	if n := len(b.files) - 1; n > 0 {
 		more = fmt.Sprintf(" +%d", n)
 	}
-	if !m.showTimes || leftW <= statusW {
+	if !m.showTimes || leftW-1 <= statusW {
 		return fitFsName(name, more, leftW)
 	}
-	col := leftW - statusW
+	col := leftW - 1 - statusW
 	// The blank cell before the age column keeps the name off the age.
 	return padRight(fitFsName(name, more, col-1), col) + timesCell(fmtDur(m.now.Sub(b.at)))
 }
@@ -789,14 +800,16 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)},
 		seg{text: " "},
 		buildCell(t, m.now, m.spin),
-		seg{text: marker(m.targetDirty(t))},
 	)
 	if m.showTimes {
 		// The times column stays on the right edge, however short the names are.
-		fill := max(0, leftW-statusW-m.buildColW(leftW)-6)
+		fill := max(0, leftW-1-statusW-(m.buildColW(leftW)+4))
 		segs = append(segs, seg{text: strings.Repeat(" ", fill)})
 		segs = append(segs, seg{text: timesCell(m.status(t)), color: statusColor(t)})
+	} else {
+		segs = append(segs, seg{text: strings.Repeat(" ", max(0, leftW-1-(m.buildColW(leftW)+4)))})
 	}
+	segs = append(segs, seg{text: marker(m.targetDirty(t))})
 	style := m.rowStyle(row, r)
 	if m.scopedRow(r) {
 		style = style.Bold(true)
@@ -1362,7 +1375,7 @@ var helpKeys = [][2]string{
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r", "mute (group: its targets) · r reboots"},
 	{"e", "fs events (last 10 min)"},
-	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t times"},
+	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t list times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
 	{"o i ctrl+o", "pick a link to open · ctrl+o: target's link · i: original lines"},
 	{"alt+z alt+y", "undo/redo text in the bar, Go-to and link picker"},

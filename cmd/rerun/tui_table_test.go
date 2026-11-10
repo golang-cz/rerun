@@ -29,7 +29,7 @@ func TestTableAlignsColumnValues(t *testing.T) {
 	if !m.tableOn() {
 		t.Fatal("a target with columns did not start in table mode")
 	}
-	lines := paneOf(m)[m.titleHeight():]
+	lines := paneBody(m)
 	row0, row1 := dropMarker(lines[0]), dropMarker(lines[1])
 	if !strings.HasPrefix(row0, "web  GET") || !strings.HasPrefix(row1, "web  DELETE") {
 		t.Fatalf("rows = %q, %q, want the name prefix then the method", row0, row1)
@@ -87,7 +87,7 @@ func TestTableMixesRawAndColumnRows(t *testing.T) {
 	m.applyScope(-1, "backend")
 	m.frame()
 
-	lines := paneOf(m)[m.titleHeight():]
+	lines := paneBody(m)
 	if got := strings.TrimRight(lines[0], " "); !strings.Contains(got, "GET") || strings.Contains(got, jsonGet) {
 		t.Fatalf("web row = %q, want a table row", got)
 	}
@@ -104,7 +104,7 @@ func TestTableFallsBackToRawOnBadLineOrExpr(t *testing.T) {
 	addLines(m, "bad", jsonGet, "not json at all")
 	m.frame()
 
-	lines := paneOf(m)[m.titleHeight():]
+	lines := paneBody(m)
 	if got := dropMarker(lines[0]); got != "bad  "+jsonGet {
 		t.Fatalf("bad-expr row = %q, want raw text", got)
 	}

@@ -738,9 +738,9 @@ func (m *tuiModel) paneWidth() int {
 // stampW is the cells a line's clock time and its space take in the pane's left gutter.
 const stampW = len("15:04:05 ")
 
-// stampGutter is the width of the pane's time gutter: stampW with `t` on and room to spare, else 0.
+// stampGutter is the width of the pane's time gutter: stampW when there is room to spare, else 0.
 func (m *tuiModel) stampGutter() int {
-	if !m.showTimes || m.width <= 0 {
+	if m.width <= 0 {
 		return 0
 	}
 	leftW, _ := m.layoutWidths()
@@ -1562,14 +1562,8 @@ func (m *tuiModel) status(t *tuiTarget) string {
 		return t.exitLabel
 	case stateStopped:
 		return "stopped"
-	case stateOnChange:
-		return "waiting"
-	case stateManual:
-		// Every Makefile target starts manual, so the word would repeat on each row.
-		if t.spec.Kind == makeKind {
-			return ""
-		}
-		return "manual"
+	case stateOnChange, stateManual:
+		return "" // the `·` glyph already says it
 	}
 	return "off"
 }

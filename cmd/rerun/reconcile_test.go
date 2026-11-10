@@ -423,8 +423,8 @@ func TestReconcileUpdatesAnUnstartedRowsStartMode(t *testing.T) {
 		stopped: []bool{false},
 	}})
 
-	if got := m.status(m.targets[0]); got != "waiting" {
-		t.Fatalf("status = %q, want waiting after the reload", got)
+	if got := m.targets[0].state; got != stateOnChange {
+		t.Fatalf("state = %v, want onchange after the reload", got)
 	}
 }
 
@@ -661,13 +661,14 @@ func TestReconcileBannerStaysOneLine(t *testing.T) {
 func TestReconcileBannerClampsToPaneWidth(t *testing.T) {
 	m := newTestModel(t, recTarget("web", "sleep 1"))
 	line := reconcileSummary([]reconcileAction{{name: strings.Repeat("verylongname", 20), kind: recAdd}})
-	if w := m.paneWidth(); displayWidth(line) <= w {
+	_, w := m.layoutWidths()
+	if displayWidth(line) <= w {
 		t.Fatalf("the fixture banner is %d cells, not past the pane width %d", displayWidth(line), w)
 	}
 
 	m.showNotice(line, false)
 
-	if got, w := bottomPaneLine(m), m.paneWidth(); displayWidth(got) > w {
+	if got := bottomPaneLine(m); displayWidth(got) > w {
 		t.Fatalf("footer = %q (%d cells), want at most the pane width %d", got, displayWidth(got), w)
 	}
 }

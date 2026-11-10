@@ -46,7 +46,7 @@ Flags:
   -cooldown <dur>   minimum time between restarts (default 0s)
   -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
   -no-gitignore     do not filter watched files through .gitignore
-  -migrate          move rerun.yml's top-level targets under targets:
+  -migrate          rewrite retired keys (fold, muted, run, open, open-on-start); move top-level targets under targets:
   -h, -help         show this help
   -version          show version
 

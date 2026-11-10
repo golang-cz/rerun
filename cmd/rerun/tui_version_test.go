@@ -20,10 +20,10 @@ func TestVersionText(t *testing.T) {
 		buildTime string
 		want      string
 	}{
-		{"release tag", "v1.2.3", "", "rerun · v1.2.3"},
-		{"dev build", "dev-abc1234", "2026-01-02T03:01:05Z", "rerun · dev-abc1234"},
-		{"unbuilt", "", "", "rerun · dev"},
-		{"bare dev", "dev", "", "rerun · dev"},
+		{"release tag", "v1.2.3", "", "v1.2.3"},
+		{"dev build", "dev-abc1234", "2026-01-02T03:01:05Z", "dev-abc1234"},
+		{"unbuilt", "", "", "dev"},
+		{"bare dev", "dev", "", "dev"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,7 +53,7 @@ func TestVersionRowOwnsTheLeftColumnsBottomLine(t *testing.T) {
 	}
 
 	leftW, _ := m.layoutWidths()
-	text := "rerun · v9.9.9"
+	text := "v9.9.9"
 	got := string([]rune(plainLine(bottom))[:leftW])
 	if want := text + strings.Repeat(" ", leftW-displayWidth(text)-len("?help")) + "?help"; got != want {
 		t.Fatalf("left column = %q, want %q", got, want)
@@ -71,7 +71,7 @@ func TestVersionCellEndsWithHelpCue(t *testing.T) {
 		leftW int
 		want  string
 	}{
-		{"wide column", 30, "rerun · v9.9.9" + strings.Repeat(" ", 30-14-5) + "?help"},
+		{"wide column", 30, "v9.9.9" + strings.Repeat(" ", 30-6-5) + "?help"},
 		{"narrow column", 8, "v…" + strings.Repeat(" ", 8-2-5) + "?help"},
 		{"cue only", 6, " ?help"},
 	}
@@ -115,7 +115,7 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 		t.Fatalf("rowAt on the version row = %d, want no row", got)
 	}
 	bottom := plainLine(lines[m.height-1])
-	if !strings.HasPrefix(bottom, "rerun · dev") {
+	if !strings.HasPrefix(bottom, "dev") {
 		t.Fatalf("version line = %q, want the dev fallback", bottom)
 	}
 	for _, tg := range targets {
@@ -128,7 +128,7 @@ func TestVersionRowShrinksTheListArea(t *testing.T) {
 // With t on the version reads `version · age ago`; t off, or no usable buildTime, drops the age.
 func TestVersionRowShowsBuildAgeWithTimes(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	const ver = "rerun · dev-abc1234"
+	const ver = "dev-abc1234"
 	cases := []struct {
 		name      string
 		times     bool
@@ -153,7 +153,7 @@ func TestVersionRowShowsBuildAgeWithTimes(t *testing.T) {
 	}
 }
 
-// Narrow columns drop the age first, then cut the version; `?help` stays.
+// Narrow columns cut the version first, then the age; `?help` stays.
 func TestVersionRowTruncationOrder(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	cases := []struct {
@@ -161,10 +161,10 @@ func TestVersionRowTruncationOrder(t *testing.T) {
 		leftW int
 		left  string
 	}{
-		{"room for age", 30, "rerun · v9.9.9 · 11m ago"},
-		{"age dropped", 25, "rerun · v9.9.9"},
-		{"name dropped", 15, "v9.9.9"},
-		{"version cut", 8, "v…"},
+		{"room for both", 30, "v9.9.9 · 11m ago"},
+		{"version cut", 21, "v9.… · 11m ago"},
+		{"version dropped", 17, "11m ago"},
+		{"age cut", 11, "11m …"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,5 +176,18 @@ func TestVersionRowTruncationOrder(t *testing.T) {
 				t.Fatalf("cell = %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// With t on at a normal list width the age shows beside the version, and `?help` stays flush right.
+func TestVersionRowKeepsAgeAtNormalWidth(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	m := newTestModel(t)
+	m.version, m.buildTime, m.now, m.showTimes = "dev-70aa7ff", "2026-01-02T02:53:05Z", now, true
+	for _, leftW := range []int{33, 29, 27} {
+		got := plainLine(m.versionCell(leftW))
+		if !strings.Contains(got, "11m ago") || !strings.HasSuffix(got, "?help") {
+			t.Errorf("versionCell(%d) = %q, want the age and `?help`", leftW, got)
+		}
 	}
 }

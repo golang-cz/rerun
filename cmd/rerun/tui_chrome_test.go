@@ -9,8 +9,8 @@ import (
 	"github.com/golang-cz/rerun"
 )
 
-// The marker cells sit between the build cell and the status, so neither touches either.
-func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
+// The marker is the row's last cell, after the times column, so it never touches the status.
+func TestMarkerCellSitsInTheLastCell(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.targets[0].state = stateRunning
 	m.targets[1].state = stateRunning
@@ -19,27 +19,26 @@ func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m.frame()
 
 	leftW, _ := m.layoutWidths()
-	markerAt := 4 + m.buildColW(leftW)
 	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y+1, leftW))) }
 
-	if got := string(cells(0)[markerAt : markerAt+2]); got != "  " {
-		t.Errorf("clean row marker = %q, want two blank cells", got)
+	if got := string(cells(0)[leftW-1]); got != " " {
+		t.Errorf("clean row marker = %q, want a blank cell", got)
 	}
-	if got := string(cells(1)[markerAt : markerAt+2]); got != "* " {
-		t.Errorf("dirty row marker = %q, want \"* \"", got)
+	if got := string(cells(1)[leftW-1]); got != "*" {
+		t.Errorf("dirty row marker = %q, want \"*\"", got)
 	}
 	for y := 0; y < 2; y++ {
-		if got := string(cells(y)); !strings.HasSuffix(got, "0s") {
-			t.Errorf("row %d = %q, want the uptime flush right at column %d", y, got, leftW)
+		if got := strings.TrimRight(string(cells(y)[:leftW-1]), " "); !strings.HasSuffix(got, "0s") || len(cells(y)) != leftW {
+			t.Errorf("row %d = %q, want the uptime ending at column %d", y, string(cells(y)), leftW-1)
 		}
 	}
 }
 
-// Every state but running names itself in words, so color is never the only cue.
+// Every state but running, onchange, and manual names itself in words; those two keep only the `·` glyph.
 func TestEveryNonRunningStateNamesItself(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	row := m.targets[0]
-	for _, st := range []procState{stateOff, stateStarting, stateBackoff, stateExited, stateStopped, stateOnChange, stateManual} {
+	for _, st := range []procState{stateOff, stateStarting, stateBackoff, stateExited, stateStopped} {
 		row.state = st
 		row.exitLabel = "exit 0"
 		if got := m.status(row); strings.TrimSpace(got) == "" || !strings.ContainsAny(got, "abcdefghijklmnopqrstuvwxyz") {
@@ -197,16 +196,19 @@ func TestFooterCueReadsHelp(t *testing.T) {
 	}
 }
 
-// A narrow screen shrinks the left column to the names, down to 16; a wide one keeps 24.
-func TestLeftColumnWidthFollowsTheScreen(t *testing.T) {
-	m := newTestModel(t, target("a"))
-	m.width, m.height = 80, 20
-	if leftW, _ := m.layoutWidths(); leftW != 16 {
-		t.Errorf("narrow leftW = %d, want 16", leftW)
+// The left column is as wide as its widest row plus one padding cell, on any screen width, down to the 12-cell floor.
+func TestLeftColumnWidthIgnoresTheScreen(t *testing.T) {
+	m := newTestModel(t, target("backoffice-webapp"))
+	for _, w := range []int{80, 120} {
+		m.width, m.height = w, 20
+		if leftW, _ := m.layoutWidths(); leftW != len("backoffice-webapp")+5 {
+			t.Errorf("width %d: leftW = %d, want %d", w, leftW, len("backoffice-webapp")+5)
+		}
 	}
-	m.width = 120
-	if leftW, _ := m.layoutWidths(); leftW != 24 {
-		t.Errorf("wide leftW = %d, want 24", leftW)
+	m = newTestModel(t, target("a"))
+	m.width, m.height = 120, 20
+	if leftW, _ := m.layoutWidths(); leftW != 12 {
+		t.Errorf("short names: leftW = %d, want the 12-cell floor", leftW)
 	}
 }
 
@@ -235,24 +237,19 @@ func TestEllipsizeMiddle(t *testing.T) {
 	}
 }
 
-// A Makefile target starts manual, but the status word would repeat on every row.
-func TestMakeTargetStatusIsEmptyAndYamlManualShowsIt(t *testing.T) {
+// A manual row, make or yaml, shows no status word: the `·` glyph says it.
+func TestManualRowsShowNoStatusWord(t *testing.T) {
 	mk := Target{Name: "build", Cmd: "make build", Kind: makeKind, Start: startManual, Selected: true, Grace: rerun.DefaultGrace}
-	mm := newTestModel(t, mk)
-	if got := mm.status(mm.targets[0]); got != "" {
-		t.Errorf("make target status = %q, want empty", got)
-	}
-	if strings.Contains(ansi.Strip(mm.View().Content), "manual") {
-		t.Errorf("make target view shows manual, want no status word")
-	}
-
-	ym := newTestModel(t, Target{Name: "job", Cmd: "true", Start: startManual, Selected: true, Grace: rerun.DefaultGrace})
-	ym.showTimes = true
-	if got := ym.status(ym.targets[0]); got != "manual" {
-		t.Errorf("yaml manual status = %q, want manual", got)
-	}
-	if !strings.Contains(ansi.Strip(ym.View().Content), "manual") {
-		t.Errorf("yaml manual view lacks the manual status word")
+	yml := Target{Name: "job", Cmd: "true", Start: startManual, Selected: true, Grace: rerun.DefaultGrace}
+	for _, tg := range []Target{mk, yml} {
+		m := newTestModel(t, tg)
+		m.showTimes = true
+		if got := m.status(m.targets[0]); got != "" {
+			t.Errorf("%s status = %q, want empty", tg.Name, got)
+		}
+		if strings.Contains(ansi.Strip(m.View().Content), "manual") {
+			t.Errorf("%s view shows manual, want no status word", tg.Name)
+		}
 	}
 }
 
@@ -263,7 +260,7 @@ func TestLongTargetNameIsCapped(t *testing.T) {
 	m.frame()
 
 	leftW, _ := m.layoutWidths()
-	if want := maxNameW + 6; leftW != want {
+	if want := maxNameW + 5; leftW != want {
 		t.Fatalf("leftW = %d, want %d", leftW, want)
 	}
 	row := ansi.Strip(m.leftLine(1, leftW))
@@ -303,5 +300,42 @@ func TestCtrlOOnGroupHeaderShowsNotice(t *testing.T) {
 	press(m, "ctrl+o")
 	if m.notice != "ctrl+o opens a target's link" || m.noticeErr {
 		t.Fatalf("notice = %q err=%v, want the ctrl+o hint", m.notice, m.noticeErr)
+	}
+}
+
+// The list is its widest row plus one padding cell, with `t` off and on.
+func TestLeftColumnIsWidestRowPlusPadding(t *testing.T) {
+	m := newTestModel(t, target("backoffice-webapp"), target("api"))
+	m.targets[0].state, m.targets[1].state = stateRunning, stateRunning
+	m.now = spawnClock
+	for _, times := range []bool{false, true} {
+		m.showTimes = times
+		m.frame()
+		leftW, _ := m.layoutWidths()
+		want := len("backoffice-webapp") + 4 + 1
+		if times {
+			want += statusW
+		}
+		if leftW != want {
+			t.Errorf("times=%v: leftW = %d, want %d", times, leftW, want)
+		}
+	}
+}
+
+// Members folded behind `(+) N more` do not widen the list, and expanding them does.
+func TestFoldedMembersDoNotWidenTheList(t *testing.T) {
+	long, short := target("a-very-long-folded-target-name"), target("api")
+	long.Schema, short.Schema = "ops", "ops"
+	m := newTestModel(t, short, long)
+	idle(m)
+	m.setFold([]string{"ops"}, true)
+	m.frame()
+	folded, _ := m.layoutWidths()
+
+	m.setFold([]string{"ops"}, false)
+	m.frame()
+	open, _ := m.layoutWidths()
+	if folded >= open {
+		t.Fatalf("folded leftW = %d, expanded = %d, want the folded list narrower", folded, open)
 	}
 }

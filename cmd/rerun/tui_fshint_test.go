@@ -99,11 +99,11 @@ func TestFsHintDoesNotFlashOnANewBatch(t *testing.T) {
 // A watcher error turns the row red until the next successful batch.
 func TestFsHintTurnsRedOnAWatchError(t *testing.T) {
 	// The long name widens the column, so the whole failure text fits.
-	m := newTestModel(t, target("backoffice-webapp"))
+	m := newTestModel(t, target("backoffice-webapp-service"))
 	m.width, m.height = 100, 30
 	m.now = spawnClock
 	m.applyEvent(event{
-		kind: evChanged, target: "backoffice-webapp", count: 1, restarts: true, at: spawnClock,
+		kind: evChanged, target: "backoffice-webapp-service", count: 1, restarts: true, at: spawnClock,
 		change: changeWithError(map[string]fsnotify.Op{"a.go": fsnotify.Write}, errors.New("too many open files")),
 	})
 	m.now = spawnClock.Add(3 * time.Second)
@@ -118,7 +118,7 @@ func TestFsHintTurnsRedOnAWatchError(t *testing.T) {
 		t.Fatalf("hint after the error = %q, want red paint", ansi.Strip(line))
 	}
 
-	changeAt(m, "backoffice-webapp", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
+	changeAt(m, "backoffice-webapp-service", spawnClock.Add(4*time.Second), map[string]fsnotify.Op{"b.go": fsnotify.Write})
 	m.now = spawnClock.Add(5 * time.Second)
 	if got := hintRow(m); got != "b.go" {
 		t.Fatalf("hint after the next good batch = %q, want the failure cleared", got)
@@ -128,11 +128,11 @@ func TestFsHintTurnsRedOnAWatchError(t *testing.T) {
 // At 80 columns the failure text is cut to the narrow column, staying
 // red while the error batch is in the window, and goes idle once it ages out.
 func TestFsHintShortensTheFailureText(t *testing.T) {
-	m := newTestModel(t, target("web"))
+	m := newTestModel(t, target("web-service"))
 	m.width, m.height = 80, 24
 	m.now = spawnClock
 	m.applyEvent(event{
-		kind: evChanged, target: "web", count: 1, restarts: true, at: spawnClock,
+		kind: evChanged, target: "web-service", count: 1, restarts: true, at: spawnClock,
 		change: changeWithError(map[string]fsnotify.Op{"a.go": fsnotify.Write}, errors.New("too many open files in the watcher pool")),
 	})
 
@@ -232,15 +232,15 @@ func TestFsHintAgeLinesUpWithRowTimes(t *testing.T) {
 	if !strings.HasPrefix(hint, "server.gen.go") || !strings.HasSuffix(hint, "4s") {
 		t.Fatalf("hint = %q, want the file then the 4s age", hint)
 	}
-	if col(hint) != leftW || col(row) != leftW {
-		t.Fatalf("hint age ends at %d, row duration at %d, want both at %d", col(hint), col(row), leftW)
+	if col(hint) != leftW-1 || col(row) != leftW-1 {
+		t.Fatalf("hint age ends at %d, row duration at %d, want both at %d", col(hint), col(row), leftW-1)
 	}
 }
 
 // With times hidden the age is gone, and the batch's +N stays in the row.
 func TestFsHintKeepsPlusNWithTimesHiddenAndShown(t *testing.T) {
-	m := newTestModel(t, target("web"))
-	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write, "b.go": fsnotify.Write})
+	m := newTestModel(t, target("web-service"))
+	changeAt(m, "web-service", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write, "b.go": fsnotify.Write})
 	m.now = spawnClock.Add(4 * time.Second)
 	if got := hintRow(m); got != "a.go +1" {
 		t.Fatalf("hidden hint = %q, want a.go +1", got)

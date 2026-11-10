@@ -20,7 +20,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneFocus {
 		t.Fatal("pane starts focused")
 	}
-	before := ansi.Strip(paneOf(m)[m.titleHeight()])
+	before := dropStamp(ansi.Strip(paneOf(m)[m.titleHeight()]))
 
 	press(m, "right")
 	if !m.paneFocus {
@@ -34,7 +34,7 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if m.paneCol != 1 {
 		t.Fatalf("paneCol = %d, want 1", m.paneCol)
 	}
-	after := ansi.Strip(paneOf(m)[m.titleHeight()])
+	after := dropStamp(ansi.Strip(paneOf(m)[m.titleHeight()]))
 	if after == before {
 		t.Fatalf("pane line did not shift: %q", after)
 	}

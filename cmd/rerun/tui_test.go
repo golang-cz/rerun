@@ -485,7 +485,7 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	}
 }
 
-// The left column is nameW + the fixed glyph, space, space, build cell, two-cell marker, and times column.
+// The left column is nameW + the fixed glyph, space, space, build cell, padding cell, and times column.
 func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
 	m.showTimes = true
@@ -495,8 +495,8 @@ func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	if got := m.nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+17 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+17)
+	if leftW != wantName+16 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+16)
 	}
 	if statusW != 11 {
 		t.Fatalf("statusW = %d, want 11", statusW)
@@ -1155,7 +1155,7 @@ func TestRowStatusText(t *testing.T) {
 	}
 }
 
-// A row that has not run yet shows its start mode's own status word.
+// A row that has not run yet shows no status word: the `·` glyph already says onchange or manual.
 func TestRowStatusTextForStartModes(t *testing.T) {
 	onchange := target("api")
 	onchange.Start = startOnChange
@@ -1166,22 +1166,20 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 	if got := m.targets[0].state; got != stateOnChange {
 		t.Fatalf("state = %v, want onchange", got)
 	}
-	if got := m.status(m.targets[0]); got != "waiting" {
-		t.Errorf("status = %q, want waiting", got)
-	}
-	if got := m.status(m.targets[1]); got != "manual" {
-		t.Errorf("status = %q, want manual", got)
-	}
-	if got := m.targets[0].glyph(); got != "·" {
-		t.Errorf("glyph = %q, want ·", got)
+	for i := range m.targets {
+		if got := m.status(m.targets[i]); got != "" {
+			t.Errorf("status of row %d = %q, want empty", i, got)
+		}
+		if got := m.targets[i].glyph(); got != "·" {
+			t.Errorf("glyph of row %d = %q, want ·", i, got)
+		}
 	}
 	m.showTimes = true
-	frame := strings.Split(m.View().Content, "\n")
-	if got := frame[1]; !strings.Contains(got, "waiting") {
-		t.Errorf("row 1 = %q, want the waiting status", got)
-	}
-	if got := frame[2]; !strings.Contains(got, "manual") {
-		t.Errorf("row 2 = %q, want the manual status", got)
+	frame := plainLine(m.View().Content)
+	for _, word := range []string{"waiting", "manual"} {
+		if strings.Contains(frame, word) {
+			t.Errorf("frame shows %q, want no status word", word)
+		}
 	}
 
 	// The first run takes the row to the ordinary running state.
