@@ -354,3 +354,49 @@ func TestSharedBuildOwnerLeavingHandsRunToNextMember(t *testing.T) {
 		t.Fatalf("build ran %d times, want 1", n)
 	}
 }
+
+// A startup trigger that finds a run already ended joins it; relaunching would drop the run's result.
+func TestSharedBuildStartupJoinsRunThatAlreadyEnded(t *testing.T) {
+	share := newBuildShare()
+	dir := t.TempDir()
+	script, counter, gate := countedBuild(t, 0)
+	a, _, ctx := sharedRunner(t, share, "a", dir, script)
+	b, bLog, _ := sharedRunner(t, share, "b", dir, script)
+
+	a.startBuild(nil)
+	waitForRuns(t, counter, 1)
+	// The process has exited, but its reap has not reached the share yet.
+	share.mu.Lock()
+	share.open[buildKeyOf(a.target)].ended.Store(time.Now().UnixNano())
+	share.mu.Unlock()
+	b.startBuild(nil)
+	releaseGate(t, gate)
+	a.finishBuild(ctx, nextBuild(t, a))
+	b.finishBuild(ctx, nextBuild(t, b))
+
+	if n := runCount(counter); n != 1 {
+		t.Fatalf("build ran %d times, want 1", n)
+	}
+	if got := len(bLog.kind(evBuildOK)); got != 1 {
+		t.Errorf("b: evBuildOK = %d, want 1", got)
+	}
+}
+
+// restartBuild replaces a running shared build, so the next run starts from scratch.
+func TestSharedBuildRestartReplacesRunningBuild(t *testing.T) {
+	share := newBuildShare()
+	dir := t.TempDir()
+	script, counter, gate := countedBuild(t, 0)
+	a, aLog, ctx := sharedRunner(t, share, "a", dir, script)
+
+	a.startBuild(nil)
+	waitForRuns(t, counter, 1)
+	a.restartBuild()
+	waitForRuns(t, counter, 2)
+	releaseGate(t, gate)
+	a.finishBuild(ctx, nextBuild(t, a))
+
+	if got := len(aLog.kind(evBuildStarted)); got != 2 {
+		t.Errorf("a: evBuildStarted = %d, want 2 (launch and restart)", got)
+	}
+}

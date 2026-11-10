@@ -111,7 +111,7 @@ func (s *buildShare) start(r *targetRunner, files map[string]struct{}, restart b
 	case cur.replacing:
 		// The run that is waiting to relaunch picks this trigger up.
 		cur.adoptLocked(job, union)
-	case cur.cancelled || restart || late || cur.ended.Load() != 0:
+	case cur.cancelled || restart || late || (cur.ended.Load() != 0 && files != nil):
 		// The process may have read the files already, or is going away: rerun once with everyone.
 		cur.cancelled, cur.replacing = true, true
 		s.mu.Unlock()
