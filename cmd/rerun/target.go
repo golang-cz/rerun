@@ -650,7 +650,8 @@ func (r *targetRunner) run(ctx context.Context) error {
 			if r.target.Build != "" {
 				r.startBuild(nil)
 			} else if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
-				return err
+				// Same as spawn: the row shows the failure and the loop stays up for the next change.
+				r.sink.emit(event{kind: evRunnerErr, target: r.target.Name, err: err})
 			}
 		}
 		r.sink.emit(event{kind: evCleared, target: r.target.Name})

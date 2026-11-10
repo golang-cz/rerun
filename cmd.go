@@ -106,9 +106,12 @@ func (c *command) Start() error {
 		return ErrAlreadyRunning
 	}
 
-	cmd := newExecCmd(c.cmdline, c.opts...)
+	cmd := newExecCmd(c.cmdline)
+	for _, opt := range c.opts {
+		opt(cmd)
+	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return startError(cmd, err)
 	}
 
 	st := &exitState{done: make(chan struct{}), code: -1}

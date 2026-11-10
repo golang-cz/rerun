@@ -41,3 +41,8 @@ func signalGroup(cmd *exec.Cmd, st *exitState, force bool) {
 	kill := exec.Command("TASKKILL", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
 	kill.Run()
 }
+
+// startError passes the start error through; only unix execs a file without #! directly.
+func startError(_ *exec.Cmd, err error) error {
+	return err
+}

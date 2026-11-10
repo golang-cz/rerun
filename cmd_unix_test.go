@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -34,12 +35,13 @@ func TestPlainArgv(t *testing.T) {
 		{"plain args", "true -x=1", []string{"true", "-x=1"}, true},
 		{"absolute binary", bin + " -port 8080", []string{bin, "-port", "8080"}, true},
 		{"real binary", "/bin/ls -l", []string{"/bin/ls", "-l"}, true},
+		{"relative binary", "./bin/server -x", []string{"./bin/server", "-x"}, true},
+		{"missing binary goes direct", "definitely-not-a-binary-xyz arg", []string{"definitely-not-a-binary-xyz", "arg"}, true},
 		{"tab separated", "true\t-x", []string{"true", "-x"}, true},
 		{"env assignment prefix", "FOO=1 true", nil, false},
 		{"and list", "cd x && y", nil, false},
 		{"builtin exec", "exec " + bin, nil, false},
 		{"builtin cd", "cd /", nil, false},
-		{"missing binary", "definitely-not-a-binary-xyz arg", nil, false},
 		{"empty", "", nil, false},
 		{"whitespace only", " \t ", nil, false},
 		{"newline", "true\nfalse", nil, false},
@@ -56,7 +58,7 @@ func TestPlainArgv(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := plainArgv(tc.script, "")
+			got, ok := plainArgv(tc.script)
 			if ok != tc.ok || !slices.Equal(got, tc.want) {
 				t.Fatalf("plainArgv(%q) = %q, %v; want %q, %v", tc.script, got, ok, tc.want, tc.ok)
 			}
@@ -64,28 +66,23 @@ func TestPlainArgv(t *testing.T) {
 	}
 }
 
-func TestPlainArgvShebangless(t *testing.T) {
+func TestStartShebanglessScriptNamesShebang(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "run.sh")
 	writeScript(t, script, "echo hi\n")
-	if got, ok := plainArgv(script, ""); ok {
-		t.Fatalf("plainArgv(%q) = %q, true; want sh for a script without #!", script, got)
+
+	_, err := StartCommand([]string{script}, 0)
+	if err == nil {
+		t.Fatalf("StartCommand(%q) succeeded; want an exec error for a script without #!", script)
+	}
+	if !strings.Contains(err.Error(), "#!") {
+		t.Fatalf("StartCommand(%q) error = %v; want it to suggest a #! line", script, err)
 	}
 }
 
-func TestPlainArgvRelativeDir(t *testing.T) {
-	dir := t.TempDir()
-	writeScript(t, filepath.Join(dir, "rerun-plainargv-test", "server"), "#!/bin/sh\nexit 0\n")
-	writeScript(t, filepath.Join(dir, "rerun-plainargv-test", "run.sh"), "echo hi\n")
-
-	if got, ok := plainArgv("./rerun-plainargv-test/server -x", dir); !ok ||
-		!slices.Equal(got, []string{"./rerun-plainargv-test/server", "-x"}) {
-		t.Fatalf("plainArgv with dir = %q, %v; want direct exec", got, ok)
-	}
-	if got, ok := plainArgv("./rerun-plainargv-test/server -x", ""); ok {
-		t.Fatalf("plainArgv without dir = %q, true; want sh, the file is not in the cwd", got)
-	}
-	if got, ok := plainArgv("./rerun-plainargv-test/run.sh", dir); ok {
-		t.Fatalf("plainArgv shebang-less relative = %q, true; want sh", got)
+func TestStartMissingBinaryNamesProgram(t *testing.T) {
+	_, err := StartCommand([]string{"definitely-not-a-binary-xyz arg"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "definitely-not-a-binary-xyz") {
+		t.Fatalf("StartCommand error = %v; want it to name the program", err)
 	}
 }
 
@@ -93,7 +90,7 @@ func TestPlainArgvGoRun(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not on PATH")
 	}
-	got, ok := plainArgv("go run .", "")
+	got, ok := plainArgv("go run .")
 	if !ok || !slices.Equal(got, []string{"go", "run", "."}) {
 		t.Fatalf("plainArgv(\"go run .\") = %q, %v", got, ok)
 	}
@@ -123,7 +120,8 @@ func TestNewExecCmdRelativePathRunsInDir(t *testing.T) {
 	dir := t.TempDir()
 	writeScript(t, filepath.Join(dir, "rerun-plainargv-test", "server"), "#!/bin/sh\nexit 0\n")
 
-	cmd := newExecCmd([]string{"./rerun-plainargv-test/server"}, WithDir(dir))
+	cmd := newExecCmd([]string{"./rerun-plainargv-test/server"})
+	WithDir(dir)(cmd)
 	if cmd.Path != "./rerun-plainargv-test/server" {
 		t.Fatalf("cmd.Path = %q, want the relative binary", cmd.Path)
 	}
