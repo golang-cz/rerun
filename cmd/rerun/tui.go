@@ -151,7 +151,7 @@ type tuiTarget struct {
 	// lastChange is the newest change batch the target reacted to, which the
 	// pane's title line counts.
 	lastChange rerun.ChangeSet
-	// flashUntil ends the row highlight a restart leaves behind.
+	// flashUntil ends the glyph flash a file-triggered restart leaves behind.
 	flashUntil time.Time
 
 	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
@@ -160,6 +160,12 @@ type tuiTarget struct {
 	building    bool
 	buildStart  time.Time
 	buildFailed bool
+	// buildOKAt is when the last build passed, which the build cell's ✓ counts from.
+	buildOKAt time.Time
+	// buildFlashUntil ends the build cell's flash for a build a file change started.
+	buildFlashUntil time.Time
+	// loopFile names the file a core rebuild loop keeps re-triggering; empty when not looping.
+	loopFile string
 	// buildRule is the target's latest build, whose rule and output the next build event updates.
 	buildRule *buildRec
 	// health is the live run's probe state; lastRule is the restart rule it may still complete.
@@ -808,7 +814,11 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		t.backoffUntil = m.now.Add(ev.delay)
 
 	case evBuildStarted:
+		t.loopFile = ""
 		t.buildStart = eventTime(ev, m.now)
+		if len(ev.files) > 0 {
+			t.buildFlashUntil = t.buildStart.Add(flashWindow)
+		}
 		m.setBuildState(i, true, false)
 		if old := t.buildRule; old != nil {
 			if old.phase == buildRunning {
@@ -834,6 +844,8 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		if t.exitLabel == "build failed" {
 			t.exitLabel = ""
 		}
+		at := eventTime(ev, m.now)
+		t.buildOKAt = at
 		m.setBuildState(i, false, false)
 		if rec := t.buildRule; rec != nil && rec.phase == buildRunning {
 			rec.phase, rec.dur = buildPassed, ev.dur
@@ -880,6 +892,8 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		}
 
 	case evStarted:
+		// Only a core resume starts a run during a pause, so a start ends the loop.
+		t.loopFile = ""
 		t.state = stateRunning
 		t.lastStart = ev.at
 		t.lastBuild = ev.buildDur
@@ -925,6 +939,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evStopped:
 		// Someone stopped the service outside rerun, so it reads as stopped, not exited.
+		t.loopFile = ""
 		t.state = stateStopped
 		t.exitLabel = ""
 		t.restartBatch = 0
@@ -943,6 +958,9 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
+		if len(ev.files) > 0 {
+			t.loopFile = ev.files[0]
+		}
 		m.showNotice(fmt.Sprintf("rerun: loop suspected — %s paused after %d× re-triggered by %s; add it to except, or change another file to resume", t.spec.Name, loopCycles, ev.line), true)
 
 	case evCleared:

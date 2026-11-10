@@ -846,7 +846,8 @@ func (r *targetRunner) loopHeld(changeSet rerun.ChangeSet) bool {
 			r.clearLoop()
 		} else {
 			r.loopHeldAt = now
-			r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(sortedFiles(changeSet.Files), ", ")})
+			files := sortedFiles(changeSet.Files)
+			r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(files, ", "), files: files})
 			return true
 		}
 	}
@@ -860,7 +861,7 @@ func (r *targetRunner) loopHeld(changeSet rerun.ChangeSet) bool {
 		r.loopPaused[p] = struct{}{}
 	}
 	r.loopPausedAt, r.loopHeldAt = time.Now(), time.Now()
-	r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(paths, ", ")})
+	r.sink.emit(event{kind: evLoop, target: r.target.Name, line: strings.Join(paths, ", "), files: paths})
 	return true
 }
 

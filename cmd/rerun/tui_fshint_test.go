@@ -18,7 +18,7 @@ func hintRow(m *tuiModel) string {
 	return strings.TrimRight(ansi.Strip(m.leftLine(0, leftW)), " ")
 }
 
-// With no batch in the last minute the row reads idle, and with no batch at all too.
+// With no batch in the last 10 seconds the row reads idle, and with no batch at all too.
 func TestFsHintReadsIdleWithoutBatches(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	if got := hintRow(m); got != "idle" {

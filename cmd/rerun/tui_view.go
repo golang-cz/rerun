@@ -89,10 +89,11 @@ func newTUIStyles(isDark bool) tuiStyles {
 
 // seg is one styled piece of a row. color == "" keeps the row's own style.
 type seg struct {
-	text  string
-	color string
-	link  string
-	faint bool
+	text    string
+	color   string
+	link    string
+	faint   bool
+	reverse bool
 }
 
 // rect is a cell area on screen, used for mouse hit testing.
@@ -680,11 +681,15 @@ func (m *tuiModel) moreLine(row int, r listRow, leftW int) string {
 	return renderSegs([]seg{{text: strings.Repeat(" ", r.indent()) + truncate(r.label, max(0, leftW-r.indent()))}}, style, leftW)
 }
 
-// feedHintCell is the fs row: the newest batch's file, `idle` past feedHintWindow.
+// feedHintCell is the fs row: a rebuild loop's file in red, else the newest batch's file, `idle` past recentWindow.
 func (m *tuiModel) feedHintCell(leftW int) string {
 	style := m.styles.hint
 	text := "idle"
-	if b, ok := m.feedHintBatch(); ok {
+	if t, ok := m.loopingTarget(); ok {
+		_, name := feedSplit(m.feedPath(t.loopFile, t.spec))
+		text = ellipsize("loop: "+fitFsName(name, "", leftW-len("loop: ")), leftW)
+		style = style.Foreground(lipgloss.Color(colorRed))
+	} else if b, ok := m.feedHintBatch(); ok {
 		if b.err != nil {
 			text = ellipsize("fs ! "+b.err.Error(), leftW)
 			style = style.Foreground(lipgloss.Color(colorRed))
@@ -792,11 +797,11 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
 	}
 	segs = append(segs,
-		seg{text: t.glyph(), color: stateColor(t)},
+		seg{text: t.glyph(), color: stateColor(t), reverse: t.flashing(m.now)},
 		seg{text: " "},
 		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link()},
 		seg{text: " "},
-		buildCell(t),
+		buildCell(t, m.now),
 		seg{text: marker(m.targetDirty(t))},
 	)
 	if m.showTimes {
@@ -808,9 +813,6 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	style := m.rowStyle(row, r)
 	if r.dim && row != m.cursor {
 		style = m.styles.muted
-	}
-	if t.flashing(m.now) {
-		style = style.Reverse(true)
 	}
 	if m.scopedRow(r) {
 		style = style.Bold(true)
@@ -911,14 +913,17 @@ func stateColor(t *tuiTarget) string {
 	return colorGray
 }
 
-// buildCell is the build indicator: an orange gear while building, a red ✗ after a failed build.
-// It stays reserved when idle, so the names never shift.
-func buildCell(t *tuiTarget) seg {
+// buildCell is the build indicator; it stays reserved when idle, so the names never shift.
+func buildCell(t *tuiTarget, now time.Time) seg {
 	switch {
+	case t.looping():
+		return seg{text: "∞", color: runRed}
 	case t.building:
-		return seg{text: "⚙", color: runYellow}
+		return seg{text: "⚙", color: runYellow, reverse: now.Before(t.buildFlashUntil)}
 	case t.buildFailed:
 		return seg{text: "✗", color: runRed}
+	case !t.buildOKAt.IsZero() && now.Sub(t.buildOKAt) <= recentWindow:
+		return seg{text: "✓", color: runGreen}
 	}
 	return seg{text: " "}
 }
@@ -952,6 +957,9 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 		}
 		if s.faint {
 			style = style.Faint(true)
+		}
+		if s.reverse {
+			style = style.Reverse(true)
 		}
 		text := truncate(s.text, width-cells)
 		if text == "" {
@@ -1372,7 +1380,7 @@ var helpMouse = []string{
 	"click a +N row reveals its hidden targets; a log line expands, or copies if plain",
 	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
 	"▶ on a group header: space starts its auto targets",
-	"orange ⚙ building  red ✗ build failed",
+	"orange ⚙ building  green ✓ built  red ✗ failed  red ∞ rebuild loop",
 	"● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",
 }

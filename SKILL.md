@@ -113,8 +113,10 @@ is refused with a footer error (edit rerun.yml by hand). Writes keep the file's 
 and line endings, and follow a symlink to the file it names. `cmd+s` works only where the terminal
 forwards it.
 
+The build cell after each name shows an orange `⚙` while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. A file-triggered build flashes its `⚙` for a second, and a file-triggered restart flashes the row's state glyph for a second; the name and the rest of the row never reverse. A rebuild loop is the core detector's pause: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three. The modal never auto-opens.
+
 The fs row at the top of the left column names the newest change batch's first
-file (`server.go +2`, `+N` for the other files in the batch, `idle` past a minute); `t`
+file (`server.go +2`, `+N` for the other files in the batch, `idle` past 10 seconds); `t`
 adds the batch's age in the times column, updates in place with no flash, and turns red `fs ! <error>`
 after a watcher error; a click (or `e`) opens the fs events modal. The modal lists the last 10 minutes' batches (events
 within 150ms of each other), newest first: the time, the first changed file with

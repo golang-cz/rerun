@@ -16,8 +16,8 @@ import (
 // feedWindow is how long a batch stays in the fs events modal.
 const feedWindow = 10 * time.Minute
 
-// feedHintWindow is how long the fs hint names the newest batch before it reads idle.
-const feedHintWindow = time.Minute
+// recentWindow is how long the fs hint names the newest batch, and the build cell shows a passed build's ✓.
+const recentWindow = 10 * time.Second
 
 // feedJoin is how far a change may sit from its batch's first event and still join it.
 const feedJoin = 150 * time.Millisecond
@@ -25,8 +25,8 @@ const feedJoin = 150 * time.Millisecond
 // configJoin is how far back a config reload looks for the batch that holds rerun.yml.
 const configJoin = 2 * time.Second
 
-// restartFlash is how long a restarted target's row stays highlighted.
-const restartFlash = time.Second
+// flashWindow is how long a file-triggered restart's glyph or build cell stays reversed.
+const flashWindow = time.Second
 
 // configTarget is the pseudo-target a rerun.yml reload is listed under.
 const configTarget = "config"
@@ -123,7 +123,7 @@ func isDirPath(path string) bool {
 func (m *tuiModel) feedRestart(t *tuiTarget, at time.Time) {
 	id := t.restartBatch
 	t.restartBatch = 0
-	t.flashUntil = at.Add(restartFlash)
+	t.flashUntil = at.Add(flashWindow)
 	for i := range m.feed {
 		if m.feed[i].id == id && !slices.Contains(m.feed[i].targets, t.spec.Name) {
 			m.feed[i].targets = append(m.feed[i].targets, t.spec.Name)
@@ -166,9 +166,9 @@ func (m *tuiModel) trimFeed() {
 	m.feed = m.feed[i:]
 }
 
-// feedHintBatch is the newest batch while it landed within feedHintWindow.
+// feedHintBatch is the newest batch while it landed within recentWindow.
 func (m *tuiModel) feedHintBatch() (feedBatch, bool) {
-	if n := len(m.feed); n > 0 && m.now.Sub(m.feed[n-1].at) <= feedHintWindow {
+	if n := len(m.feed); n > 0 && m.now.Sub(m.feed[n-1].at) <= recentWindow {
 		return m.feed[n-1], true
 	}
 	return feedBatch{}, false
@@ -373,5 +373,18 @@ func absDuration(d time.Duration) time.Duration {
 	return d
 }
 
-// flashing reports whether a restarted target's row is still highlighted.
+// flashing reports whether a file-triggered restart's glyph is still reversed.
 func (t *tuiTarget) flashing(now time.Time) bool { return now.Before(t.flashUntil) }
+
+// looping reports a core rebuild loop, which stays until the target resumes.
+func (t *tuiTarget) looping() bool { return t.loopFile != "" }
+
+// loopingTarget is the first target in list order that is in a rebuild loop.
+func (m *tuiModel) loopingTarget() (*tuiTarget, bool) {
+	for _, t := range m.targets {
+		if t.looping() {
+			return t, true
+		}
+	}
+	return nil, false
+}

@@ -84,7 +84,7 @@ func TestEventsModalOpensWithHeaderAndFooter(t *testing.T) {
 	}
 
 	lines := eventsLines(m)
-	if !strings.Contains(lines[1], "fs events") || !strings.Contains(lines[1], "last 1m · 1 batch") {
+	if !strings.Contains(lines[1], "fs events") || !strings.Contains(lines[1], "last 10m · 1 batch") {
 		t.Fatalf("header = %q, want the title and the window count", lines[1])
 	}
 	if got := eventsFooterLine(m); !strings.Contains(got, "j k move · → expand · c copy all · esc close") {
@@ -599,7 +599,7 @@ func TestEventsModalEscCloses(t *testing.T) {
 	if m.eventsModal.open {
 		t.Fatal("esc did not close the fs events modal")
 	}
-	if view := ansi.Strip(m.View().Content); strings.Contains(view, "fs events ·") && strings.Contains(view, "last 1m") {
+	if view := ansi.Strip(m.View().Content); strings.Contains(view, "fs events ·") && strings.Contains(view, "last 10m") {
 		t.Fatalf("the modal is still drawn after esc:\n%s", view)
 	}
 }

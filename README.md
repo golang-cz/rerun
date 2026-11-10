@@ -104,11 +104,13 @@ last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
 A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `collapsed: true` starts its header collapsed; `→` or a click expands it. Folding is a start state; a reload keeps your collapse for groups already shown.
+The build cell after each name shows an orange `⚙` while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. A file-triggered build flashes its `⚙` for a second, and a file-triggered restart flashes the row's state glyph for a second. A rebuild loop is a file that the target's own build or run keeps writing: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the build cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three.
+
 The first row of the left column is the fs row: `server.go +1` gives the newest
 change batch's first file, with `+N` for the other files in the batch. A long name cuts its
 stem with `…` and keeps its extension (`ser….gen.go`). `t` adds the batch's age in the times
-column, lined up with the row durations. It reads `idle` when no batch landed in the last minute. It updates in place, with no flash, and
-turns red `fs ! too many open files` after a watcher error, for the same minute. A click
+column, lined up with the row durations. It reads `idle` when no batch landed in the last 10 seconds. It updates in place, with no flash, and
+turns red `fs ! too many open files` after a watcher error, for the same 10 seconds. A click
 opens the fs events modal, like `e`. The modal keeps the last 10 minutes of batches, newest first: `22:32:00  path +N` with
 the targets it restarted, after a 2-space gap and a `↻` mark (`config` for a rerun.yml
 reload). A batch is every change within 150ms of its first event, so one save

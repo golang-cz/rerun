@@ -207,17 +207,17 @@ func TestFeedCreatedDirectoryHeadsItsFiles(t *testing.T) {
 	}
 }
 
-// A restarted target's row is highlighted for about a second.
+// A file-triggered restart reverses the target's glyph for about a second.
 func TestRestartFlashExpires(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	changeAt(m, "web", spawnClock, map[string]fsnotify.Op{"a.go": fsnotify.Write})
 
 	web := m.targets[0]
 	if !web.flashing(spawnClock.Add(500 * time.Millisecond)) {
-		t.Fatalf("row not flashing 500ms after the restart")
+		t.Fatalf("glyph not flashing 500ms after the restart")
 	}
 	if web.flashing(spawnClock.Add(1500 * time.Millisecond)) {
-		t.Fatalf("row still flashing 1.5s after the restart")
+		t.Fatalf("glyph still flashing 1.5s after the restart")
 	}
 }
 

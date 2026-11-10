@@ -340,6 +340,7 @@ func (m *tuiModel) fitEvents() {
 	if latestWatchErr(batches) != nil {
 		body-- // the red error line owns the body's first row
 	}
+	body -= len(m.loopWarnings())
 	sel := 0
 	for i, r := range rows {
 		if r.sel {
@@ -367,6 +368,10 @@ func (m *tuiModel) eventsView() string {
 		}, m.styles.base, innerW))
 		body--
 	}
+	for _, w := range m.loopWarnings() {
+		lines = append(lines, renderSegs([]seg{{text: w, color: colorRed}}, m.styles.base, innerW))
+		body--
+	}
 	if len(rows) == 0 && len(lines) == 0 {
 		lines = append(lines, m.styles.hint.Render(eventsEmpty))
 	}
@@ -386,10 +391,22 @@ func (m *tuiModel) eventsView() string {
 	return m.modalBox(m.eventsHeader(len(merged), innerW), footer, lines, outerW, outerH)
 }
 
+// loopWarnings is the modal's row per rebuild loop, naming the target and the file it keeps rebuilding.
+func (m *tuiModel) loopWarnings() []string {
+	var out []string
+	for _, t := range m.targets {
+		if t.looping() {
+			// Only a core pause sets the loop, so the warning always reads as paused.
+			out = append(out, fmt.Sprintf("%s: rebuild loop, %s changes after every build, paused", t.spec.Name, m.feedPath(t.loopFile, t.spec)))
+		}
+	}
+	return out
+}
+
 // eventsHeader is the modal's title row: what it shows on the left, the window and
 // the batch count on the right.
 func (m *tuiModel) eventsHeader(batches, innerW int) string {
-	left, right := eventsTitle, "last 1m · "+batchCount(batches)
+	left, right := eventsTitle, "last 10m · "+batchCount(batches)
 	gap := strings.Repeat(" ", max(1, innerW-displayWidth(left)-displayWidth(right)))
 	return m.styles.title.Render(left) + gap + m.styles.hint.Render(right)
 }

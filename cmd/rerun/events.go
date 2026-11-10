@@ -61,7 +61,7 @@ type event struct {
 	// cfg is the reconciled target list behind evReconcile.
 	cfg *configChange
 
-	// files are the changed paths behind evStarted and evBuildStarted/Failed;
+	// files are the changed paths behind evStarted, evBuildStarted/Failed and evLoop;
 	// empty on a first or manual start. They reuse change's keys, sorted.
 	files []string
 	// dur is the build's length on evBuildOK/evBuildFailed, and sinceStart on evHealth.
