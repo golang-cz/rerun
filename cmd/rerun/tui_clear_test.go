@@ -288,15 +288,16 @@ func TestClearInAFrozenPaneResumesTheTail(t *testing.T) {
 }
 
 // A folded header still clears every member it hides.
-func TestClearOnACollapsedHeaderBlanksTheGroupPane(t *testing.T) {
+func TestClearOnAFoldedHeaderBlanksTheGroupPane(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"), target("web"))
+	idle(m)
 	m.cursor = 0
 	m.liveSelect()
 	addLines(m, "api", "api-1")
 	addLines(m, "worker", "worker-1")
 	m.frame()
 	press(m, "left")
-	if !m.collapsed["backend"] {
+	if !m.foldState["backend"] {
 		t.Fatal("left did not fold the backend header")
 	}
 

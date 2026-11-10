@@ -11,14 +11,14 @@ import (
 // threeTargetsYAML is the fixture the arg-flow tests share: one default-on
 // target, one `selected: false`, one default-on target nobody names.
 const threeTargetsYAML = `frontend:
-  cmd: pnpm run dev
+  run: pnpm run dev
 
 api:
-  cmd: go run ./cmd/api
+  run: go run ./cmd/api
   selected: false
 
 test:
-  cmd: go test ./...
+  run: go test ./...
 `
 
 // captureStdio points os.Stdout/os.Stderr at temp files for the duration of
@@ -60,7 +60,7 @@ func captureStdio(t *testing.T, run func() int) (stdout, stderr string, code int
 // hint. Stdout stays empty and the usage wall never appears.
 func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  cmd: echo hi\n  bogus: true\n")
+	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  run: echo hi\n  bogus: true\n")
 	t.Chdir(dir)
 
 	stdout, stderr, code := captureStdio(t, func() int { return runConfigMode(Args{}) })

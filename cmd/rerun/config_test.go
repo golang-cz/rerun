@@ -28,14 +28,14 @@ func TestParseConfigStringOrList(t *testing.T) {
   desc: Vite dev server
   on: web
   except: [node_modules, dist]
-  cmd: pnpm run dev
+  run: pnpm run dev
   delay: 250ms
   cooldown: 2s
   grace: 1s
 
 api:
   on: [cmd, internal]
-  cmd: go run ./cmd/api
+  run: go run ./cmd/api
 `)
 
 	cfg, err := ParseConfig(path)
@@ -80,7 +80,7 @@ api:
 
 func TestParseConfigDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n")
+	writeFile(t, path, "api:\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -101,11 +101,11 @@ func TestParseConfigDefaults(t *testing.T) {
 func TestParseConfigPreservesOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
 	writeFile(t, path, `zeta:
-  cmd: echo z
+  run: echo z
 alpha:
-  cmd: echo a
+  run: echo a
 middle:
-  cmd: echo m
+  run: echo m
 `)
 
 	cfg, err := ParseConfig(path)
@@ -131,38 +131,38 @@ func TestParseConfigErrors(t *testing.T) {
 		},
 		{
 			name:    "unknown field",
-			content: "api:\n  cmd: echo hi\n  bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, cmd, build, health, open, open-on-start, columns, queries, group, muted, hide, selected, start, delay, cooldown, grace"},
+			content: "api:\n  run: echo hi\n  bogus: 1\n",
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, build, health, open, columns, queries, group, muted, selected, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown schema",
-			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  cmd: echo hi\n",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  run: echo hi\n",
 			wantSub: []string{`target "api"`, `field "schema"`, `unknown schema "nope"`},
 		},
 		{
 			name:    "groups and schemas both set",
-			content: "groups:\n  backend: {}\nschemas:\n  backend: {}\n\napi:\n  cmd: echo hi\n",
+			content: "groups:\n  backend: {}\nschemas:\n  backend: {}\n\napi:\n  run: echo hi\n",
 			wantSub: []string{`both "groups" and "schemas" are set; use one`},
 		},
 		{
 			name:    "group and schema both set on a target",
-			content: "groups:\n  backend: {}\n\napi:\n  group: backend\n  schema: backend\n  cmd: echo hi\n",
+			content: "groups:\n  backend: {}\n\napi:\n  group: backend\n  schema: backend\n  run: echo hi\n",
 			wantSub: []string{`target "api"`, `both "group" and "schema" are set; use one`},
 		},
 		{
 			name:    "unknown group",
-			content: "groups:\n  backend: {}\n\napi:\n  group: nope\n  cmd: echo hi\n",
+			content: "groups:\n  backend: {}\n\napi:\n  group: nope\n  run: echo hi\n",
 			wantSub: []string{`target "api"`, `field "group"`, `unknown group "nope"`},
 		},
 		{
 			name:    "groups is not a mapping",
-			content: "groups: 5\napi:\n  cmd: echo hi\n",
+			content: "groups: 5\napi:\n  run: echo hi\n",
 			wantSub: []string{"groups: expected a mapping of group names"},
 		},
 		{
 			name:    "unknown field inside a schema",
-			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
-			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, queries, muted, collapsed, auto-hide, start"},
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  run: echo hi\n",
+			wantSub: []string{`schema "backend"`, `unknown field "bogus"`, "fields: columns, queries, muted, fold, start"},
 		},
 		{
 			name:    "schemas with no targets",
@@ -171,12 +171,12 @@ func TestParseConfigErrors(t *testing.T) {
 		},
 		{
 			name:    "schemas is not a mapping",
-			content: "schemas: 5\napi:\n  cmd: echo hi\n",
+			content: "schemas: 5\napi:\n  run: echo hi\n",
 			wantSub: []string{"schemas: expected a mapping of schema names"},
 		},
 		{
 			name:    "bad duration",
-			content: "api:\n  cmd: echo hi\n  delay: abc\n",
+			content: "api:\n  run: echo hi\n  delay: abc\n",
 			wantSub: []string{`target "api"`, "delay", `invalid duration "abc"`},
 		},
 		{
@@ -186,13 +186,13 @@ func TestParseConfigErrors(t *testing.T) {
 		},
 		{
 			name:    "duplicate target",
-			content: "api:\n  cmd: a\napi:\n  cmd: b\n",
+			content: "api:\n  run: a\napi:\n  run: b\n",
 			wantSub: []string{"duplicate target", "api"},
 		},
 		{
 			name:    "duplicate field",
-			content: "api:\n  cmd: a\n  cmd: b\n",
-			wantSub: []string{`target "api"`, `duplicate field "cmd"`},
+			content: "api:\n  run: a\n  run: b\n",
+			wantSub: []string{`target "api"`, `duplicate field "run"`},
 		},
 		{
 			name:    "no targets",
@@ -201,12 +201,12 @@ func TestParseConfigErrors(t *testing.T) {
 		},
 		{
 			name:    "integer on",
-			content: "api:\n  cmd: echo hi\n  on: 5\n",
+			content: "api:\n  run: echo hi\n  on: 5\n",
 			wantSub: []string{`target "api"`, `"on"`, "got int"},
 		},
 		{
 			name:    "mapping on",
-			content: "api:\n  cmd: echo hi\n  on: {a: b}\n",
+			content: "api:\n  run: echo hi\n  on: {a: b}\n",
 			wantSub: []string{`target "api"`, `"on"`, "expected a string or a list of strings"},
 		},
 		{
@@ -216,57 +216,57 @@ func TestParseConfigErrors(t *testing.T) {
 		},
 		{
 			name:    "whitespace cmd",
-			content: "api:\n  cmd: \"  \"\n",
+			content: "api:\n  run: \"  \"\n",
 			wantSub: []string{`target "api"`, "run is required"},
 		},
 		{
 			name:    "column without expression",
-			content: "api:\n  cmd: echo hi\n  columns: [\"method\"]\n",
+			content: "api:\n  run: echo hi\n  columns: [\"method\"]\n",
 			wantSub: []string{`target "api"`, `field "columns"`, "method"},
 		},
 		{
 			name:    "column without name",
-			content: "api:\n  cmd: echo hi\n  columns: [\"{.a}\"]\n",
+			content: "api:\n  run: echo hi\n  columns: [\"{.a}\"]\n",
 			wantSub: []string{`target "api"`, "empty column name"},
 		},
 		{
 			name:    "column with empty expression",
-			content: "api:\n  cmd: echo hi\n  columns: [\"a {}\"]\n",
+			content: "api:\n  run: echo hi\n  columns: [\"a {}\"]\n",
 			wantSub: []string{`target "api"`, "empty column expression"},
 		},
 		{
 			name:    "non-string column",
-			content: "api:\n  cmd: echo hi\n  columns: [5]\n",
+			content: "api:\n  run: echo hi\n  columns: [5]\n",
 			wantSub: []string{`target "api"`, `"columns"`, "got int"},
 		},
 		{
 			name:    "non-string list item",
-			content: "api:\n  cmd: echo hi\n  on: [\"a\", 5]\n",
+			content: "api:\n  run: echo hi\n  on: [\"a\", 5]\n",
 			wantSub: []string{`target "api"`, `"on"`, "got int"},
 		},
 		{
 			name:    "non-string cmd",
-			content: "api:\n  cmd: 123\n",
-			wantSub: []string{`target "api"`, `field "cmd"`, "got int"},
+			content: "api:\n  run: 123\n",
+			wantSub: []string{`target "api"`, `field "run"`, "got int"},
 		},
 		{
 			name:    "non-string desc",
-			content: "api:\n  cmd: echo hi\n  desc: true\n",
+			content: "api:\n  run: echo hi\n  desc: true\n",
 			wantSub: []string{`target "api"`, `field "desc"`, "got bool"},
 		},
 		{
 			name:    "integer delay",
-			content: "api:\n  cmd: echo hi\n  delay: 5\n",
+			content: "api:\n  run: echo hi\n  delay: 5\n",
 			wantSub: []string{`target "api"`, `field "delay"`, "got int"},
 		},
 		{
 			name:    "negative delay",
-			content: "api:\n  cmd: echo hi\n  delay: -1s\n",
+			content: "api:\n  run: echo hi\n  delay: -1s\n",
 			wantSub: []string{`target "api"`, `field "delay"`, "must not be negative"},
 		},
 		{
 			name:    "negative grace",
-			content: "api:\n  cmd: echo hi\n  grace: -2s\n",
+			content: "api:\n  run: echo hi\n  grace: -2s\n",
 			wantSub: []string{`target "api"`, `field "grace"`, "must not be negative"},
 		},
 	}
@@ -300,39 +300,39 @@ func TestParseConfigErrorPositions(t *testing.T) {
 	}{
 		{
 			name:    "unknown field",
-			content: "codegen:\n  cmd: make generate\n  bogus: true\n",
+			content: "codegen:\n  run: make generate\n  bogus: true\n",
 			head:    `:3:3: target "codegen": unknown field "bogus"`,
 			excerpt: []string{"  3 |   bogus: true", "    |   ^^^^^", "fields: " + strings.Join(targetFields, ", ")},
 		},
 		{
 			name:    "duplicate field",
-			content: "api:\n  cmd: echo hi\n  cmd: again\n",
-			head:    `:3:3: target "api": duplicate field "cmd"`,
-			excerpt: []string{"  3 |   cmd: again", "    |   ^^^"},
+			content: "api:\n  run: echo hi\n  run: again\n",
+			head:    `:3:3: target "api": duplicate field "run"`,
+			excerpt: []string{"  3 |   run: again", "    |   ^^^"},
 		},
 		{
 			name:    "duplicate target",
-			content: "api:\n  cmd: a\napi:\n  cmd: b\n",
+			content: "api:\n  run: a\napi:\n  run: b\n",
 			head:    `:3:1: duplicate target "api"`,
 			excerpt: []string{"  3 | api:", "    | ^^^"},
 		},
 		{
 			name:    "type error points at the value",
-			content: "api:\n  cmd: echo hi\n  on: 5\n",
+			content: "api:\n  run: echo hi\n  on: 5\n",
 			head:    `:3:7: target "api": field "on": expected a string or a list of strings, got int`,
 			excerpt: []string{"  3 |   on: 5", "    |       ^"},
 		},
 		{
 			name:    "unknown schema points at the name",
-			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  cmd: echo hi\n",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: nope\n  run: echo hi\n",
 			head:    `:6:11: target "api": field "schema": unknown schema "nope"`,
 			excerpt: []string{"  6 |   schema: nope", "    |" + strings.Repeat(" ", 11) + "^^^^"},
 		},
 		{
 			name:    "unknown field inside a schema points at the key",
-			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  cmd: echo hi\n",
+			content: "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n    bogus: 1\n\napi:\n  run: echo hi\n",
 			head:    `:4:5: schema "backend": unknown field "bogus"`,
-			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, muted, collapsed, auto-hide, start"},
+			excerpt: []string{"  4 |     bogus: 1", "    |" + strings.Repeat(" ", 5) + "^^^^^", "fields: columns, queries, muted, fold, start"},
 		},
 		{
 			name:    "cmd is required points at the target",
@@ -378,7 +378,7 @@ func TestParseConfigNodeLessErrorsStayOneLine(t *testing.T) {
 func TestParseConfigLongLineWindow(t *testing.T) {
 	pad := strings.Repeat("a", 150)
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n  on: ["+pad+", 5]\n")
+	writeFile(t, path, "api:\n  run: echo hi\n  on: ["+pad+", 5]\n")
 
 	_, err := ParseConfig(path)
 	if err == nil {
@@ -412,7 +412,7 @@ func TestParseConfigLongLineWindow(t *testing.T) {
 
 func TestParseConfigColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n  columns:\n    - method {.request.method}\n    - \"status {.response.status}\"\n")
+	writeFile(t, path, "api:\n  run: echo hi\n  columns:\n    - method {.request.method}\n    - \"status {.response.status}\"\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -429,7 +429,7 @@ func TestParseConfigColumns(t *testing.T) {
 
 func TestParseConfigNullOnIsEmptyList(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n  on:\n  except: \"\"\n")
+	writeFile(t, path, "api:\n  run: echo hi\n  on:\n  except: \"\"\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -448,16 +448,16 @@ func TestParseConfigAliasOnAndExcept(t *testing.T) {
 	writeFile(t, path, `api:
   on: &api_watch [apps/api, pkg, proto]
   except: &api_skip [vendor, node_modules]
-  cmd: go run ./cmd/api
+  run: go run ./cmd/api
 
 web:
   on: *api_watch
   except: *api_skip
-  cmd: pnpm run dev
+  run: pnpm run dev
 
 docs:
   on: *api_watch
-  cmd: echo docs
+  run: echo docs
 `)
 
 	cfg, err := ParseConfig(path)
@@ -489,7 +489,7 @@ func TestParseConfigAliasScalars(t *testing.T) {
 	writeFile(t, path, `base: &base
   on: [&shared proto]
   except: &skip vendor
-  cmd: &api_cmd go run ./cmd/api
+  run: &api_cmd go run ./cmd/api
   desc: &api_desc API server
 
 copy: *base
@@ -497,7 +497,7 @@ copy: *base
 web:
   on: [*shared, apps]
   except: *skip
-  cmd: *api_cmd
+  run: *api_cmd
   desc: *api_desc
 `)
 
@@ -546,22 +546,22 @@ func TestParseConfigAliasErrors(t *testing.T) {
 	}{
 		{
 			name:    "alias to bool on",
-			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  on: *b\n",
+			content: "api:\n  run: echo hi\n  open: &b true\n\nweb:\n  run: echo hi\n  on: *b\n",
 			wantSub: []string{`target "web"`, `field "on"`, "expected a string or a list of strings, got bool"},
 		},
 		{
 			name:    "alias to bool as list item",
-			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  on: [*b]\n",
+			content: "api:\n  run: echo hi\n  open: &b true\n\nweb:\n  run: echo hi\n  on: [*b]\n",
 			wantSub: []string{`target "web"`, `field "on"`, "expected a list of strings, got bool"},
 		},
 		{
 			name:    "alias to bool desc",
-			content: "api:\n  cmd: echo hi\n  open: &b true\n\nweb:\n  cmd: echo hi\n  desc: *b\n",
+			content: "api:\n  run: echo hi\n  open: &b true\n\nweb:\n  run: echo hi\n  desc: *b\n",
 			wantSub: []string{`target "web"`, `field "desc"`, "expected a string, got bool"},
 		},
 		{
 			name:    "alias to non-duration string",
-			content: "api:\n  cmd: echo hi\n  desc: &d abc\n\nweb:\n  cmd: echo hi\n  delay: *d\n",
+			content: "api:\n  run: echo hi\n  desc: &d abc\n\nweb:\n  run: echo hi\n  delay: *d\n",
 			wantSub: []string{`target "web"`, `field "delay"`, `invalid duration "abc"`},
 		},
 	}
@@ -586,7 +586,7 @@ func TestParseConfigAliasErrors(t *testing.T) {
 
 func TestParseConfigUndefinedAliasErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n  on: *nope\n")
+	writeFile(t, path, "api:\n  run: echo hi\n  on: *nope\n")
 
 	_, err := ParseConfig(path)
 	if err == nil {
@@ -606,12 +606,12 @@ func TestParseConfigUndefinedAliasErrors(t *testing.T) {
 func TestParseConfigURLSelectedOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
 	writeFile(t, path, `frontend:
-  cmd: pnpm run dev
+  run: pnpm run dev
   url: http://localhost:5173
   open: true
 
 api:
-  cmd: go run ./cmd/api
+  run: go run ./cmd/api
   selected: false
 `)
 
@@ -624,9 +624,6 @@ api:
 	if frontend.Open != "http://localhost:5173" {
 		t.Errorf("open = %q", frontend.Open)
 	}
-	if !frontend.OpenOnStart {
-		t.Error("open-on-start = false, want true")
-	}
 	if !frontend.Selected {
 		t.Error("selected = false by default, want true")
 	}
@@ -634,9 +631,6 @@ api:
 	api := cfg.Targets[1]
 	if api.Selected {
 		t.Error("selected = true for `selected: false`")
-	}
-	if api.OpenOnStart {
-		t.Error("open-on-start = true by default")
 	}
 	if api.Open != "" {
 		t.Errorf("open = %q, want empty", api.Open)
@@ -646,18 +640,18 @@ api:
 func TestParseConfigStartMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
 	writeFile(t, path, `plain:
-  cmd: echo plain
+  run: echo plain
 
 svc:
-  cmd: echo svc
+  run: echo svc
   start: auto
 
 worker:
-  cmd: echo worker
+  run: echo worker
   start: onchange
 
 job:
-  cmd: echo job
+  run: echo job
   start: manual
 `)
 
@@ -682,11 +676,11 @@ func TestParseConfigGroupStartMode(t *testing.T) {
 
 worker:
   group: services
-  cmd: echo worker
+  run: echo worker
 
 api:
   group: services
-  cmd: echo api
+  run: echo api
   start: auto
 `)
 
@@ -704,7 +698,7 @@ api:
 
 func TestParseConfigRejectsUnknownGroupStartMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "groups:\n  backend:\n    start: sometimes\n\napi:\n  group: backend\n  cmd: echo hi\n")
+	writeFile(t, path, "groups:\n  backend:\n    start: sometimes\n\napi:\n  group: backend\n  run: echo hi\n")
 
 	_, err := ParseConfig(path)
 	if err == nil {
@@ -719,7 +713,7 @@ func TestParseConfigRejectsUnknownGroupStartMode(t *testing.T) {
 
 func TestParseConfigRejectsUnknownStartMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n  start: sometimes\n")
+	writeFile(t, path, "api:\n  run: echo hi\n  start: sometimes\n")
 
 	_, err := ParseConfig(path)
 	if err == nil {
@@ -733,9 +727,9 @@ func TestParseConfigRejectsUnknownStartMode(t *testing.T) {
 }
 
 func TestParseConfigBoolFieldErrors(t *testing.T) {
-	for _, field := range []string{"open-on-start", "selected"} {
+	for _, field := range []string{"selected"} {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
-		writeFile(t, path, "api:\n  cmd: echo hi\n  "+field+": 1\n")
+		writeFile(t, path, "api:\n  run: echo hi\n  "+field+": 1\n")
 
 		_, err := ParseConfig(path)
 		if err == nil {
@@ -753,26 +747,23 @@ func TestParseConfigBoolFieldErrors(t *testing.T) {
 // from the parser. Add a row here when a field joins the switch in parseTarget.
 func TestTargetFieldsAllAccepted(t *testing.T) {
 	values := map[string]string{
-		"desc":          "x",
-		"on":            "src",
-		"except":        "vendor",
-		"run":           "echo hi",
-		"cmd":           "echo hi",
-		"build":         "make",
-		"health":        "tcp://127.0.0.1:1",
-		"url":           "http://localhost:1",
-		"columns":       `["a {.b}"]`,
-		"queries":       "{errors: level=error}",
-		"group":         "backend",
-		"muted":         "true",
-		"hide":          "true",
-		"open":          "http://localhost:1",
-		"open-on-start": "true",
-		"selected":      "false",
-		"start":         "onchange",
-		"delay":         "1s",
-		"cooldown":      "1s",
-		"grace":         "1s",
+		"desc":     "x",
+		"on":       "src",
+		"except":   "vendor",
+		"run":      "echo hi",
+		"build":    "make",
+		"health":   "tcp://127.0.0.1:1",
+		"url":      "http://localhost:1",
+		"columns":  `["a {.b}"]`,
+		"queries":  "{errors: level=error}",
+		"group":    "backend",
+		"muted":    "true",
+		"open":     "http://localhost:1",
+		"selected": "false",
+		"start":    "onchange",
+		"delay":    "1s",
+		"cooldown": "1s",
+		"grace":    "1s",
 	}
 	for _, field := range targetFields {
 		value, ok := values[field]
@@ -782,12 +773,9 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		}
 		path := filepath.Join(t.TempDir(), ConfigFileName)
 		line := "  " + field + ": " + value
-		base := "  cmd: echo hi\n"
+		base := "  run: echo hi\n"
 		if field == "run" {
 			base = ""
-		}
-		if field == "cmd" {
-			line = ""
 		}
 		prefix := ""
 		if field == "group" {
@@ -803,7 +791,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 
 func TestParseConfigInvalidYAMLNamesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: [unterminated\n")
+	writeFile(t, path, "api:\n  run: [unterminated\n")
 
 	_, err := ParseConfig(path)
 	if err == nil {
@@ -822,7 +810,7 @@ func TestLoadConfigDiscovery(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, ConfigFileName), "api:\n  cmd: echo hi\n")
+	writeFile(t, filepath.Join(root, ConfigFileName), "api:\n  run: echo hi\n")
 
 	nested := filepath.Join(root, "a", "b")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -843,10 +831,10 @@ func TestLoadConfigNearestWins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(root, ConfigFileName), "outer:\n  cmd: echo outer\n")
+	writeFile(t, filepath.Join(root, ConfigFileName), "outer:\n  run: echo outer\n")
 
 	nested := filepath.Join(root, "a")
-	writeFile(t, filepath.Join(nested, ConfigFileName), "inner:\n  cmd: echo inner\n")
+	writeFile(t, filepath.Join(nested, ConfigFileName), "inner:\n  run: echo inner\n")
 
 	cfg, err := LoadConfig(nested)
 	if err != nil {
@@ -859,7 +847,7 @@ func TestLoadConfigNearestWins(t *testing.T) {
 
 func TestLoadConfigStopsAtGitRoot(t *testing.T) {
 	parent := t.TempDir()
-	writeFile(t, filepath.Join(parent, ConfigFileName), "outer:\n  cmd: echo outer\n")
+	writeFile(t, filepath.Join(parent, ConfigFileName), "outer:\n  run: echo outer\n")
 
 	repo := filepath.Join(parent, "repo")
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
@@ -889,7 +877,7 @@ func TestLoadConfigNotFound(t *testing.T) {
 
 func TestParseConfigSchemaColumns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n\nweb:\n  cmd: echo web\n")
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  schema: backend\n  run: echo hi\n\nweb:\n  run: echo web\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -908,7 +896,7 @@ func TestParseConfigSchemaColumns(t *testing.T) {
 
 func TestParseConfigTargetColumnsBeatSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\"]\n\napi:\n  schema: backend\n  columns: [\"status {.status}\"]\n  cmd: echo hi\n\nempty:\n  schema: backend\n  columns: []\n  cmd: echo hi\n")
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"level {.level}\"]\n\napi:\n  schema: backend\n  columns: [\"status {.status}\"]\n  run: echo hi\n\nempty:\n  schema: backend\n  columns: []\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -926,7 +914,7 @@ func TestParseConfigTargetColumnsBeatSchema(t *testing.T) {
 
 func TestParseConfigSchemasOnlyBlockIsNullSafe(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "schemas:\napi:\n  cmd: echo hi\n")
+	writeFile(t, path, "schemas:\napi:\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -939,7 +927,7 @@ func TestParseConfigSchemasOnlyBlockIsNullSafe(t *testing.T) {
 
 func TestParseConfigGroupsKeyMatchesSchemas(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "groups:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  group: backend\n  cmd: echo hi\n")
+	writeFile(t, path, "groups:\n  backend:\n    columns: [\"level {.level}\", \"msg {.msg}\"]\n\napi:\n  group: backend\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -955,7 +943,7 @@ func TestParseConfigGroupsKeyMatchesSchemas(t *testing.T) {
 // A group with no columns is valid in every spelling, like `columns: []`.
 func TestParseConfigEmptyGroupsAreValid(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "groups:\n  webapps: {}\n  nulls:\n  lists:\n    columns: []\n\na:\n  group: webapps\n  cmd: echo a\n\nb:\n  group: nulls\n  cmd: echo b\n\nc:\n  group: lists\n  cmd: echo c\n")
+	writeFile(t, path, "groups:\n  webapps: {}\n  nulls:\n  lists:\n    columns: []\n\na:\n  group: webapps\n  run: echo a\n\nb:\n  group: nulls\n  run: echo b\n\nc:\n  group: lists\n  run: echo c\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -971,7 +959,7 @@ func TestParseConfigEmptyGroupsAreValid(t *testing.T) {
 
 func TestParseConfigGroupKeyReadsSchemasBlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "schemas:\n  backend: {}\n\napi:\n  group: backend\n  cmd: echo hi\n")
+	writeFile(t, path, "schemas:\n  backend: {}\n\napi:\n  group: backend\n  run: echo hi\n")
 
 	_, err := ParseConfig(path)
 	if err != nil {
@@ -981,7 +969,7 @@ func TestParseConfigGroupKeyReadsSchemasBlock(t *testing.T) {
 
 func TestParseConfigRunBuildHealthAndAliases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "a:\n  run: go run .\n  build: go build ./...\n  health: http://localhost:1/up\nb:\n  cmd: echo old\n")
+	writeFile(t, path, "a:\n  run: go run .\n  build: go build ./...\n  health: http://localhost:1/up\nb:\n  run: echo old\n")
 	cfg, err := ParseConfig(path)
 	if err != nil {
 		t.Fatal(err)

@@ -749,7 +749,7 @@ func TestComposeImportRejectsMisuse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newImportFixture(t, tt.root, map[string]string{
 				"devbox/docker-compose.yml": composeYML,
-				"bpn/rerun.yml":             "api:\n  cmd: echo\n",
+				"bpn/rerun.yml":             "api:\n  run: echo\n",
 			})
 			_, err := ParseConfig(f.root)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -768,7 +768,7 @@ func TestComposeImportWithoutDocker(t *testing.T) {
 		t.Fatalf("required import err = %v, want docker not found", err)
 	}
 
-	f = newImportFixture(t, "api:\n  cmd: echo\n\nimports:\n  - path: ../devbox/docker-compose.yml\n    optional: true\n", map[string]string{"devbox/docker-compose.yml": composeYML})
+	f = newImportFixture(t, "api:\n  run: echo\n\nimports:\n  - path: ../devbox/docker-compose.yml\n    optional: true\n", map[string]string{"devbox/docker-compose.yml": composeYML})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatalf("optional import err = %v, want a skip", err)

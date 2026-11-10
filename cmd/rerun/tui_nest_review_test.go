@@ -18,8 +18,9 @@ func nestedFixture(t *testing.T) *tuiModel {
 	dash.Schema = "omsx/webapps"
 	misc := importTarget("omsx", "misc", "")
 	m := newTestModel(t, api, gw, dash, misc)
-	for i := range m.targets {
-		m.targets[i].state = stateStopped
+	m.now = spawnClock
+	for _, tg := range m.targets {
+		tg.state, tg.lastStart = stateStopped, spawnClock.Add(-time.Hour)
 	}
 	return m
 }

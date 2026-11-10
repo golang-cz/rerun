@@ -46,16 +46,18 @@ func hiddenGroupModel(t *testing.T) *tuiModel {
 	t.Helper()
 	api := mutedSpec("api", true)
 	api.Schema = "backend"
-	api.GroupHide = true
+	api.AutoFold = true
 	web := target("web")
 	web.Schema = "backend"
-	web.GroupHide = true
-	return newTestModel(t, api, web)
+	web.AutoFold = true
+	m := newTestModel(t, api, web)
+	idle(m)
+	return m
 }
 
-func TestHiddenGroupStartsCollapsed(t *testing.T) {
+func TestFoldGroupStartsFolded(t *testing.T) {
 	m := hiddenGroupModel(t)
-	if got, want := nestedRows(m), []string{"▸backend"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▸backend", " (+) 2 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 }
@@ -85,12 +87,13 @@ func TestReloadKeepsUserExpandedHiddenGroup(t *testing.T) {
 	}
 }
 
-func TestReloadFoldsNewHiddenGroup(t *testing.T) {
+func TestReloadFoldsNewFoldGroup(t *testing.T) {
 	m := hiddenGroupModel(t)
 	toggleKey(t, m, "backend")
 	ops := mutedSpec("ops", true)
 	ops.Schema = "ops"
-	ops.GroupHide = true
+	ops.AutoFold = true
+	ops.Start = startManual
 	runner := newTargetRunner(recTarget("ops", "ops"), &recordingSink{})
 	m.applyEvent(event{
 		kind: evReconcile,
@@ -101,12 +104,12 @@ func TestReloadFoldsNewHiddenGroup(t *testing.T) {
 			stopped: []bool{false, false, false},
 		},
 	})
-	if got, want := nestedRows(m), []string{"▾backend", " api", " web", "▸ops"}; !reflect.DeepEqual(got, want) {
+	if got, want := nestedRows(m), []string{"▾backend", " api", " web", "▸ops", " (+) 1 more"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after reload rows = %v, want %v", got, want)
 	}
 }
 
-func TestReloadKeepsExpandedGroupWhenItGainsHide(t *testing.T) {
+func TestReloadKeepsExpandedGroupWhenItGainsFold(t *testing.T) {
 	api := target("api")
 	api.Schema = "backend"
 	web := target("web")
@@ -115,8 +118,8 @@ func TestReloadKeepsExpandedGroupWhenItGainsHide(t *testing.T) {
 	if got, want := nestedRows(m), []string{"▾backend", " api", " web"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
-	api.GroupHide = true
-	web.GroupHide = true
+	api.AutoFold = true
+	web.AutoFold = true
 	m.applyEvent(event{
 		kind: evReconcile,
 		line: "── config reloaded ──",

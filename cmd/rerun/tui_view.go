@@ -798,9 +798,6 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		segs = append(segs, seg{text: timesCell(m.status(t)), color: statusColor(t)})
 	}
 	style := m.rowStyle(row, r)
-	if r.dim && row != m.cursor {
-		style = m.styles.muted
-	}
 	if m.scopedRow(r) {
 		style = style.Bold(true)
 	}
@@ -1279,7 +1276,7 @@ func (m *tuiModel) runAgainHint() string {
 func (m *tuiModel) makeEmptyHint() string {
 	for _, t := range m.targets {
 		if t.spec.Kind == makeKind {
-			if t.spec.ImportHide {
+			if t.spec.AutoFold {
 				return "ctrl+k go to a target · → expand make/"
 			}
 			return "ctrl+k go to a target"
@@ -1343,7 +1340,7 @@ var helpShortKeys = [][2]string{
 	{"r", "run/reboot the row"},
 	{"o i", "pick a link · pane i: original lines"},
 	{"ctrl+o", "open the current target's link"},
-	{"← →", "expand or collapse a group; → on a row focuses the log pane"},
+	{"← →", "expand or fold a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last 10 min)"},
 	{"enter → a =", "pane: → expand · ← collapse · a adds key, = filters value"},
@@ -1360,10 +1357,10 @@ var helpShortKeys = [][2]string{
 // helpKeys is the help overlay's full view, in display order. It fits 30 rows.
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move rows; ⇧↑⇧↓ select pane lines; home/end first/last"},
-	{"←/→ enter", "group: expand or collapse · row: its group · pane: focus"},
+	{"←/→ enter", "group: expand or fold · row: its group · pane: focus"},
 	{"space", "start or stop · pane: jump to live"},
 	{"s", "stop the row · pane: stop what the pane shows"},
-	{"m r h", "mute (group: its targets) · r reboots · h shows idle targets"},
+	{"m r", "mute (group: its targets) · r reboots"},
 	{"e", "fs events (last 10 min)"},
 	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
@@ -1383,8 +1380,8 @@ var helpKeys = [][2]string{
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
-	"click a group scopes to its targets; its ▾ folds it; the fs row opens the fs events",
-	"click a (+) N more row reveals its hidden targets or unfolds its group; a log line expands, or copies if plain",
+	"click a group scopes to its targets; its ▾ folds or expands it; the fs row opens the fs events",
+	"a folded group (fold: true) lists failing and recent targets; click (+) N more to expand it; a log line expands, or copies if plain",
 	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
 	"▶ on a group header: space starts its auto targets",
 	"orange ⠋ building  green ✓ built  red ✗ failed  red ∞ rebuild loop  name: orange build, green restart, red failed",

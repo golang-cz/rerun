@@ -1102,7 +1102,7 @@ func TestEscClearsSolo(t *testing.T) {
 	}
 }
 
-func TestOpenKeyAndAutoOpen(t *testing.T) {
+func TestOpenKeyOpensOnlyOnCtrlO(t *testing.T) {
 	var opened []string
 	old := openURL
 	openURL = func(url string) error {
@@ -1113,24 +1113,22 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 
 	web := target("web")
 	web.Open = "http://localhost:5173"
-	web.OpenOnStart = true
 	m := newTestModel(t, web, target("api"))
 
 	m.applyEvent(event{kind: evStarted, target: "web"})
-	m.applyEvent(event{kind: evStarted, target: "web"}) // a restart must not re-open
-	if len(opened) != 1 || opened[0] != web.Open {
-		t.Fatalf("opened = %q, want the url exactly once", opened)
+	if len(opened) != 0 {
+		t.Fatalf("a start opened %q, want nothing", opened)
 	}
 
 	// ctrl+o opens the highlighted row's url, and does nothing without one.
 	m.cursor = 1
 	press(m, "ctrl+o")
-	if len(opened) != 1 {
+	if len(opened) != 0 {
 		t.Fatalf("ctrl+o on a target without a url opened %q", opened)
 	}
 	m.cursor = 0
 	press(m, "ctrl+o")
-	if len(opened) != 2 {
+	if len(opened) != 1 {
 		t.Fatalf("ctrl+o did not open the url, opened = %q", opened)
 	}
 }

@@ -137,7 +137,7 @@ type tuiTarget struct {
 	state     procState
 	exitCode  int
 	exitLabel string
-	// exitedAt is when the last run exited, which the auto-hide grace counts from.
+	// exitedAt is when the last run exited, which the fold window counts from.
 	exitedAt  time.Time
 	lastStart time.Time
 	// runStarted is set by a real start, so an exit without one shows no duration.
@@ -145,8 +145,7 @@ type tuiTarget struct {
 	// backoffUntil is when a backoff-delayed start may run.
 	backoffUntil time.Time
 
-	muted  bool
-	opened bool
+	muted bool
 
 	// lastChange is the newest change batch the target reacted to, which the
 	// pane's title line counts.
@@ -317,10 +316,8 @@ type tuiModel struct {
 
 	// schemaSel is the group whose members the pane merges, or "" for none.
 	schemaSel string
-	// collapsed holds the list headers folded shut, by group key; it lives in memory only.
-	collapsed map[string]bool
-	// revealed holds the groups whose auto-hidden members the list shows dim, by group key.
-	revealed map[string]bool
+	// foldState holds the user's fold toggles by block key (true folded, false expanded); it lives in memory only.
+	foldState map[string]bool
 	// finder is the Ctrl+K popup over targets and groups.
 	finder finderState
 	// eventsModal is the `e` fs events modal over the last 10 minutes' change batches.
@@ -467,7 +464,6 @@ func newTUI(targets []Target) *tuiModel {
 		m.targets = append(m.targets, row)
 	}
 	groupTargets(m.targets)
-	m.seedCollapsed(nil)
 	m.refreshNames()
 	return m
 }
@@ -838,7 +834,6 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		return nil
 	}
 	t := m.targets[i]
-	var openCmd tea.Cmd
 
 	switch ev.kind {
 	case evOutput:
@@ -967,10 +962,6 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		if t.restartBatch != 0 {
 			m.feedRestart(t, eventTime(ev, m.now))
 		}
-		if t.spec.OpenOnStart && t.spec.Open != "" && !t.opened {
-			t.opened = true // once per session, never on a restart
-			openCmd = m.openTarget(i)
-		}
 
 	case evExited:
 		// A swap's exit draws nothing; the ↻ rule at the next start stands for it.
@@ -1014,7 +1005,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	case evCleared:
 		// The TUI owns the screen; the clear bytes belong to the plain path.
 	}
-	return openCmd
+	return nil
 }
 
 // rebuildRows adopts a reconciled target list. Rows are matched by name, so a
@@ -1025,12 +1016,8 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	m.queries = c.queries
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
-	known := make(map[string]bool, len(old))
 	for _, t := range old {
 		byName[t.spec.Name] = t
-		if k := foldKey(t.spec); k != "" {
-			known[k] = true
-		}
 	}
 
 	// The cursor and selection follow their row by name: a reload reorders rows.
@@ -1080,7 +1067,6 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 	}
 
 	m.targets = rows
-	m.seedCollapsed(known)
 	m.applyEdits()
 	m.solo = -1
 	if j, ok := index[soloName]; ok {
@@ -1098,7 +1084,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 			break
 		}
 	}
-	// The seeded folds may have just hidden the cursor's row; follow it to the header that hides it.
+	// A reload may fold the cursor's row away; follow it to its header.
 	if i := m.foldingHeader(cursorKey); !found && i >= 0 {
 		m.cursor = i
 	}

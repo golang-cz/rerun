@@ -286,11 +286,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.showTimes = !m.showTimes
 		m.dispDirty, m.vpDirty = true, true // the pane's rules gain or lose their clock times
 
-	case "h":
-		if m.listFocused() {
-			m.toggleHidden()
-		}
-
 	case "c":
 		return m, m.copyKey()
 
@@ -658,15 +653,14 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	r, _ := m.listRowAt(row)
-	// The arrow cell folds a header; its name cell selects it as before.
+	// The arrow cell folds or expands a header; its name cell selects it as before.
 	if r.header && e.X == r.indent() {
-		m.toggleCollapse(row)
+		m.toggleFold(row)
 		return m, nil
 	}
 	if r.more {
 		m.cursor = row
 		m.expandMore(r)
-		m.cursor = m.indexOfKey(m.rowKey(r))
 		return m, nil
 	}
 

@@ -20,8 +20,8 @@ const (
 	migrateRenamed                        // targets already live under targets:, and their retired keys were renamed
 )
 
-// migrateOpenKeys renames each target's url: to open: and its boolean open: to
-// open-on-start:, in place. It reports whether any key changed.
+// migrateOpenKeys rewrites each target's retired keys in place: url: becomes open:, cmd: run:, hide: muted:,
+// and open-on-start: and a boolean open: are dropped. It reports whether any key changed.
 func migrateOpenKeys(block *yaml.Node) (bool, error) {
 	changed := false
 	for i := 0; i+1 < len(block.Content); i += 2 {
@@ -39,73 +39,120 @@ func migrateOpenKeys(block *yaml.Node) (bool, error) {
 	return changed, nil
 }
 
-// renameOpenKeys renames one target's retired keys; a url: beside a string open: is an error.
+// keyAt is the index of a mapping's key, or -1.
+func keyAt(m *yaml.Node, name string) int {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// dropKey removes the key and its value at i.
+func dropKey(m *yaml.Node, i int) { m.Content = slices.Delete(m.Content, i, i+2) }
+
+// renameOpenKeys rewrites one target's retired keys; a url: beside a string open: is an error.
 func renameOpenKeys(target *yaml.Node, name string) (bool, error) {
-	urlAt, openAt := -1, -1
-	for i := 0; i+1 < len(target.Content); i += 2 {
-		switch target.Content[i].Value {
-		case "url":
-			urlAt = i
-		case "open":
-			openAt = i
-		}
+	changed := false
+	// A boolean open: and open-on-start: only said "open at startup", which is gone.
+	if at := keyAt(target, "open"); at >= 0 && deref(target.Content[at+1]).Tag == "!!bool" {
+		dropKey(target, at)
+		changed = true
 	}
-	if urlAt < 0 && openAt < 0 {
-		return false, nil
+	if at := keyAt(target, "open-on-start"); at >= 0 {
+		dropKey(target, at)
+		changed = true
 	}
-	if openAt >= 0 && deref(target.Content[openAt+1]).Tag != "!!bool" {
-		if urlAt >= 0 {
-			return false, fmt.Errorf("target %q: both url: and a string open: are set; use open: alone", name)
-		}
-		return false, nil
-	}
-	if openAt >= 0 {
-		target.Content[openAt].Value = "open-on-start"
+	urlAt, openAt := keyAt(target, "url"), keyAt(target, "open")
+	if urlAt >= 0 && openAt >= 0 {
+		return false, fmt.Errorf("target %q: both url: and a string open: are set; use open: alone", name)
 	}
 	if urlAt >= 0 {
 		target.Content[urlAt].Value = "open"
+		changed = true
 	}
-	return true, nil
+	if at := keyAt(target, "cmd"); at >= 0 {
+		if keyAt(target, "run") >= 0 {
+			return false, fmt.Errorf("target %q: both run: and cmd: are set; use run:", name)
+		}
+		target.Content[at].Value = "run"
+		changed = true
+	}
+	if at := keyAt(target, "hide"); at >= 0 {
+		if keyAt(target, "muted") >= 0 {
+			dropKey(target, at)
+		} else {
+			target.Content[at].Value = "muted"
+		}
+		changed = true
+	}
+	return changed, nil
 }
 
-// migrateCollapsed renames each group's hide: to collapsed:, in place. It reports
-// whether any key changed, and names a group that sets both.
-func migrateCollapsed(root *yaml.Node) (bool, error) {
+// foldSpellings are the retired keys that `fold:` replaces on a group or an import.
+var foldSpellings = []string{"collapsed", "auto-hide", "hide", "auto-fold"}
+
+// mergeFold folds a group's or import's retired keys into one `fold:`, where true wins.
+// It skips a mapping whose values are not booleans, which the parser reports.
+func mergeFold(m *yaml.Node) bool {
+	var at []int
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if k := m.Content[i].Value; k == "fold" || slices.Contains(foldSpellings, k) {
+			if deref(m.Content[i+1]).Tag != "!!bool" {
+				return false
+			}
+			at = append(at, i)
+		}
+	}
+	if len(at) == 0 || (len(at) == 1 && m.Content[at[0]].Value == "fold") {
+		return false
+	}
+	value := "false"
+	for _, i := range at {
+		if m.Content[i+1].Value == "true" {
+			value = "true"
+		}
+	}
+	first := at[0]
+	if f := keyAt(m, "fold"); f >= 0 {
+		first = f
+	}
+	for k := len(at) - 1; k >= 0; k-- {
+		if at[k] != first {
+			dropKey(m, at[k])
+		}
+	}
+	m.Content[first].Value = "fold"
+	m.Content[first+1].Value = value
+	return true
+}
+
+// migrateFold rewrites the retired fold keys of every group and import, in place.
+func migrateFold(root *yaml.Node) bool {
 	changed := false
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key := deref(root.Content[i])
-		if key.Kind != yaml.ScalarNode || (key.Value != groupsBlock.block && key.Value != schemasBlock.block) {
-			continue
-		}
 		block := deref(root.Content[i+1])
-		if block.Kind != yaml.MappingNode {
+		if key.Kind != yaml.ScalarNode {
 			continue
 		}
-		for j := 0; j+1 < len(block.Content); j += 2 {
-			group := deref(block.Content[j+1])
-			if group.Kind != yaml.MappingNode {
-				continue
-			}
-			hideAt, collapsedAt := -1, -1
-			for k := 0; k+1 < len(group.Content); k += 2 {
-				switch group.Content[k].Value {
-				case "hide":
-					hideAt = k
-				case "collapsed":
-					collapsedAt = k
+		switch {
+		case key.Value == groupsBlock.block || key.Value == schemasBlock.block:
+			for j := 1; block.Kind == yaml.MappingNode && j < len(block.Content); j += 2 {
+				if g := deref(block.Content[j]); g.Kind == yaml.MappingNode {
+					changed = mergeFold(g) || changed
 				}
 			}
-			if hideAt < 0 {
-				continue
+		case key.Value == importsKey:
+			for _, item := range block.Content {
+				if e := deref(item); e.Kind == yaml.MappingNode {
+					changed = mergeFold(e) || changed
+				}
 			}
-			if collapsedAt >= 0 {
-				return false, fmt.Errorf("%s %q: both \"hide\" and \"collapsed\" are set; use collapsed:", key.Value, deref(block.Content[j]).Value)
-			}
-			group.Content[hideAt].Value = "collapsed"
-			changed = true
 		}
 	}
-	return changed, nil
+	return changed
 }
 
 // writeYAML writes a node to path, keeping its comments.
@@ -230,10 +277,7 @@ func migrateConfig(path string) (migrateStatus, error) {
 	if root.Kind != yaml.MappingNode {
 		return migrateNoTargets, fmt.Errorf("%s: expected a mapping of target names", real)
 	}
-	groupsRenamed, err := migrateCollapsed(root)
-	if err != nil {
-		return migrateNoTargets, fmt.Errorf("%s: %v", real, err)
-	}
+	groupsRenamed := migrateFold(root)
 	if value := mappingValue(root, targetsKey); value != nil {
 		if looksLikeTarget(value) {
 			return migrateNoTargets, fmt.Errorf("%s: %s", real, errTargetsReserved)

@@ -26,7 +26,7 @@ func nestedRows(m *tuiModel) []string {
 		}
 		if r.header {
 			glyph := "▾"
-			if r.collapsed {
+			if r.hidden > 0 && r.hidden == len(r.members) {
 				glyph = "▸"
 			}
 			out = append(out, pad+glyph+r.label)

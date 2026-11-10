@@ -111,6 +111,7 @@ func TestOffsetClampsAfterAFold(t *testing.T) {
 		specs = append(specs, schemaTarget(fmt.Sprintf("b%d", i), "b"))
 	}
 	m := newTestModel(t, specs...)
+	idle(m)
 	m.cursor = m.listLen() - 1
 	if got := offsetAt(m); got == 0 {
 		t.Fatal("setup: the long list did not scroll to the cursor")

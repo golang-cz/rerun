@@ -20,10 +20,10 @@ const allKeyPrefix = "\x00all:"
 // indentCells is the list pane indent per nesting level.
 const indentCells = 1
 
-// autoHideGrace is how long an auto-hide target that exited 0 stays listed.
-const autoHideGrace = 10 * time.Minute
+// foldWindow is how long a folded group keeps listing a member that started, restarted or exited.
+const foldWindow = 10 * time.Minute
 
-// playGlyph marks a header space would start; a collapsed header keeps its fold marker even so.
+// playGlyph marks a header space would start; a fully folded header keeps its fold marker even so.
 const playGlyph = "▶"
 
 // listRow is one list line: a group header, or a target, indented by its depth.
@@ -34,14 +34,10 @@ type listRow struct {
 	target  int    // a target row's index into m.targets; -1 on a header
 	members []int  // a header's member indices, which are contiguous
 	depth   int    // indent level: header 0, sub-header and root-group target 1, sub-group target 2
-	// collapsed is a header folded shut, which hides every row below it at a deeper depth.
-	collapsed bool
-	// more is the (+) N hidden row that shows or hides a block's auto-hidden members.
-	more     bool
-	revealed bool // the block's hidden members are shown, so the row reads (−) hide N
-	unfold   bool // the more row under a collapsed header: it expands the header
-	// dim is an auto-hidden target the list shows because its group is revealed.
-	dim bool
+	// hidden is how many of a header's members the list folds away.
+	hidden int
+	// more is the `(+) N more` row that expands a block's folded members.
+	more bool
 }
 
 // indent is the list cells in front of a row's name.
@@ -186,146 +182,94 @@ func (m *tuiModel) allRows() []listRow {
 	return rows
 }
 
-// listRows is the list as drawn: allRows without the rows under a collapsed header, and without
-// auto-hidden targets unless their group is revealed. Each block ends in a (+)/(−) row when it hides any.
+// listRows is the list as drawn: allRows without the members a folded block folds away.
+// A block that folds any ends in a `(+) N more` row.
 func (m *tuiModel) listRows() []listRow {
-	var out []listRow
-	skip := -1
 	all := m.allRows()
+	gone := map[int]bool{}
+	goneIn := map[string]int{}
+	for _, r := range all {
+		if !r.header && m.foldedAway(r.target, r.schema) {
+			gone[r.target] = true
+			goneIn[r.schema]++
+		}
+	}
+	var out []listRow
 	for i, r := range all {
-		if skip >= 0 && r.depth > skip {
-			continue
-		}
-		skip = -1
-		if r.header && m.collapsed[r.schema] {
-			r.collapsed = true
-			skip = r.depth
-		}
 		if r.header {
-			out = append(out, r)
-			if n := m.hiddenIn(r.members); r.collapsed && n > 0 {
-				out = append(out, listRow{schema: r.schema, target: -1, depth: r.depth + 1, more: true, unfold: true, label: fmt.Sprintf("(+) %d more", n)})
+			for _, j := range r.members {
+				if gone[j] {
+					r.hidden++
+				}
 			}
+			out = append(out, r)
 			continue
 		}
-		if hidden := m.autoHidden(r.target); !hidden || m.revealed[r.schema] {
-			r.dim = hidden
+		if !gone[r.target] {
 			out = append(out, r)
 		}
 		if i+1 < len(all) && !all[i+1].header && all[i+1].schema == r.schema {
 			continue
 		}
-		if n := m.hiddenCount(r.schema); n > 0 {
-			out = append(out, m.moreRow(r.schema, r.depth, n))
+		if n := goneIn[r.schema]; n > 0 {
+			out = append(out, listRow{schema: r.schema, target: -1, depth: r.depth, more: true, label: fmt.Sprintf("(+) %d more", n)})
 		}
 	}
 	return out
 }
 
-// moreRow is the block's last row: `(+) N more`, or `(−) collapse` once its auto-hidden members show.
-func (m *tuiModel) moreRow(schema string, depth, n int) listRow {
-	r := listRow{schema: schema, target: -1, depth: depth, more: true, revealed: m.revealed[schema]}
-	r.label = fmt.Sprintf("(+) %d more", n)
-	if r.revealed {
-		r.label = "(−) collapse"
+// foldedAway reports whether the block key folds target i off the list. The solo target never
+// vanishes under the cursor, and a failing or recently active member always shows.
+func (m *tuiModel) foldedAway(i int, key string) bool {
+	if key == "" || i == m.solo {
+		return false
 	}
-	return r
-}
-
-// autoHidden reports whether an auto-hide target is off the list: not running, starting, backing off,
-// or failed, and not the solo target, which never vanishes under the cursor.
-func (m *tuiModel) autoHidden(i int) bool {
 	t := m.targets[i]
-	if !t.spec.AutoHide || i == m.solo {
-		return false
-	}
-	switch t.state {
-	case stateRunning, stateStarting, stateBackoff:
-		return false
-	case stateExited:
-		return t.exitCode == 0 && m.now.Sub(t.exitedAt) > autoHideGrace
-	}
-	return true
-}
-
-// hiddenCount is how many members of a group key the list hides.
-func (m *tuiModel) hiddenCount(key string) int {
-	n := 0
-	for _, i := range m.schemaMembers(key) {
-		if m.autoHidden(i) {
-			n++
-		}
-	}
-	return n
-}
-
-// hiddenIn is how many of the given members the list hides.
-func (m *tuiModel) hiddenIn(members []int) int {
-	n := 0
-	for _, i := range members {
-		if m.autoHidden(i) {
-			n++
-		}
-	}
-	return n
-}
-
-// setRevealed shows or hides a group's auto-hidden members.
-func (m *tuiModel) setRevealed(key string, on bool) {
-	if m.revealed == nil {
-		m.revealed = map[string]bool{}
-	}
-	m.revealed[key] = on
-}
-
-// toggleHidden is h: shows or hides the cursor's group's auto-hidden members, from any row of the group.
-func (m *tuiModel) toggleHidden() {
-	r, ok := m.cursorRow()
+	folded, ok := m.foldState[key]
 	if !ok {
-		return
+		folded = t.spec.AutoFold
 	}
-	if subs := m.subGroupKeys(r); len(subs) > 0 {
-		m.toggleSubGroups(subs)
-		return
-	}
-	if r.schema == "" || (!m.revealed[r.schema] && m.hiddenCount(r.schema) == 0) {
-		return
-	}
-	m.setRevealed(r.schema, !m.revealed[r.schema])
+	return folded && !m.foldActive(t)
 }
 
-// subGroupKeys is the sub-group keys under an import header, or nil for any other row.
-func (m *tuiModel) subGroupKeys(r listRow) []string {
-	if !r.header || !strings.HasPrefix(r.schema, importKeyPrefix) {
-		return nil
+// foldActive is the rule a folded group keeps a member listed by: failing, or started, restarted or exited within foldWindow.
+func (m *tuiModel) foldActive(t *tuiTarget) bool {
+	if t.buildFailed || t.state == stateBackoff || (t.state == stateExited && t.exitCode != 0) {
+		return true
 	}
-	all := m.allRows()
-	at := slices.IndexFunc(all, func(s listRow) bool { return s.header && s.schema == r.schema })
-	if at < 0 {
-		return nil
+	if !t.runStarted && !t.state.up() && t.state != stateExited && t.state != stateStopped {
+		return false
 	}
+	at := t.lastStart
+	for _, c := range []time.Time{t.exitedAt, t.restartedAt} {
+		if c.After(at) {
+			at = c
+		}
+	}
+	return m.now.Sub(at) <= foldWindow
+}
+
+// blockKeys are the keys of the target blocks under the header at rows[at].
+func blockKeys(rows []listRow, at int) []string {
 	var keys []string
-	for _, s := range all[at+1:] {
-		if s.header && s.depth == 0 {
+	for _, r := range rows[at+1:] {
+		if r.header && r.depth <= rows[at].depth {
 			break
 		}
-		if s.header {
-			keys = append(keys, s.schema)
+		if !r.header && !slices.Contains(keys, r.schema) {
+			keys = append(keys, r.schema)
 		}
 	}
 	return keys
 }
 
-// toggleSubGroups is h on an import header: reveals every sub-group if any still hides members, else hides all.
-func (m *tuiModel) toggleSubGroups(keys []string) {
-	reveal := false
-	for _, k := range keys {
-		if !m.revealed[k] && m.hiddenCount(k) > 0 {
-			reveal = true
-		}
+// setFold folds or expands the given blocks, which a reload keeps.
+func (m *tuiModel) setFold(keys []string, folded bool) {
+	if m.foldState == nil {
+		m.foldState = map[string]bool{}
 	}
 	for _, k := range keys {
-		m.setRevealed(k, reveal)
+		m.foldState[k] = folded
 	}
 }
 
@@ -464,25 +408,14 @@ func (m *tuiModel) rowKey(r listRow) string {
 	return "target:" + m.targets[r.target].spec.Name
 }
 
-// treeLeft is ← on the list: fold an open header, else step to the enclosing header.
+// treeLeft is ← on the list: fold an unfolded header, else step to the enclosing header.
 func (m *tuiModel) treeLeft() {
 	r, ok := m.cursorRow()
 	if !ok {
 		return
 	}
-	if r.header && !r.collapsed {
-		m.toggleCollapse(m.cursor)
-		return
-	}
-	if r.more && r.revealed {
-		m.setRevealed(r.schema, false)
-		return
-	}
-	if r.more && r.unfold {
-		if i := m.enclosingHeader(m.cursor); i >= 0 {
-			m.cursor = i
-			m.liveSelect()
-		}
+	if r.header && r.hidden == 0 {
+		m.toggleFold(m.cursor)
 		return
 	}
 	if i := m.enclosingHeader(m.cursor); i >= 0 {
@@ -491,87 +424,35 @@ func (m *tuiModel) treeLeft() {
 	}
 }
 
-// treeRight is → on the list: unfold a folded header. It reports false on any other row.
+// treeRight is → on the list: expand a header that folds members. It reports false on any other row.
 func (m *tuiModel) treeRight() bool {
 	r, ok := m.cursorRow()
-	if ok && r.more && r.unfold {
-		m.toggleCollapse(m.headerIndex(r.schema))
-		return true
-	}
-	if ok && r.more && !r.revealed {
-		m.setRevealed(r.schema, true)
-		return true
-	}
-	if !ok || !r.header || !r.collapsed {
+	switch {
+	case ok && r.more:
+		m.expandMore(r)
+	case ok && r.header && r.hidden > 0:
+		m.toggleFold(m.cursor)
+	default:
 		return false
 	}
-	m.toggleCollapse(m.cursor)
 	return true
 }
 
-// headerKey is the list header a target's group draws, or "" when it draws none.
-func headerKey(t Target) string {
-	if t.section() == "" {
-		return t.Schema
-	}
-	if t.Sub == "" {
-		return importKeyPrefix + t.section()
-	}
-	return t.Sub
-}
-
-// foldKey is the header a target's `hide:` folds: its import section when the import hides.
-func foldKey(t Target) string {
-	if t.ImportHide {
-		return importKeyPrefix + t.section()
-	}
-	return headerKey(t)
-}
-
-// Seed only unknown groups so a reload keeps the user's fold state.
-func (m *tuiModel) seedCollapsed(known map[string]bool) {
-	for _, t := range m.targets {
-		k := foldKey(t.spec)
-		if !t.spec.GroupHide || k == "" || known[k] {
-			continue
-		}
-		if m.collapsed == nil {
-			m.collapsed = map[string]bool{}
-		}
-		m.collapsed[k] = true
-	}
-}
-
-// foldingHeader is the listed header that hides the row key names, or -1; enclosingHeader needs a listed row.
+// foldingHeader is the listed header of the block that folds away the row key names, or -1.
 func (m *tuiModel) foldingHeader(key string) int {
-	rows := m.allRows()
-	at := -1
-	for i, r := range rows {
-		if m.rowKey(r) == key {
-			at = i
-			break
+	if schema, ok := strings.CutPrefix(key, "more:"); ok {
+		return m.indexOfKey("schema:" + schema)
+	}
+	for _, r := range m.allRows() {
+		if !r.header && m.rowKey(r) == key {
+			return m.indexOfKey("schema:" + r.schema)
 		}
 	}
-	if at < 0 {
-		return -1
-	}
-	fold, depth := "", rows[at].depth
-	for i := at - 1; i >= 0 && depth > 0; i-- {
-		if r := rows[i]; r.header && r.depth < depth {
-			depth = r.depth
-			if m.collapsed[r.schema] {
-				fold = r.schema
-			}
-		}
-	}
-	if fold == "" {
-		return -1
-	}
-	return m.indexOfKey("schema:" + fold)
+	return -1
 }
 
-// toggleCollapse folds or unfolds the header at idx. A cursor the fold hides moves to the header.
-func (m *tuiModel) toggleCollapse(idx int) {
+// toggleFold expands the header at idx when it folds members, else folds it. A cursor the fold hides moves to the header.
+func (m *tuiModel) toggleFold(idx int) {
 	r, ok := m.listRowAt(idx)
 	if !ok || !r.header {
 		return
@@ -580,15 +461,11 @@ func (m *tuiModel) toggleCollapse(idx int) {
 	if c, ok := m.cursorRow(); ok {
 		cursorKey = m.rowKey(c)
 	}
-	if m.collapsed[r.schema] {
-		delete(m.collapsed, r.schema)
-	} else {
-		if m.collapsed == nil {
-			m.collapsed = map[string]bool{}
-		}
-		m.collapsed[r.schema] = true
+	all := m.allRows()
+	if at := slices.IndexFunc(all, func(s listRow) bool { return s.header && s.schema == r.schema }); at >= 0 {
+		m.setFold(blockKeys(all, at), r.hidden == 0)
 	}
-	m.cursor = m.indexOfKey(cursorKey, m.rowKey(r))
+	m.cursor = max(0, m.indexOfKey(cursorKey, m.rowKey(r)))
 }
 
 // indexOfKey is the index of the first listed row named by keys, or -1 when none is listed.
@@ -634,13 +511,10 @@ func (m *tuiModel) enterRow() {
 	m.focusPane()
 }
 
-// expandMore is enter or a click on a `(+) N more` row: it unfolds a collapsed header, else toggles the block's hidden members.
+// expandMore is enter or a click on a `(+) N more` row: it expands the block and leaves the cursor on its header.
 func (m *tuiModel) expandMore(r listRow) {
-	if r.unfold {
-		m.toggleCollapse(m.headerIndex(r.schema))
-		return
-	}
-	m.setRevealed(r.schema, !r.revealed)
+	m.setFold([]string{r.schema}, false)
+	m.cursor = max(0, m.indexOfKey("schema:"+r.schema))
 }
 
 // headerIndex is the list index of a group's header, or -1 when it is not listed.
@@ -881,7 +755,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	nameW := max(0, m.nameWidth(leftW)-indent)
 	glyph := "▾"
 	switch {
-	case r.collapsed:
+	case r.hidden > 0 && r.hidden == len(r.members):
 		glyph = "▸"
 	case m.startsOnSpace(r.members):
 		glyph = playGlyph

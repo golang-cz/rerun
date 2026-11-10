@@ -103,48 +103,6 @@ func TestOpenCommandStartErrorShowsNotice(t *testing.T) {
 	}
 }
 
-func TestOpenOnStartRunsOnceAtFirstStart(t *testing.T) {
-	opened := stubOpen(t)
-	ran := stubOpenCommand(t, 0, nil)
-	web := target("web")
-	web.Open = "make dev"
-	web.OpenOnStart = true
-	m := newTestModel(t, web)
-
-	cmd := m.applyEvent(event{kind: evStarted, target: "web"})
-	m.applyEvent(event{kind: evStarted, target: "web"})
-	if cmd == nil {
-		t.Fatal("the first start returned no command")
-	}
-	cmd()
-	if len(*ran) != 1 || len(*opened) != 0 {
-		t.Fatalf("ran = %q opened = %q, want the command once", *ran, *opened)
-	}
-}
-
-func TestOpenOnStartWithLinkOpensOnce(t *testing.T) {
-	opened := stubOpen(t)
-	web := target("web")
-	web.Open = "http://localhost:5173"
-	web.OpenOnStart = true
-	m := newTestModel(t, web)
-	m.applyEvent(event{kind: evStarted, target: "web"})
-	m.applyEvent(event{kind: evStarted, target: "web"})
-	if len(*opened) != 1 {
-		t.Fatalf("opened = %q, want the link exactly once", *opened)
-	}
-}
-
-func TestOpenOnStartOffDoesNothing(t *testing.T) {
-	ran := stubOpenCommand(t, 0, nil)
-	web := target("web")
-	web.Open = "make dev"
-	m := newTestModel(t, web)
-	if cmd := m.applyEvent(event{kind: evStarted, target: "web"}); cmd != nil || len(*ran) != 0 {
-		t.Fatal("a target without open-on-start ran its open: value at start")
-	}
-}
-
 func TestCapturedEndpointDoesNotReplaceCommand(t *testing.T) {
 	stubOpenCommand(t, 0, nil)
 	web := target("web")
@@ -165,15 +123,12 @@ func writeOpenConfig(t *testing.T, body string) (*Config, error) {
 }
 
 func TestConfigOpenStringIsTheLinkOrCommand(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "targets:\n  web:\n    cmd: x\n    open: make dev\n  app:\n    cmd: y\n    open: http://localhost:1\n    open-on-start: true\n")
+	cfg, err := writeOpenConfig(t, "targets:\n  web:\n    run: x\n    open: make dev\n  app:\n    run: y\n    open: http://localhost:1\n")
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if cfg.Targets[0].Open != "make dev" || cfg.Targets[0].OpenOnStart {
-		t.Errorf("web open = %q onstart=%v", cfg.Targets[0].Open, cfg.Targets[0].OpenOnStart)
-	}
-	if cfg.Targets[1].Open != "http://localhost:1" || !cfg.Targets[1].OpenOnStart {
-		t.Errorf("app open = %q onstart=%v", cfg.Targets[1].Open, cfg.Targets[1].OpenOnStart)
+	if cfg.Targets[0].Open != "make dev" || cfg.Targets[1].Open != "http://localhost:1" {
+		t.Errorf("open = %q, %q", cfg.Targets[0].Open, cfg.Targets[1].Open)
 	}
 	if len(cfg.Notices) != 0 {
 		t.Errorf("notices = %q, want none for the new spelling", cfg.Notices)
@@ -181,19 +136,19 @@ func TestConfigOpenStringIsTheLinkOrCommand(t *testing.T) {
 }
 
 func TestConfigURLIsTheLinkWithOneNotice(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "web:\n  cmd: x\n  url: http://localhost:5173\n  open: true\napp:\n  cmd: y\n  url: http://localhost:1\n")
+	cfg, err := writeOpenConfig(t, "web:\n  run: x\n  url: http://localhost:5173\n  open: true\napp:\n  run: y\n  url: http://localhost:1\n")
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if cfg.Targets[0].Open != "http://localhost:5173" || !cfg.Targets[0].OpenOnStart {
-		t.Errorf("web open = %q onstart=%v", cfg.Targets[0].Open, cfg.Targets[0].OpenOnStart)
+	if cfg.Targets[0].Open != "http://localhost:5173" {
+		t.Errorf("web open = %q", cfg.Targets[0].Open)
 	}
 	var urlNotes, boolNotes int
 	for _, n := range cfg.Notices {
 		if strings.Contains(n, "url: is now open:") {
 			urlNotes++
 		}
-		if strings.Contains(n, "open: true is now open-on-start: true") {
+		if strings.Contains(n, "open-on-start: removed, press o") {
 			boolNotes++
 		}
 	}
@@ -203,28 +158,28 @@ func TestConfigURLIsTheLinkWithOneNotice(t *testing.T) {
 }
 
 func TestConfigURLWithStringOpenIsAnError(t *testing.T) {
-	_, err := writeOpenConfig(t, "web:\n  cmd: x\n  url: http://a\n  open: make dev\n")
+	_, err := writeOpenConfig(t, "web:\n  run: x\n  url: http://a\n  open: make dev\n")
 	if err == nil || !strings.Contains(err.Error(), `"web"`) || !strings.Contains(err.Error(), "url") {
 		t.Fatalf("err = %v, want a config error naming target web and url", err)
 	}
 }
 
-func TestConfigBooleanOpenFalseIsOpenOnStartFalse(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "web:\n  cmd: x\n  open: false\n")
+func TestConfigBooleanOpenIsRemovedWithANote(t *testing.T) {
+	cfg, err := writeOpenConfig(t, "web:\n  run: x\n  open: false\n")
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if cfg.Targets[0].OpenOnStart || cfg.Targets[0].Open != "" {
-		t.Errorf("open-on-start=%v open=%q, want both off", cfg.Targets[0].OpenOnStart, cfg.Targets[0].Open)
+	if cfg.Targets[0].Open != "" {
+		t.Errorf("open = %q, want none", cfg.Targets[0].Open)
 	}
-	if !slices.ContainsFunc(cfg.Notices, func(n string) bool { return strings.Contains(n, "open: false is now open-on-start: false") }) {
-		t.Errorf("notices = %q, want the open-bool notice", cfg.Notices)
+	if !slices.ContainsFunc(cfg.Notices, func(n string) bool { return strings.Contains(n, "open-on-start: removed, press o") }) {
+		t.Errorf("notices = %q, want the open-on-start note", cfg.Notices)
 	}
 }
 
-func TestMigrateRenamesURLAndBooleanOpen(t *testing.T) {
+func TestMigrateRenamesURLAndDropsBooleanOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  web:\n    cmd: x\n    url: http://localhost:5173\n    open: true\n")
+	writeFile(t, path, "targets:\n  web:\n    run: x\n    url: http://localhost:5173\n    open: true\n")
 	status, err := migrateConfig(path)
 	if err != nil {
 		t.Fatalf("migrateConfig: %v", err)
@@ -233,10 +188,8 @@ func TestMigrateRenamesURLAndBooleanOpen(t *testing.T) {
 		t.Fatalf("status = %v, want migrateRenamed", status)
 	}
 	text := readConfigText(t, path)
-	for _, want := range []string{"open: http://localhost:5173", "open-on-start: true"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("migrated file lacks %q:\n%s", want, text)
-		}
+	if !strings.Contains(text, "open: http://localhost:5173") || strings.Contains(text, "open: true") {
+		t.Fatalf("migrated file wants the link under open: and no boolean open:\n%s", text)
 	}
 	if strings.Contains(text, "url:") {
 		t.Fatalf("migrated file still has url::\n%s", text)
@@ -255,7 +208,7 @@ func TestMigrateRenamesURLAndBooleanOpen(t *testing.T) {
 
 func TestMigrateLegacyTopLevelRenamesKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "web:\n  cmd: x\n  url: http://a\n")
+	writeFile(t, path, "web:\n  run: x\n  url: http://a\n")
 	if _, err := migrateConfig(path); err != nil {
 		t.Fatalf("migrateConfig: %v", err)
 	}
@@ -267,7 +220,7 @@ func TestMigrateLegacyTopLevelRenamesKeys(t *testing.T) {
 
 func TestMigrateRejectsURLWithStringOpen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  web:\n    cmd: x\n    url: http://a\n    open: make dev\n")
+	writeFile(t, path, "targets:\n  web:\n    run: x\n    url: http://a\n    open: make dev\n")
 	if _, err := migrateConfig(path); err == nil || !strings.Contains(err.Error(), `"web"`) {
 		t.Fatalf("err = %v, want the conflict named", err)
 	}

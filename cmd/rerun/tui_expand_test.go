@@ -436,10 +436,10 @@ const schemaConfig = `schemas:
 
 api:
   schema: backend
-  cmd: sleep 1
+  run: sleep 1
 
 web:
-  cmd: sleep 1
+  run: sleep 1
 `
 
 // ctrl+s writes the selected schema's columns, clears the dirty flag, and keeps the chips

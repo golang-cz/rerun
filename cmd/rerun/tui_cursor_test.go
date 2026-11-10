@@ -11,9 +11,9 @@ import (
 )
 
 const twoTargets = `web:
-  cmd: sleep 1
+  run: sleep 1
 api:
-  cmd: sleep 1
+  run: sleep 1
 `
 
 // cursorTo puts the pane cursor on the expansion row of the field with key.

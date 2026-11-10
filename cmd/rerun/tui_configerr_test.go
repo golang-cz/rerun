@@ -13,7 +13,7 @@ import (
 func brokenConfigErr(t *testing.T) error {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	if err := os.WriteFile(path, []byte("web:\n  cmd: [\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("web:\n  run: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ParseConfig(path)

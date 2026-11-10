@@ -67,7 +67,7 @@ Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 schema's targets (`esc` backs out), and that row is bold. On a schema header, `space`, `r`, and `m` act on its
 targets. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
-the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `collapsed: true` also collapses its header. A target's own `hide: false` overrides a group's `collapsed: true`. A target's `hide: false` unmutes it, but the group header still starts collapsed. A root group named after an import collapses that import's section. Folding is a start state; a reload keeps your collapse for groups already shown. The pane's top line is
+the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; A group's `fold: true` folds its idle members into a `(+) N more` row, and folding never mutes. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
@@ -127,25 +127,28 @@ and heads the files reported under it. The pane's top line
 names a muted row (`muted`). A rerun.yml reload shows as the `config`
 target. Batches older than 10 minutes drop off.
 
-### Auto-hide: idle targets
+### Fold: idle targets
 
-`auto-hide: true` on a group or an import lists its targets only while they run, start, restart or fail.
-Stopped, never-run, manual and off targets hide. A target that exits 0 hides ten minutes after it exits, so you can read its result.
-A target that exits non-zero stays visible.
+`fold: true` on a group or an import folds its idle targets into one dim `(+) N more` row.
+A folded group still lists every failing member, and every member that started, restarted or exited in the last 10 minutes.
+Failing means a failed build, a non-zero exit, or a restart backoff. Never-run targets, and targets that ran steadily for over 10 minutes, fold.
+`fold: false` lists every member. It is the default.
 
+- The header reads `▾` while any member is listed and `▸` once all are folded. Its `running/total` count does not change.
+- `→`, or a click on the header's arrow, expands a folded group. `enter` or a click on `(+) N more` does too.
+- `←` on an expanded header folds it again. Your toggles stay across config reloads.
 - A target the pane shows stays listed, so it never vanishes under the cursor.
-- A group's last row counts its hidden members: `(+) 12 more`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) collapse`.
-- `h` shows or hides the cursor's group's hidden members from any row of that group. A collapsed header reads `▸ make` with its `running/total` count, and a dim `(+) 12 more` row under it that `→`, `enter` or a click expands.
-- `ctrl+k` still finds hidden targets. Running one makes it visible.
-- A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
+- `ctrl+k` still finds folded targets. Jumping to one lists only that target.
+- Folding never mutes. Mute a target with `muted: true` or `m`.
+- A Makefile import defaults to `fold: true`.
 
 ```yaml
 imports:
   - path: apps/api/Makefile
-    auto-hide: false               # keep every rule listed
+    fold: false                    # keep every rule listed
 groups:
   tools:
-    auto-hide: true                # default false outside Makefile imports
+    fold: true                     # default false outside Makefile imports
 ```
 
 ### Imports: other projects' rerun.yml
@@ -157,13 +160,13 @@ imports:
   - path: ../bpn-api/rerun.yml   # relative to this file
     group: bpn-api               # section name and target prefix; default: the dir name
     optional: true               # skip the file while it is missing
-    hide: true                   # start its targets muted and its section collapsed
+    fold: true                   # fold its idle targets; default false
     start: auto                  # first run for its targets; a target's own wins
     groups: [backend]            # only these groups of that file
 ```
 
 Imported targets run from their own dir, and their names read `bpn-api/api`.
-An import's `hide: true` mutes its targets and collapses its section. Its own `muted` or `hide` and a group's still win.
+An import's `fold: true` folds its idle targets. The import's `fold` outranks a root group's and the file's own groups'.
 An import's `start:` is the outermost level too: a target's own `start` and a group's `start` win.
 A rerun.yml import's targets default to `auto`; a Makefile or compose import's to `manual`.
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
@@ -183,9 +186,9 @@ imports:
     targets: [lint, gen]           # keep only these
 ```
 
-- A `Makefile` next to `rerun.yml` loads as a collapsed `make` group by default. With a `rerun.yml`, it loads only when listed under `imports:`.
+- A `Makefile` next to `rerun.yml` loads as a `make` group that folds its idle targets by default. With a `rerun.yml`, it loads only when listed under `imports:`.
 - Subfolder Makefiles load only when imported. rerun never scans subfolders.
-- `groups: make: collapsed: false` expands a Makefile group.
+- `groups: make: fold: false` lists every Makefile target.
 - Descriptions come from a trailing `## text` or the comment above the target.
 - Targets start manually and do not watch files. Enter in Ctrl+K runs one.
 - An import's `start: auto` overrides that default; a target's or group's own `start:` still wins.
@@ -227,25 +230,24 @@ targets:
     build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
     health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
     open: http://localhost:5173    # ctrl+o opens it; the row links to it (or a shell command to run)
-    open-on-start: true            # open (or run) it once at startup
     delay: 200ms                  # batch file events before restarting
     cooldown: 2s                  # min time between restarts (event storms)
     grace: 5s                     # SIGTERM → wait → SIGKILL
 
   api:
     on: [cmd, internal]
-    cmd: go run ./cmd/api --addr :8080
+    run: go run ./cmd/api --addr :8080
     selected: false               # listed in the TUI, starts off (space starts it)
 
   test:
     on: ['**/*.go']
-    cmd: go test ./...
+    run: go test ./...
     delay: 500ms
     start: onchange               # auto (default), onchange, or manual
 ```
 
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
-`selected: true`, `open-on-start: false`, `start: auto`.
+`selected: true`, `start: auto`.
 Naming a target on the command line overrides `selected` either way: named ones
 start, unnamed ones stay off (still listed, still startable with `space`).
 `start: onchange` holds the first run back until a file changes, and

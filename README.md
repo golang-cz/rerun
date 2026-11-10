@@ -105,7 +105,7 @@ column. The pane's top line shows the cursor row's state, uptime, how many files
 last change batch held, and its command, with its url linked. It names a muted
 row in words (`muted`), and uptime reads `7s`, `2m03s`, `1h02m`.
 Each row keeps two marker cells after its name: `*` marks unsaved columns. Muting a target posts a footer notice (`muted api`).
-A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. `hide: true` does the same, and a group's `collapsed: true` starts its header collapsed; `→` or a click expands it. Folding is a start state; a reload keeps your collapse for groups already shown.
+A `muted: true` in `rerun.yml` starts the stream muted; `m` still toggles it. A group's `fold: true` folds its idle members into a `(+) N more` row; see Fold below. Folding never mutes.
 The build cell after each name shows an orange braille spinner while building, a green `✓` for 10 seconds after a good build, and a red `✗` until the next build. The name itself tints orange for 2 seconds after a build starts, green for 2 seconds after a file-triggered restart, and red while the build is failed or the target loops; red wins. Nothing draws in reverse except the cursor and a selection. A rebuild loop is a file that the target's own build or run keeps writing: six self-written re-triggers in a row pause the target for up to 30 seconds. While paused, the build cell shows a red `∞`, the fs hint reads `loop: <file>` in red, and the fs events modal lists a warning. A change after the pause resumes the target and clears all three.
 
 The first row of the left column is the fs row: `server.go +1` gives the newest
@@ -188,7 +188,7 @@ Each top-level key is one target. Fields:
 | `desc` | free-form description |
 | `on` | watch paths or globs, a string or a list |
 | `except` | paths or globs to ignore, a string or a list |
-| `run` | shell command to run, required. Older spelling: `cmd`; use one |
+| `run` | shell command to run, required |
 | `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
 | `open` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. Older spelling: `url:`, which still works as the link |
@@ -196,8 +196,6 @@ Each top-level key is one target. Fields:
 | `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
 | `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
-| `hide` | start the stream muted, like `muted`; a group's `collapsed` also starts its header collapsed. Own `muted` wins over `hide`, and `muted: false` overrides both. `hide: false` overrides a group's `collapsed: true` |
-| `open-on-start` | run `open` once at startup (default false). Older spelling: a boolean `open:` |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
 | `delay` | batch window before restarting (default 200ms) |
@@ -240,36 +238,39 @@ groups:
 targets:
   omsx-api:
     group: backend
-    cmd: make -C apps/api run
+    run: make -C apps/api run
 ```
 
 A target's own `columns` wins over its group's. A group's `queries:` pass their saved
 queries to the members, and a target's own entry wins a name clash. A group's `start:` sets the
 first run for its members, and a target's own `start:` wins. A `group:` that names no
 group is a config error. A group's `muted: true` starts its members muted, and a
-target's own `muted: false` overrides it. A group's `collapsed: true` mutes its members the same way and starts the group's header collapsed. A target's own `hide: false` overrides a group's `collapsed: true`. A target's `hide: false` unmutes it, but the group header still starts collapsed. A root group named after an import collapses that import's section. A group may be empty (`webapps: {}`). `schemas:` and
+target's own `muted: false` overrides it. A group's `fold: true` folds its idle members; folding never mutes. A root group named after an import takes that import's section. A group may be empty (`webapps: {}`). `schemas:` and
 `schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
-#### Auto-hide
+#### Fold
 
-`auto-hide: true` on a group or an import lists its targets only while they run, start, restart or fail.
-Stopped, never-run, manual and off targets hide. A target that exits 0 hides ten minutes after it exits, so you can read its result.
-A target that exits non-zero stays visible.
+`fold: true` on a group or an import folds its idle targets into one dim `(+) N more` row.
+A folded group still lists every failing member, and every member that started, restarted or exited in the last 10 minutes.
+Failing means a failed build, a non-zero exit, or a restart backoff. Never-run targets, and targets that ran steadily for over 10 minutes, fold.
+`fold: false` lists every member. It is the default.
 
+- The header reads `▾` while any member is listed and `▸` once all are folded. Its `running/total` count does not change.
+- `→`, or a click on the header's arrow, expands a folded group. `enter` or a click on `(+) N more` does too.
+- `←` on an expanded header folds it again. Your toggles stay across config reloads.
 - A target the pane shows stays listed, so it never vanishes under the cursor.
-- A group's last row counts its hidden members: `(+) 12 more`. `→`, `enter` or a click shows them dimmed, and the row reads `(−) collapse`.
-- `h` shows or hides the cursor's group's hidden members from any row of that group. A collapsed header reads `▸ make` with its `running/total` count, and a dim `(+) 12 more` row under it that `→`, `enter` or a click expands.
-- `ctrl+k` still finds hidden targets. Running one makes it visible.
-- A Makefile import defaults to `auto-hide: true`. Other imports and groups default to off.
+- `ctrl+k` still finds folded targets. Jumping to one lists only that target.
+- Folding never mutes. Mute a target with `muted: true` or `m`.
+- A Makefile import defaults to `fold: true`.
 
 ```yaml
 imports:
   - path: apps/api/Makefile
-    auto-hide: false               # keep every rule listed
+    fold: false                    # keep every rule listed
 groups:
   tools:
-    auto-hide: true                # default false outside Makefile imports
+    fold: true                     # default false outside Makefile imports
 ```
 
 #### Saved queries
@@ -306,19 +307,19 @@ imports:
   - path: ../bpn-api/rerun.yml   # relative to this file; ~ expands
     group: bpn-api               # the section name; defaults to the file's dir name
     optional: true               # a missing file is skipped until it appears
-    hide: true                   # start its targets muted and its section collapsed
+    fold: true                   # fold its idle targets; default false
     start: auto                  # first run for its targets; default: the file's own
     groups: [backend]            # import only these groups of that file
 
 targets:
   api:
-    cmd: make run
+    run: make run
 ```
 
 - An imported target runs from its own file's dir. It shows under its `group` section as `bpn-api/api`.
 - The imported file's groups get the prefix too: `bpn-api/backend`.
 - A group in this file with the import's name gives every imported target its columns.
-- An import's `hide: true` mutes its targets and collapses its section. It is the outermost level: the target's own `muted` or `hide`, and a group's `muted` or `hide`, still win.
+- An import's `fold: true` folds its idle targets. It is the outermost level: a root group's `fold` and the file's own groups' `fold` apply only where the import sets none.
 - An import's `start:` fills in for its targets where neither they nor their group set one. It is the outermost level: the target's own `start` and a group's `start` still win. A rerun.yml import's targets default to `auto`, a Makefile or compose import's to `manual`.
 - A missing optional import shows one dim `bpn-api (not found)` row until its file appears.
 - Saving an imported file reloads the config. Column picks save into the file that defines the target or group.
@@ -365,14 +366,14 @@ imports:
 
 groups:
   make:
-    collapsed: false              # expand the default group
+    fold: false                   # list every Makefile target
 ```
 
-- A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and starts collapsed. With a `rerun.yml`, it loads only when listed under `imports:`.
+- A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and folds its idle targets. With a `rerun.yml`, it loads only when listed under `imports:`.
 - A subfolder's Makefile loads only when you import it. rerun never scans subfolders.
 - The default group for a subfolder import is `make/<dir>`, such as `make/api`.
-- `groups: make: collapsed: false` expands a Makefile group.
-- Subgroups such as `make/api` need their own entry, like `groups: make/api: collapsed: false`.
+- `groups: make: fold: false` lists every Makefile target.
+- Subgroups such as `make/api` need their own entry, like `groups: make/api: fold: false`.
 - A target's description is its trailing `## text`, or the comment lines directly above it.
 - `targets:` keeps only the named targets. It works on Makefile imports only.
 - `targets:` fails the load when a listed target is gone from the Makefile.

@@ -115,7 +115,7 @@ func runMigrate() int {
 	case migrateAlready:
 		fmt.Fprintf(os.Stdout, "rerun: %s already uses targets:\n", path)
 	case migrateRenamed:
-		fmt.Fprintf(os.Stdout, "rerun: %s: renamed retired keys (url:, open: bool, group hide:)\n", path)
+		fmt.Fprintf(os.Stdout, "rerun: %s: rewrote retired keys (url:, cmd:, hide:, collapsed:, auto-hide:, open-on-start:)\n", path)
 	default:
 		fmt.Fprintf(os.Stdout, "rerun: %s has no top-level targets to move\n", path)
 	}

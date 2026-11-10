@@ -20,16 +20,17 @@ import (
 const importsKey = "imports"
 
 // importFields is the accepted keys of one import entry.
-var importFields = []string{"path", "group", "optional", "hide", "auto-hide", "start", "groups", "services", "profiles", "targets"}
+var importFields = []string{"path", "group", "optional", "fold", "start", "groups", "services", "profiles", "targets"}
 
 // importSpec is one parsed `imports:` entry.
 type importSpec struct {
 	path     string
 	group    string
 	optional bool
-	hide     bool
-	// autoHide is the import's `auto-hide:`; nil leaves it to the root group or the Makefile default.
-	autoHide *bool
+	// autoFold is the import's `fold:`; nil leaves it to the root group or the Makefile default.
+	autoFold *bool
+	// retired names the old spellings of fold: the entry used, for one notice each.
+	retired  []string
 	groups   []string
 	services []string
 	profiles []string
@@ -60,6 +61,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			spec, err := parseImportSpec(src, deref(item))
 			if err != nil {
 				return err
+			}
+			for _, old := range spec.retired {
+				if n := filepath.Base(rootFile) + ": " + old + ": is now fold:"; !slices.Contains(cfg.Notices, n) {
+					cfg.Notices = append(cfg.Notices, n)
+				}
 			}
 			specs = append(specs, spec)
 		}
@@ -271,13 +277,6 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if !t.startSet && root.startSet {
 					t.Start, t.startSet = root.start, true
 				}
-				if t.Muted == nil && root.hide {
-					muted := true
-					t.Muted = &muted
-				}
-				if root.hide {
-					t.GroupHide = true
-				}
 				if !t.ownColumns {
 					t.Schema = spec.group
 					t.SchemaFile = rootFile
@@ -285,20 +284,10 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 					t.Columns = slices.Clone(root.columns)
 				}
 			}
-			// Makefile imports fold by default; a root groups: entry with hide: false unfolds one.
-			unfolded := rootSchemas[spec.group].hideSet && !rootSchemas[spec.group].hide
 			if !t.startSet && spec.startSet {
 				t.Start, t.startSet = spec.start, true
 			}
-			t.AutoHide = autoHideOf(spec, rootSchemas[spec.group], t.Kind == makeKind)
-			if spec.hide || (t.Kind == makeKind && !unfolded) {
-				t.GroupHide, t.ImportHide = true, true
-			}
-			// The import's hide is the outermost level: it only applies where nothing above set muted.
-			if spec.hide && t.Muted == nil {
-				muted := true
-				t.Muted = &muted
-			}
+			t.AutoFold = autoFoldOf(spec, rootSchemas[spec.group], t.Kind == makeKind || t.AutoFold)
 			cfg.Targets = append(cfg.Targets, t)
 		}
 	}
@@ -321,15 +310,15 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 	return nil
 }
 
-// autoHideOf is an import's auto-hide: its own, else its root group's, else on for a Makefile.
-func autoHideOf(spec importSpec, root groupDef, makefile bool) bool {
+// autoFoldOf is an import's fold: its own, else its root group's, else the file's own group, else on for a Makefile.
+func autoFoldOf(spec importSpec, root groupDef, dflt bool) bool {
 	switch {
-	case spec.autoHide != nil:
-		return *spec.autoHide
-	case root.autoHideSet:
-		return root.autoHide
+	case spec.autoFold != nil:
+		return *spec.autoFold
+	case root.autoFoldSet:
+		return root.autoFold
 	}
-	return makefile
+	return dflt
 }
 
 // errNoDocker is returned when a compose import needs the docker CLI and it is not on PATH.
@@ -438,7 +427,7 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				spec.group, spec.groupNode = strings.TrimSpace(value.Value), value
 			}
 
-		case "auto-hide":
+		case "fold", "auto-fold", "auto-hide", "hide":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
 			}
@@ -446,9 +435,17 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			if err != nil {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
 			}
-			spec.autoHide = &b
+			if field != "fold" {
+				spec.retired = append(spec.retired, field)
+			}
+			// Retired spellings may sit beside each other; true wins.
+			if spec.autoFold == nil {
+				spec.autoFold = &b
+			} else if b {
+				*spec.autoFold = true
+			}
 
-		case "optional", "hide":
+		case "optional":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
 			}
@@ -456,11 +453,7 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			if err != nil {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
 			}
-			if field == "optional" {
-				spec.optional = b
-			} else {
-				spec.hide = b
-			}
+			spec.optional = b
 
 		case "start":
 			m, err := parseStartMode(src, "import", field, value)

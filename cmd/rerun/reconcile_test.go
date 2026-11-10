@@ -39,7 +39,6 @@ func TestDiffTargetsReconcileActions(t *testing.T) {
 	cosmetic.Open = "http://localhost:8080"
 	cosmetic.Grace = time.Second
 	cosmetic.Cooldown = 2 * time.Second
-	cosmetic.OpenOnStart = true
 	cosmetic.Selected = false
 
 	tests := []struct {
@@ -542,10 +541,10 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 
 	t.Run("applies the new list", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
-		save(t, path, "web:\n  on: src\n  cmd: sleep 30\n")
+		save(t, path, "web:\n  on: src\n  run: sleep 30\n")
 		group, sink := g(t, []Target{recTarget("web", "sleep 30")}, path)
 
-		save(t, path, "web:\n  on: src\n  cmd: sleep 31\n\napi:\n  on: src\n  cmd: sleep 30\n")
+		save(t, path, "web:\n  on: src\n  run: sleep 31\n\napi:\n  on: src\n  run: sleep 30\n")
 		group.reload(path)
 
 		var banner string
@@ -569,7 +568,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
 		running := []Target{recTarget("web", "sleep 30"), recTarget("api", "sleep 30")}
 		group, sink := g(t, running, path)
-		save(t, path, "web:\n  cmd:\n")
+		save(t, path, "web:\n  run:\n")
 
 		group.reload(path)
 
@@ -594,7 +593,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 
 	t.Run("a cosmetic save only refreshes the spec", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), ConfigFileName)
-		save(t, path, "web:\n  on: src\n  cmd: sleep 30\n  desc: the web\n")
+		save(t, path, "web:\n  on: src\n  run: sleep 30\n  desc: the web\n")
 		group, sink := g(t, []Target{recTarget("web", "sleep 30")}, path)
 
 		group.reload(path)
@@ -622,7 +621,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 // The migrate notice shows once per config path, however often the file reloads.
 func TestReloadShowsTheMigrateNoticeOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	if err := os.WriteFile(path, []byte("web:\n  cmd: sleep 30\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("web:\n  run: sleep 30\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sink := &recordingSink{}
@@ -739,13 +738,13 @@ func TestRetireInterruptsTheCooldown(t *testing.T) {
 // edit it restarts nothing.
 func TestSchemaColumnsChangeIsCosmetic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n")
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"a {.b}\"]\n\napi:\n  schema: backend\n  run: echo hi\n")
 	old, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
 
-	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"c {.d}\"]\n\napi:\n  schema: backend\n  cmd: echo hi\n")
+	writeFile(t, path, "schemas:\n  backend:\n    columns: [\"c {.d}\"]\n\napi:\n  schema: backend\n  run: echo hi\n")
 	fresh, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
@@ -762,7 +761,7 @@ func TestSchemaColumnsChangeIsCosmetic(t *testing.T) {
 // A restored file that changes nothing still clears the error modal.
 func TestRestoredConfigClearsTheErrorModal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	const good = "web:\n  on: src\n  cmd: sleep 30\n"
+	const good = "web:\n  on: src\n  run: sleep 30\n"
 	if err := os.WriteFile(path, []byte(good), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +769,7 @@ func TestRestoredConfigClearsTheErrorModal(t *testing.T) {
 	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
 	t.Cleanup(group.cancel)
 
-	if err := os.WriteFile(path, []byte("web:\n  cmd: [\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("web:\n  run: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	group.reload(path)
@@ -800,13 +799,13 @@ func TestReloadQueriesOnlyEmitsReconcile(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	save("queries:\n  errors: err\nweb:\n  on: src\n  cmd: sleep 30\n")
+	save("queries:\n  errors: err\nweb:\n  on: src\n  run: sleep 30\n")
 	sink := &recordingSink{}
 	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
 	t.Cleanup(group.cancel)
 	group.queries = map[string]string{"errors": "err"} // the startup load's set
 
-	save("queries:\n  errors: timeout\nweb:\n  on: src\n  cmd: sleep 30\n")
+	save("queries:\n  errors: timeout\nweb:\n  on: src\n  run: sleep 30\n")
 	group.reload(path)
 
 	reconciles := 0

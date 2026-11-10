@@ -241,11 +241,11 @@ func TestHeaderNameColumnMatchesPreGlyphColumn(t *testing.T) {
 	}
 }
 
-// A collapsed header keeps its fold marker, never the play glyph.
-func TestCollapsedHeaderKeepsFoldMarker(t *testing.T) {
+// A folded header keeps its fold marker, never the play glyph.
+func TestFoldedHeaderKeepsFoldMarker(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"))
-	m.targets[0].state = stateStopped
-	m.collapsed = map[string]bool{"backend": true}
+	idle(m)
+	m.foldState = map[string]bool{"backend": true}
 
 	if line := leftPane(m)[1]; strings.Contains(line, playGlyph) || !strings.HasPrefix(line, "▸ backend") {
 		t.Fatalf("header = %q, want the fold marker on a collapsed header", line)
@@ -261,7 +261,8 @@ func TestPlayGlyphCellIsFaint(t *testing.T) {
 	if play := drawnRow(t, m, "schema:backend"); !faintLine(play) {
 		t.Fatalf("play glyph row = %q, want the glyph cell faint", play)
 	}
-	m.collapsed = map[string]bool{"backend": true}
+	idle(m)
+	m.foldState = map[string]bool{"backend": true}
 	if fold := drawnRow(t, m, "schema:backend"); faintLine(fold) {
 		t.Fatalf("fold marker row = %q, want the header's own style", fold)
 	}

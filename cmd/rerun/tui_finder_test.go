@@ -90,18 +90,19 @@ func TestFinderEnterOnGroupSelectsIt(t *testing.T) {
 	}
 }
 
-func TestFinderUnfoldsCollapsedGroup(t *testing.T) {
+func TestFinderJumpToFoldedMemberKeepsGroupFolded(t *testing.T) {
 	m := newTestModel(t,
 		target("web"),
 		schemaTarget("api", "backend"),
 		schemaTarget("worker", "backend"),
 	)
-	m.collapsed = map[string]bool{"backend": true}
+	idle(m)
+	m.foldState = map[string]bool{"backend": true}
 	m.Update(ctrlK)
 	press(m, "w", "o", "r", "k", "e", "r")
 	press(m, "enter")
-	if m.collapsed["backend"] {
-		t.Fatal("group stayed collapsed after jumping to a member")
+	if !m.foldState["backend"] {
+		t.Fatal("jumping to a member expanded the whole group")
 	}
 	if want := targetIndex(m, "worker"); m.solo != want {
 		t.Fatalf("solo = %d, want worker at %d", m.solo, want)
@@ -131,37 +132,39 @@ func TestFinderEscLeavesScopeUnchanged(t *testing.T) {
 	}
 }
 
-func TestFinderEnterOnCollapsedGroupUnfoldsIt(t *testing.T) {
+func TestFinderEnterOnFoldedGroupExpandsIt(t *testing.T) {
 	m := newTestModel(t,
 		target("web"),
 		schemaTarget("api", "backend"),
 	)
-	m.collapsed = map[string]bool{"backend": true}
+	idle(m)
+	m.foldState = map[string]bool{"backend": true}
 	m.Update(ctrlK)
 	press(m, "b", "a", "c", "k", "e", "n", "d")
 	press(m, "enter")
-	if m.collapsed["backend"] {
-		t.Fatal("jumping to a collapsed group left it folded")
+	if m.foldState["backend"] {
+		t.Fatal("jumping to a folded group left it folded")
 	}
 	if r, _ := m.cursorRow(); !r.header || r.schema != "backend" {
 		t.Fatalf("cursor row = %+v, want the backend header", r)
 	}
 }
 
-func TestFinderNestedSubHeaderRevealsItsChain(t *testing.T) {
+func TestFinderNestedSubHeaderExpandsItsBlock(t *testing.T) {
 	omsxAPI := importTarget("omsx", "omsx-api", "omsx/backend")
 	omsxAPI.Schema = "omsx/backend"
 	server := schemaTarget("server", "backend")
 	m := newTestModel(t, omsxAPI, server)
-	m.collapsed = map[string]bool{importKeyPrefix + "omsx": true, "omsx/backend": true}
+	idle(m)
+	m.foldState = map[string]bool{"omsx/backend": true}
 	m.Update(ctrlK)
 	press(m, "omsx/backend")
 	if res := m.finderResults(m.finder.query); len(res) == 0 || res[0].name != "omsx/backend" {
 		t.Fatalf("results = %v, want the nested omsx/backend sub-header first", res)
 	}
 	press(m, "enter")
-	if m.collapsed[importKeyPrefix+"omsx"] || m.collapsed["omsx/backend"] {
-		t.Fatalf("collapsed = %v, want the import and its sub-header unfolded", m.collapsed)
+	if m.foldState["omsx/backend"] {
+		t.Fatalf("fold = %v, want the sub-header expanded", m.foldState)
 	}
 	if r, _ := m.cursorRow(); !r.header || r.schema != "omsx/backend" {
 		t.Fatalf("cursor row = %+v, want the omsx/backend sub-header", r)
@@ -490,13 +493,14 @@ func TestGoToJumpFocusesThePane(t *testing.T) {
 	}
 }
 
-// A finder jump that unfolds a header above the cursor keeps the jumped row, even when it lands on the old index.
-func TestFinderJumpUnfoldKeepsJumpedRow(t *testing.T) {
+// A finder jump that moves rows above the cursor keeps the jumped row, even when it lands on the old index.
+func TestFinderJumpKeepsJumpedRow(t *testing.T) {
 	alpha, beta := target("alpha1"), target("beta1")
 	alpha.Schema, beta.Schema = "alpha", "beta"
 	m := newTestModel(t, alpha, beta)
-	m.collapsed = map[string]bool{"alpha": true}
-	m.cursor = 1 // the beta header, which the jump's unfold pushes down one row
+	idle(m)
+	m.foldState = map[string]bool{"alpha": true}
+	m.cursor = m.indexOfKey("schema:beta")
 
 	press(m, "g", "a", "l", "p", "h", "a", "1", "enter")
 
@@ -526,25 +530,24 @@ func TestFinderJumpPlacesCursorOnNewPaneTail(t *testing.T) {
 	}
 }
 
-// A finder jump to an auto-hidden target lists only that target; moving away hides it again.
-func TestFinderJumpToHiddenTargetDoesNotRevealGroup(t *testing.T) {
-	m := autoHideFixture(t)
+// A finder jump to a folded target lists only that target; moving away folds it again.
+func TestFinderJumpToFoldedTargetDoesNotExpandGroup(t *testing.T) {
+	m := foldFixture(t)
 	press(m, "g", "s", "e", "r", "v", "e", "enter")
 
 	if got := listedNames(m); !slices.Contains(got, "serve") || slices.Contains(got, "lint") {
-		t.Fatalf("after the jump listed %v, want serve and not the other hidden lint", got)
+		t.Fatalf("after the jump listed %v, want serve and not the other folded lint", got)
 	}
-	if m.revealed["ops"] {
-		t.Fatal("the jump revealed the whole ops group")
+	if v, ok := m.foldState["ops"]; ok && !v {
+		t.Fatal("the jump expanded the whole ops group")
 	}
 
 	press(m, "esc")
-	// enter started serve; stop it again so auto-hide applies once the cursor moves away.
-	m.targets[targetIndex(m, "serve")].state = stateStopped
+	m.targets[targetIndex(m, "serve")].state = stateManual
 	m.cursor = rowAtKey(t, m, "target:build")
 	m.liveSelect()
 	if got := listedNames(m); slices.Contains(got, "serve") {
-		t.Fatalf("after moving to build listed %v, want serve hidden again", got)
+		t.Fatalf("after moving to build listed %v, want serve folded again", got)
 	}
 }
 

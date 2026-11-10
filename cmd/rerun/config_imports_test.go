@@ -40,11 +40,11 @@ func targetNames(cfg *Config) []string {
 }
 
 func TestParseImports(t *testing.T) {
-	bpn := "api:\n  cmd: go run ./api\n\nweb:\n  cmd: pnpm dev\n\nworker:\n  cmd: go run ./worker\n"
+	bpn := "api:\n  run: go run ./api\n\nweb:\n  run: pnpm dev\n\nworker:\n  run: go run ./worker\n"
 	grouped := "groups:\n  backend:\n    columns: [\"level {.level}\"]\n  frontend:\n\n" +
-		"api:\n  group: backend\n  cmd: go run ./api\n\n" +
-		"web:\n  group: frontend\n  cmd: pnpm dev\n\n" +
-		"util:\n  cmd: make util\n"
+		"api:\n  group: backend\n  run: go run ./api\n\n" +
+		"web:\n  group: frontend\n  run: pnpm dev\n\n" +
+		"util:\n  run: make util\n"
 
 	tests := []struct {
 		name     string
@@ -56,12 +56,12 @@ func TestParseImports(t *testing.T) {
 	}{
 		{
 			name:    "required missing file is an error at the import line",
-			root:    "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: echo\n",
+			root:    "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: echo\n",
 			wantErr: "file not found",
 		},
 		{
 			name:     "optional missing file is skipped and recorded",
-			root:     "imports:\n  - path: ../bpn/rerun.yml\n    optional: true\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n    optional: true\n\nlocal:\n  run: echo\n",
 			wantNext: []string{"local"},
 			check: func(t *testing.T, cfg *Config) {
 				if len(cfg.Missing) != 1 || cfg.Missing[0].Group != "bpn" {
@@ -71,7 +71,7 @@ func TestParseImports(t *testing.T) {
 		},
 		{
 			name:     "imported targets and groups get the group prefix",
-			root:     "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"bpn/rerun.yml": bpn},
 			wantNext: []string{"local", "bpn/api", "bpn/web", "bpn/worker"},
 			check: func(t *testing.T, cfg *Config) {
@@ -110,8 +110,8 @@ func TestParseImports(t *testing.T) {
 		},
 		{
 			name:     "import start fills in for its targets, own start wins",
-			root:     "imports:\n  - path: ../bpn/rerun.yml\n    start: manual\n\nlocal:\n  cmd: echo\n",
-			files:    map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n\nweb:\n  cmd: echo\n  start: auto\n"},
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n    start: manual\n\nlocal:\n  run: echo\n",
+			files:    map[string]string{"bpn/rerun.yml": "api:\n  run: echo\n\nweb:\n  run: echo\n  start: auto\n"},
 			wantNext: []string{"local", "bpn/api", "bpn/web"},
 			check: func(t *testing.T, cfg *Config) {
 				if api, _ := cfg.Find("bpn/api"); api.Start != startManual {
@@ -125,7 +125,7 @@ func TestParseImports(t *testing.T) {
 		{
 			name:     "a group's start beats the import's start",
 			root:     "imports:\n  - path: ../bpn/rerun.yml\n    start: manual\n",
-			files:    map[string]string{"bpn/rerun.yml": "groups:\n  backend:\n    start: onchange\n\napi:\n  group: backend\n  cmd: echo\n"},
+			files:    map[string]string{"bpn/rerun.yml": "groups:\n  backend:\n    start: onchange\n\napi:\n  group: backend\n  run: echo\n"},
 			wantNext: []string{"bpn/api"},
 			check: func(t *testing.T, cfg *Config) {
 				api, _ := cfg.Find("bpn/api")
@@ -137,12 +137,12 @@ func TestParseImports(t *testing.T) {
 		{
 			name:    "an invalid import start is an error",
 			root:    "imports:\n  - path: ../bpn/rerun.yml\n    start: sometimes\n",
-			files:   map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n"},
+			files:   map[string]string{"bpn/rerun.yml": "api:\n  run: echo\n"},
 			wantErr: `expected auto, onchange, or manual, got "sometimes"`,
 		},
 		{
 			name:     "groups filter keeps only the listed groups",
-			root:     "imports:\n  - path: ../bpn/rerun.yml\n    groups: [backend]\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: ../bpn/rerun.yml\n    groups: [backend]\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"bpn/rerun.yml": grouped},
 			wantNext: []string{"local", "bpn/api"},
 			check: func(t *testing.T, cfg *Config) {
@@ -169,13 +169,13 @@ func TestParseImports(t *testing.T) {
 		},
 		{
 			name:    "a file that imports itself is an error",
-			root:    "imports:\n  - path: rerun.yml\n\nlocal:\n  cmd: echo\n",
+			root:    "imports:\n  - path: rerun.yml\n\nlocal:\n  run: echo\n",
 			wantErr: "cannot import itself",
 		},
 		{
 			name:     "an imports key in an imported file is ignored with a notice",
 			root:     "imports:\n  - path: ../bpn/rerun.yml\n",
-			files:    map[string]string{"bpn/rerun.yml": "imports:\n  - path: ../carol/rerun.yml\n\n" + bpn, "carol/rerun.yml": "carol:\n  cmd: echo\n"},
+			files:    map[string]string{"bpn/rerun.yml": "imports:\n  - path: ../carol/rerun.yml\n\n" + bpn, "carol/rerun.yml": "carol:\n  run: echo\n"},
 			wantNext: []string{"bpn/api", "bpn/web", "bpn/worker"},
 			check: func(t *testing.T, cfg *Config) {
 				notices := withoutMigrateNotice(cfg.Notices)
@@ -194,7 +194,7 @@ func TestParseImports(t *testing.T) {
 			name: "a same-named group fills only targets with no group of their own",
 			root: "groups:\n  bpn:\n    columns: [\"root {.r}\"]\n\nimports:\n  - path: ../bpn/rerun.yml\n",
 			files: map[string]string{"bpn/rerun.yml": "groups:\n  backend:\n    columns: [\"level {.level}\"]\n\n" +
-				"api:\n  group: backend\n  cmd: go run ./api\n\nweb:\n  cmd: pnpm dev\n"},
+				"api:\n  group: backend\n  run: go run ./api\n\nweb:\n  run: pnpm dev\n"},
 			wantNext: []string{"bpn/api", "bpn/web"},
 			check: func(t *testing.T, cfg *Config) {
 				api, _ := cfg.Find("bpn/api")
@@ -227,12 +227,12 @@ func TestParseImports(t *testing.T) {
 		},
 		{
 			name:    "a legacy target named imports is rejected",
-			root:    "imports:\n  cmd: echo\n",
+			root:    "imports:\n  run: echo\n",
 			wantErr: "`imports` is reserved; rename the target",
 		},
 		{
 			name:    "a duplicate target name from an import is an error",
-			root:    "bpn/api:\n  cmd: echo\n\nimports:\n  - path: ../bpn/rerun.yml\n",
+			root:    "bpn/api:\n  run: echo\n\nimports:\n  - path: ../bpn/rerun.yml\n",
 			files:   map[string]string{"bpn/rerun.yml": bpn},
 			wantErr: `duplicate target "bpn/api"`,
 		},
@@ -267,9 +267,9 @@ func TestParseImports(t *testing.T) {
 // A target runs from the dir of the file that defines it, whatever dir rerun started in.
 func TestImportedTargetsRunFromTheirOwnDir(t *testing.T) {
 	f := newImportFixture(t,
-		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  on: src\n  cmd: pwd -P\n",
+		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  on: src\n  run: pwd -P\n",
 		map[string]string{
-			"bpn/rerun.yml": "api:\n  cmd: pwd -P\n",
+			"bpn/rerun.yml": "api:\n  run: pwd -P\n",
 			"app/src/.keep": "",
 		})
 	subdir := filepath.Join(f.dir, "app", "src")
@@ -312,12 +312,12 @@ func TestImportedTargetsRunFromTheirOwnDir(t *testing.T) {
 func TestConfigWatchReloadsOnImportEdits(t *testing.T) {
 	bpnPath := filepath.Join("bpn", ConfigFileName)
 	f := newImportFixture(t,
-		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: sleep 30\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  cmd: sleep 30\n"})
+		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: sleep 30\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: sleep 30\n"})
 	group, sink := startConfigWatch(t, f.root)
 
 	// The watch starts in a goroutine, so the write repeats until a reload lands.
-	edit := func() { writeFile(t, filepath.Join(f.dir, bpnPath), "api:\n  cmd: sleep 31\n") }
+	edit := func() { writeFile(t, filepath.Join(f.dir, bpnPath), "api:\n  run: sleep 31\n") }
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, edit)
 
 	api, ok := findSnapshot(group, "bpn/api")
@@ -329,14 +329,14 @@ func TestConfigWatchReloadsOnImportEdits(t *testing.T) {
 // Creating an absent optional import loads it.
 func TestConfigWatchLoadsAnOptionalImportThatAppears(t *testing.T) {
 	f := newImportFixture(t,
-		"imports:\n  - path: ../bpn/rerun.yml\n    optional: true\n\nlocal:\n  cmd: sleep 30\n",
+		"imports:\n  - path: ../bpn/rerun.yml\n    optional: true\n\nlocal:\n  run: sleep 30\n",
 		nil)
 	group, sink := startConfigWatch(t, f.root)
 	if _, ok := findSnapshot(group, "bpn/api"); ok {
 		t.Fatal("bpn/api loaded before its file existed")
 	}
 
-	create := func() { writeFile(t, filepath.Join(f.dir, "bpn", ConfigFileName), "api:\n  cmd: sleep 30\n") }
+	create := func() { writeFile(t, filepath.Join(f.dir, "bpn", ConfigFileName), "api:\n  run: sleep 30\n") }
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, create)
 
 	if _, ok := findSnapshot(group, "bpn/api"); !ok {
@@ -398,8 +398,8 @@ func waitForKindPoking(t *testing.T, sink *recordingSink, kind eventKind, timeou
 
 // Columns save into the file that defines the node: the imported file for its targets, the root for its groups.
 func TestSaveColumnsWritesTheDefiningFile(t *testing.T) {
-	rootYML := "groups:\n  bpn:\n    columns: [\"msg {.msg}\"]\n\nlocal:\n  cmd: echo\n\nimports:\n  - path: ../bpn/rerun.yml\n    groups: [backend]\n"
-	bpnYML := "groups:\n  backend:\n    columns: [\"level {.level}\"]\n\napi:\n  group: backend\n  cmd: go run ./api\n"
+	rootYML := "groups:\n  bpn:\n    columns: [\"msg {.msg}\"]\n\nlocal:\n  run: echo\n\nimports:\n  - path: ../bpn/rerun.yml\n    groups: [backend]\n"
+	bpnYML := "groups:\n  backend:\n    columns: [\"level {.level}\"]\n\napi:\n  group: backend\n  run: go run ./api\n"
 	f := newImportFixture(t, rootYML, map[string]string{"bpn/rerun.yml": bpnYML})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
@@ -449,8 +449,8 @@ func TestMissingImportRowIsNotSelectable(t *testing.T) {
 // A broken import still reloads once it is fixed.
 func TestConfigWatchRecoversFromABrokenImport(t *testing.T) {
 	f := newImportFixture(t,
-		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: sleep 30\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  cmd:\n"})
+		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: sleep 30\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run:\n"})
 	if _, err := ParseConfig(f.root); err == nil {
 		t.Fatal("the broken import parsed")
 	}
@@ -460,7 +460,7 @@ func TestConfigWatchRecoversFromABrokenImport(t *testing.T) {
 	t.Cleanup(group.cancel)
 	go group.watchConfig(f.root)
 
-	fix := func() { writeFile(t, filepath.Join(f.dir, "bpn", ConfigFileName), "api:\n  cmd: sleep 30\n") }
+	fix := func() { writeFile(t, filepath.Join(f.dir, "bpn", ConfigFileName), "api:\n  run: sleep 30\n") }
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, fix)
 
 	if _, ok := findSnapshot(group, "bpn/api"); !ok {
@@ -471,8 +471,8 @@ func TestConfigWatchRecoversFromABrokenImport(t *testing.T) {
 // Both spellings of one file dedupe, and the logical path stays the Dir.
 func TestSymlinkedImportLoadsOnce(t *testing.T) {
 	f := newImportFixture(t,
-		"imports:\n  - path: link.yml\n    group: via\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: echo\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  cmd: go run ./api\n"})
+		"imports:\n  - path: link.yml\n    group: via\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: echo\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: go run ./api\n"})
 	if err := os.Symlink(filepath.Join(f.dir, "bpn", ConfigFileName), filepath.Join(f.dir, "app", "link.yml")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
@@ -523,8 +523,8 @@ func TestOnlyMissingOptionalImportsIsValid(t *testing.T) {
 
 // Removing an import unwatches its dir.
 func TestRemovedImportUnwatchesItsDir(t *testing.T) {
-	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: echo\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n"})
+	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: echo\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: echo\n"})
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		t.Fatal(err)
@@ -551,15 +551,15 @@ func TestRemovedImportUnwatchesItsDir(t *testing.T) {
 // A reload that fails leaves the old targets; the next good save reloads.
 func TestConfigWatchReloadsAfterAFailedReload(t *testing.T) {
 	f := newImportFixture(t,
-		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  cmd: sleep 30\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  cmd: sleep 30\n"})
+		"imports:\n  - path: ../bpn/rerun.yml\n\nlocal:\n  run: sleep 30\n",
+		map[string]string{"bpn/rerun.yml": "api:\n  run: sleep 30\n"})
 	group, sink := startConfigWatch(t, f.root)
 	bpnFile := filepath.Join(f.dir, "bpn", ConfigFileName)
 
-	broken := func() { writeFile(t, bpnFile, "api:\n  cmd:\n") }
+	broken := func() { writeFile(t, bpnFile, "api:\n  run:\n") }
 	waitForKindPoking(t, sink, evConfigErr, 10*time.Second, broken)
 
-	fixed := func() { writeFile(t, bpnFile, "api:\n  cmd: sleep 31\n") }
+	fixed := func() { writeFile(t, bpnFile, "api:\n  run: sleep 31\n") }
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, fixed)
 
 	if api, ok := findSnapshot(group, "bpn/api"); !ok || api.Cmd != "sleep 31" {
@@ -633,7 +633,7 @@ func TestMakefileImports(t *testing.T) {
 	}{
 		{
 			name:     "explicit import lists each rule as a manual make target",
-			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"tools/Makefile": tools},
 			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
 			check: func(t *testing.T, cfg *Config) {
@@ -667,7 +667,7 @@ func TestMakefileImports(t *testing.T) {
 		{
 			name:    "targets on a rerun import is an error",
 			root:    "imports:\n  - path: ../bpn/rerun.yml\n    targets: [api]\n",
-			files:   map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n"},
+			files:   map[string]string{"bpn/rerun.yml": "api:\n  run: echo\n"},
 			wantErr: "targets applies to Makefile imports",
 		},
 		{
@@ -678,19 +678,19 @@ func TestMakefileImports(t *testing.T) {
 		},
 		{
 			name:     "a Makefile beside rerun.yml defaults to the make group",
-			root:     "imports:\n  - path: Makefile\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: Makefile\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"app/Makefile": "build:\n"},
 			wantNext: []string{"local", "make/build"},
 		},
 		{
 			name:     "a listed Makefile beside rerun.yml is imported as make",
-			root:     "imports:\n  - path: Makefile\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: Makefile\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"app/Makefile": "build:\n"},
 			wantNext: []string{"local", "make/build"},
 			check: func(t *testing.T, cfg *Config) {
 				build, _ := cfg.Find("make/build")
-				if !build.ImportHide {
-					t.Errorf("make group is not folded by default")
+				if !build.AutoFold {
+					t.Errorf("make group does not fold by default")
 				}
 				if !slices.ContainsFunc(cfg.Files, func(f string) bool {
 					return filepath.Dir(f) == filepath.Dir(cfg.Path) && strings.EqualFold(filepath.Base(f), "makefile")
@@ -701,7 +701,7 @@ func TestMakefileImports(t *testing.T) {
 		},
 		{
 			name:     "an unlisted Makefile beside rerun.yml is not imported",
-			root:     "local:\n  cmd: echo\n",
+			root:     "local:\n  run: echo\n",
 			files:    map[string]string{"app/Makefile": "build:\n"},
 			wantNext: []string{"local"},
 			check: func(t *testing.T, cfg *Config) {
@@ -712,24 +712,24 @@ func TestMakefileImports(t *testing.T) {
 		},
 		{
 			name:     "an explicit root import with targets replaces the implicit one",
-			root:     "imports:\n  - path: Makefile\n    targets: [test]\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: Makefile\n    targets: [test]\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"app/Makefile": "build:\ntest:\n"},
 			wantNext: []string{"local", "make/test"},
 		},
 		{
 			name:     "no Makefile beside rerun.yml means no make group",
-			root:     "local:\n  cmd: echo\n",
+			root:     "local:\n  run: echo\n",
 			wantNext: []string{"local"},
 		},
 		{
 			name:     "a nested rerun file does not pull in a Makefile beside it",
 			root:     "imports:\n  - path: ../bpn/rerun.yml\n",
-			files:    map[string]string{"bpn/rerun.yml": "api:\n  cmd: echo\n", "bpn/Makefile": "build:\n"},
+			files:    map[string]string{"bpn/rerun.yml": "api:\n  run: echo\n", "bpn/Makefile": "build:\n"},
 			wantNext: []string{"bpn/api"},
 		},
 		{
 			name:     "import start auto overrides the manual Makefile default",
-			root:     "imports:\n  - path: ../tools/Makefile\n    start: auto\n\nlocal:\n  cmd: echo\n",
+			root:     "imports:\n  - path: ../tools/Makefile\n    start: auto\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"tools/Makefile": tools},
 			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
 			check: func(t *testing.T, cfg *Config) {
@@ -740,26 +740,26 @@ func TestMakefileImports(t *testing.T) {
 			},
 		},
 		{
-			name:     "groups entry hide false expands one make group",
-			root:     "groups:\n  make/tools:\n    hide: false\n\nimports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			name:     "groups entry fold false expands one make group",
+			root:     "groups:\n  make/tools:\n    fold: false\n\nimports:\n  - path: ../tools/Makefile\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"tools/Makefile": tools},
 			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
 			check: func(t *testing.T, cfg *Config) {
 				build, _ := cfg.Find("make/tools/build")
-				if build.GroupHide || build.ImportHide {
-					t.Errorf("group hide = %v, import hide = %v; want unfolded", build.GroupHide, build.ImportHide)
+				if build.AutoFold {
+					t.Errorf("AutoFold = true, want unfolded")
 				}
 			},
 		},
 		{
-			name:     "make groups are folded by default",
-			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  cmd: echo\n",
+			name:     "make groups fold by default",
+			root:     "imports:\n  - path: ../tools/Makefile\n\nlocal:\n  run: echo\n",
 			files:    map[string]string{"tools/Makefile": tools},
 			wantNext: []string{"local", "make/tools/build", "make/tools/test"},
 			check: func(t *testing.T, cfg *Config) {
 				build, _ := cfg.Find("make/tools/build")
-				if !build.ImportHide || build.Muted != nil {
-					t.Errorf("import hide = %v, muted = %v; want folded and not muted", build.ImportHide, build.Muted)
+				if !build.AutoFold || build.Muted != nil {
+					t.Errorf("AutoFold = %v, muted = %v; want folded and not muted", build.AutoFold, build.Muted)
 				}
 			},
 		},
@@ -808,7 +808,7 @@ func TestImportGroupPassesQueriesDown(t *testing.T) {
 	f := newImportFixture(t,
 		"groups:\n  bpn:\n    queries:\n      errors: level=error\n      slow: group-slow\n\nimports:\n  - path: ../bpn/rerun.yml\n",
 		map[string]string{
-			"bpn/rerun.yml": "api:\n  cmd: go run ./api\n  queries:\n    slow: api-slow\n",
+			"bpn/rerun.yml": "api:\n  run: go run ./api\n  queries:\n    slow: api-slow\n",
 		})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {

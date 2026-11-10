@@ -103,16 +103,10 @@ type Target struct {
 	// Selected is false for `selected: false` targets: they exist in the
 	// list but start off until they are started by hand.
 	Selected bool
-	// OpenOnStart runs Open once at the first start.
-	OpenOnStart bool
 	// Muted is the `muted:` value, or nil when unset so the group's value can fill in.
 	Muted *bool
-	// GroupHide is set when the target's group is `hide: true`: its list header starts folded.
-	GroupHide bool
-	// ImportHide is set when the target's import is `hide: true`: the import section folds, not its sub-group.
-	ImportHide bool
-	// AutoHide lists the target only while it runs, starts, restarts or fails; see tui_list.go.
-	AutoHide bool
+	// AutoFold folds the target into its group's `(+) N more` row unless it is failing or recent; see tui_list.go.
+	AutoFold bool
 	// Dir is the defining file's directory: the base for run, build, health and on:.
 	Dir string
 	// Kind is "compose" for a docker-compose service, or "" for a process.
@@ -450,17 +444,14 @@ func (n *oldFormNotes) once(text string) {
 	}
 }
 
-// groupDef is one `groups:` entry: its columns, and the `muted:`, `hide:` and `start:` its members start with.
+// groupDef is one `groups:` entry: its columns, and the `muted:`, `fold:` and `start:` its members start with.
 type groupDef struct {
 	columns []Column
 	queries map[string]string
 	muted   *bool
-	hide    bool
-	// hideSet tells `hide: false` apart from no hide key, which Makefile groups read differently.
-	hideSet bool
-	// autoHide and autoHideSet are the group's `auto-hide:`, which hides idle members from the list.
-	autoHide    bool
-	autoHideSet bool
+	// autoFold and autoFoldSet are the group's `fold:`, which folds its idle members.
+	autoFold    bool
+	autoFoldSet bool
 	// start and startSet carry the group's `start:` default to its members.
 	start    startMode
 	startSet bool
@@ -749,11 +740,14 @@ func checkQueryRef(lookup func(string) (queryRef, bool), stack []string, name st
 // migrateNoticeText is the footer notice a file in the legacy form shows.
 const migrateNoticeText = "uses top-level targets; run rerun -migrate"
 
+// openOnStartGone is the notice for the removed open-on-start: and its old boolean open: spelling.
+const openOnStartGone = "open-on-start: removed, press o"
+
 // errTargetsReserved rejects a legacy target named `targets`, which reads as the new form's block.
 const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
 
 // schemaFields is the accepted keys inside a group entry.
-var schemaFields = []string{"columns", "queries", "muted", "collapsed", "auto-hide", "start"}
+var schemaFields = []string{"columns", "queries", "muted", "fold", "start"}
 
 // parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
 // group. The two spellings cannot both appear. A null block is an empty one,
@@ -845,29 +839,16 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node,
 			}
 			def.muted = &b
 
-		case "collapsed", "hide":
-			if field == "hide" {
-				// Retired: collapsed: took the name, with the same values and default.
-				if seen["collapsed"] {
-					return groupDef{}, src.at(key, len(field), fmt.Sprintf("%s: both \"hide\" and \"collapsed\" are set; use collapsed:", owner))
-				}
-				notes.once("hide: is now collapsed:")
-			}
-			if field == "collapsed" && seen["hide"] {
-				return groupDef{}, src.at(key, len(field), fmt.Sprintf("%s: both \"hide\" and \"collapsed\" are set; use collapsed:", owner))
+		case "fold", "auto-fold", "collapsed", "auto-hide", "hide":
+			if field != "fold" {
+				notes.once(field + ": is now fold:")
 			}
 			b, err := boolField(src, name, field, deref(node.Content[i+1]))
 			if err != nil {
 				return groupDef{}, err
 			}
-			def.hide, def.hideSet = b, true
-
-		case "auto-hide":
-			b, err := boolField(src, name, field, deref(node.Content[i+1]))
-			if err != nil {
-				return groupDef{}, err
-			}
-			def.autoHide, def.autoHideSet = b, true
+			// Retired spellings may sit beside each other; true wins.
+			def.autoFold, def.autoFoldSet = def.autoFold || b, true
 
 		case "start":
 			m, err := parseStartMode(src, owner, field, deref(node.Content[i+1]))
@@ -896,7 +877,7 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node,
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart. `schema` parses too but is not listed.
-var targetFields = []string{"desc", "on", "except", "run", "cmd", "build", "health", "open", "open-on-start", "columns", "queries", "group", "muted", "hide", "selected", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "build", "health", "open", "columns", "queries", "group", "muted", "selected", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef, notes *oldFormNotes) (Target, error) {
 	node = deref(node)
@@ -919,7 +900,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		}
 		seen[field] = true
 		if seen["run"] && seen["cmd"] {
-			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"run\" and \"cmd\" are set; use one", name))
+			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"run\" and \"cmd\" are set; use run", name))
 		}
 		if seen["group"] && seen["schema"] {
 			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"group\" and \"schema\" are set; use one", name))
@@ -951,6 +932,9 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			}
 			switch field {
 			case "run", "cmd":
+				if field == "cmd" {
+					notes.once("cmd: is now run:")
+				}
 				target.Cmd = s
 			case "build":
 				target.Build = s
@@ -970,12 +954,10 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 
 		case "open":
 			if deref(value).Kind == yaml.ScalarNode && deref(value).Tag == "!!bool" {
-				b, err := boolField(src, name, field, value)
-				if err != nil {
+				if _, err := boolField(src, name, field, value); err != nil {
 					return Target{}, err
 				}
-				target.OpenOnStart = b
-				notes.once(fmt.Sprintf("open: %t is now open-on-start: %t", b, b))
+				notes.once(openOnStartGone)
 				break
 			}
 			s, err := scalarField(src, name, field, value)
@@ -986,11 +968,10 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			openString = true
 
 		case "open-on-start":
-			b, err := boolField(src, name, field, value)
-			if err != nil {
+			if _, err := boolField(src, name, field, value); err != nil {
 				return Target{}, err
 			}
-			target.OpenOnStart = b
+			notes.once(openOnStartGone)
 
 		case "columns":
 			cols, err := parseColumnList(src, owner, field, value)
@@ -1034,6 +1015,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				return Target{}, err
 			}
 			hide = &b
+			notes.once("hide: is now muted:")
 
 		case "selected":
 			b, err := boolField(src, name, field, value)
@@ -1066,7 +1048,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 	if urlKey != nil && openString {
 		return Target{}, src.at(urlKey, len("url"), fmt.Sprintf("target %q: both \"url\" and a string \"open\" are set; use open: alone", name))
 	}
-	// Own muted beats own hide, and both beat the group's muted and hide.
+	// Own muted beats the retired hide, and both beat the group's muted.
 	if target.Muted == nil && hide != nil {
 		target.Muted = hide
 	}
@@ -1081,13 +1063,8 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		if target.Muted == nil {
 			target.Muted = group.muted
 		}
-		if target.Muted == nil && group.hide {
-			muted := true
-			target.Muted = &muted
-		}
-		target.GroupHide = group.hide
-		if group.autoHideSet {
-			target.AutoHide = group.autoHide
+		if group.autoFoldSet {
+			target.AutoFold = group.autoFold
 		}
 		if !target.startSet && group.startSet {
 			target.Start, target.startSet = group.start, true

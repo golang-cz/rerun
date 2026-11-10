@@ -15,7 +15,7 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · `ctrl+l` blanks the pane and keeps scrollback: the clear hides old output without deleting it. Why: scrollback stays searchable.
 - 2026-11-09 · no `›` gutter glyph: each pane row drops a glyph. Why: the glyph cost bytes on every redraw.
 - 2026-11-09 · shift+arrows select lines in the pane: a keyboard selection reuses the drag highlight. Why: copying lines should not need the mouse.
-- 2026-11-09 · `auto-hide` lists idle targets only while they run or fail: Makefile imports default on, and an exit 0 hides after 10 minutes. Why: the list keeps what needs attention, and a clean exit stays readable for a while.
+- 2026-11-09 · `fold: true` lists a group's idle targets only as `(+) N more`: Makefile imports default on, and an exit 0 stays listed for 10 minutes. Why: the list keeps what needs attention, and a clean exit stays readable for a while.
 - 2026-11-09 · with a rerun.yml, imports are explicit: only `imports:` loads, and `rerun -migrate` writes the entries. Why: no surprise targets appear from a file nobody listed.
 - 2026-11-09 · `c` is the only copy key: no `y` anywhere, and the fs events modal moved from `y` to `c`. Why: one copy key across every modal.
 - 2026-11-09 · modal size defaults (80%, 80–120 cols, 80% height, min 10 rows) live in `cmd/rerun/tui_modal.go`: every modal shares one box. Why: the modals drifted apart in size.
@@ -25,11 +25,11 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-09 · fuzzy matches use fzf's sage green, readable on light and dark. Why: fzf users already read that color as a match.
 - 2026-11-09 · the fs row moves to the top of the left list and names the newest batch's file: `server.go +1`, or `fs idle`. Why: the bottom row sat under the list, where a long list hid it.
 - 2026-11-09 · `ctrl+o` on a target with no `open:` says so. Why: a silent `ctrl+o` looked broken.
-- 2026-11-09 · `open:` is the target's link or command, and `open-on-start:` runs it at startup: one field for what `o` does, one for when. Why: a `url:` that could not run a command, and a boolean `open:` that did not open anything, misled readers.
+- 2026-11-09 · `open:` is the target's link or command, and `o` runs it; nothing opens at startup. Why: a `url:` that could not run a command, and a boolean `open:` that did not open anything, misled readers.
 - 2026-11-09 · the pills row takes focus with `↑`, and `←`/`→` stay in the input: arrows keep one job per focus. Why: the input jump to pills fired when the cursor merely reached the start.
 - 2026-11-09 · `f` opens search and `=` filters by the cursor value: `f` is the one search key, and `ctrl+f` goes. Why: the old `f` filter label hid the search key.
 - 2026-11-09 · the row whose logs the pane shows is bold, focus or not: the scope reads at a glance. Why: the cursor band alone did not say which target the pane was showing.
-- 2026-11-09 · groups are expanded or collapsed (`collapsed:`), and idle targets are auto-hidden (`auto-hide:`): two separate ideas, two names. Why: `hide:` on a group read as hiding targets, when it only folded the header.
+- 2026-11-09 · a group is expanded or folded with one key, `fold:`; a target's `hide:` became `muted:`. Why: `hide:` on a group read as hiding targets, when it only folded the header.
 - 2026-11-09 · `o` on the list opens a link picker over every `open:` value; go to no longer lists links. Why: links get their own place instead of doubling the go to list.
 - 2026-11-09 · startup scopes the pane to the cursor's row: the first group or target shows only its logs. Why: the highlighted row must match the logs.
 - 2026-11-09 · `i` inspects a line's original or JSON form; `o` always opens links. Why: one key, one job, in every pane.
@@ -37,4 +37,5 @@ This file logs product and developer-experience decisions, each with a short why
 - 2026-11-10 · the fs hint is `file +N` and shows the last batch for 10 s, then `fs idle`; `t` adds the batch's age in the times column, lined up with the row durations. A long name keeps its extension (`ser….gen.go`). The hint never flashes, and the events modal keeps 10 min. Why: a calm, compact hint, with history one key away.
 - 2026-11-10 · one 10 s window for the build ✓ and the fs hint, one 2 s window for the name tints; nothing flashes in reverse. A build start tints the name orange and a file restart tints it green, a failed build or loop tints it red and red wins; a rebuild loop (the core detector: 6 self-written re-triggers, auto-pause up to 30 s) shows a red `∞` and a red `loop:` hint. Why: signals stay where they belong, and a loop is named instead of blinked.
 - 2026-11-10 · `t` shows times everywhere: list durations, the fs hint age, the build age on the version row (`11m ago`) and the arrival time `HH:MM:SS` of every log line, service output and rerun's own rules alike, in a dim gutter before the pane. The time is no part of the line, so copy and search skip it, and a line's expansion rows stay blank. Why: one key for all details, and the log stays clean by default.
-- 2026-11-10 · a collapsed group is its header plus a dim `(+) N more` row, and the times column is right-aligned for every value. Why: one scannable right edge, and one affordance for hidden members.
+- 2026-11-10 · a folded group is its listed members plus a dim `(+) N more` row, and the times column is right-aligned for every value. Why: one scannable right edge, and one affordance for hidden members.
+- 2026-11-10 · one `fold:` replaces `collapsed:`, `auto-hide:`, `auto-fold:` and group `hide:`; a folded group shows failing members and anything active in the last 10 min. Folding never mutes. `open-on-start:` and `cmd:` are gone. Why: rerun.yml stays small, and a folded group never hides a problem.

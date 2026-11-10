@@ -29,11 +29,11 @@ func TestParseConfigTargetsKeyMatchesLegacy(t *testing.T) {
 	dir := t.TempDir()
 	body := `  api:
     desc: the API
-    cmd: go run ./cmd/api
+    run: go run ./cmd/api
     on: [cmd, internal]
 
   web:
-    cmd: pnpm dev
+    run: pnpm dev
     on: web
 `
 	legacy := filepath.Join(dir, "legacy.yml")
@@ -62,7 +62,7 @@ func TestParseConfigTargetsKeyMatchesLegacy(t *testing.T) {
 
 func TestParseConfigRejectsUnknownTopLevelKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  api:\n    cmd: echo hi\n\napi:\n  cmd: echo hi\n")
+	writeFile(t, path, "targets:\n  api:\n    run: echo hi\n\napi:\n  run: echo hi\n")
 
 	_, err := ParseConfig(path)
 	if err == nil || !strings.Contains(err.Error(), `unknown top-level key "api"`) {
@@ -72,7 +72,7 @@ func TestParseConfigRejectsUnknownTopLevelKey(t *testing.T) {
 
 func TestParseConfigTargetsKeyAcceptsReservedTargetNames(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  groups:\n    cmd: echo groups\n  imports:\n    cmd: echo imports\n")
+	writeFile(t, path, "targets:\n  groups:\n    run: echo groups\n  imports:\n    run: echo imports\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestParseConfigTargetsKeyAcceptsReservedTargetNames(t *testing.T) {
 
 func TestParseConfigLegacyFormNotices(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n")
+	writeFile(t, path, "api:\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestParseConfigLegacyFormNotices(t *testing.T) {
 		t.Fatalf("notices = %q, want one migrate notice", cfg.Notices)
 	}
 
-	writeFile(t, path, "targets:\n  api:\n    cmd: echo hi\n")
+	writeFile(t, path, "targets:\n  api:\n    run: echo hi\n")
 	cfg, err = ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
@@ -107,7 +107,7 @@ func TestParseConfigLegacyFormNotices(t *testing.T) {
 
 func TestParseConfigRejectsLegacyTargetNamedTargets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\ntargets:\n  cmd: echo targets\n")
+	writeFile(t, path, "api:\n  run: echo hi\ntargets:\n  run: echo targets\n")
 
 	_, err := ParseConfig(path)
 	if err == nil || !strings.Contains(err.Error(), "targets is reserved") {
@@ -117,7 +117,7 @@ func TestParseConfigRejectsLegacyTargetNamedTargets(t *testing.T) {
 
 func TestMigrateRejectsLegacyTargetNamedTargets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\ntargets:\n  cmd: echo targets\n")
+	writeFile(t, path, "api:\n  run: echo hi\ntargets:\n  run: echo targets\n")
 
 	before := readConfigText(t, path)
 	if _, err := migrateConfig(path); err == nil || !strings.Contains(err.Error(), "targets is reserved") {
@@ -132,7 +132,7 @@ func TestParseConfigImportsOnlyRootHasNoMigrateNotice(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
 	writeFile(t, path, "imports:\n  - path: b/rerun.yml\n")
-	writeFile(t, filepath.Join(dir, "b", ConfigFileName), "api:\n  cmd: echo hi\n")
+	writeFile(t, filepath.Join(dir, "b", ConfigFileName), "api:\n  run: echo hi\n")
 
 	cfg, err := ParseConfig(path)
 	if err != nil {
@@ -154,11 +154,11 @@ groups:
 # the API server
 api:
   group: backend
-  cmd: go run ./cmd/api # local dev
+  run: go run ./cmd/api # local dev
   on: [cmd, internal]
 
 web:
-  cmd: pnpm dev
+  run: pnpm dev
 `)
 
 	before, err := ParseConfig(path)
@@ -219,7 +219,7 @@ web:
 func TestMigrateLeavesReservedKeysInPlace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ConfigFileName)
-	writeFile(t, path, "api:\n  cmd: echo hi\n\nimports:\n  - path: tools.mk\n")
+	writeFile(t, path, "api:\n  run: echo hi\n\nimports:\n  - path: tools.mk\n")
 	writeFile(t, filepath.Join(dir, "tools.mk"), "lint:\n\tgo vet\n")
 
 	if _, err := migrateConfig(path); err != nil {
@@ -242,13 +242,13 @@ func TestSetColumnsMatchesTheFileForm(t *testing.T) {
 	}{
 		{
 			name: "targets form",
-			in:   "targets:\n  api:\n    cmd: go run ./cmd/api\n",
-			want: "targets:\n  api:\n    cmd: go run ./cmd/api\n    columns: ['level {.level}']\n",
+			in:   "targets:\n  api:\n    run: go run ./cmd/api\n",
+			want: "targets:\n  api:\n    run: go run ./cmd/api\n    columns: ['level {.level}']\n",
 		},
 		{
 			name: "legacy form",
-			in:   "api:\n  cmd: go run ./cmd/api\n",
-			want: "api:\n  cmd: go run ./cmd/api\n  columns: ['level {.level}']\n",
+			in:   "api:\n  run: go run ./cmd/api\n",
+			want: "api:\n  run: go run ./cmd/api\n  columns: ['level {.level}']\n",
 		},
 	}
 
@@ -269,7 +269,7 @@ func TestSetColumnsMatchesTheFileForm(t *testing.T) {
 
 func TestSetColumnsSchemaInTargetsFormKeepsTargets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  api:\n    cmd: echo hi\n")
+	writeFile(t, path, "targets:\n  api:\n    run: echo hi\n")
 
 	if err := setColumns(path, "backend", "", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
@@ -299,7 +299,7 @@ func TestParseArgsMigrate(t *testing.T) {
 func TestMigrateFollowsASymlink(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real.yml")
-	writeFile(t, real, "api:\n  cmd: echo hi\n")
+	writeFile(t, real, "api:\n  run: echo hi\n")
 	link := filepath.Join(dir, ConfigFileName)
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("symlink: %v", err)
@@ -316,7 +316,7 @@ func TestMigrateFollowsASymlink(t *testing.T) {
 // A legacy top-level queries: block stays at the top level through -migrate.
 func TestMigrateKeepsTopLevelQueries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "queries:\n  errors: level=error\n\nweb:\n  cmd: sleep 1\n")
+	writeFile(t, path, "queries:\n  errors: level=error\n\nweb:\n  run: sleep 1\n")
 
 	status, err := migrateConfig(path)
 	if err != nil {

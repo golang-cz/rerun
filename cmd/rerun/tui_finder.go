@@ -58,7 +58,7 @@ func (m *tuiModel) finderRuns(c finderItem) bool {
 // finderDesc collapses a description onto one line, so a newline cannot break the popup.
 func finderDesc(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// finderCandidates lists every target and group in list order, including rows under collapsed groups.
+// finderCandidates lists every target and group in list order, including rows under folded groups.
 func (m *tuiModel) finderCandidates() []finderItem {
 	rows := m.allRows()
 	out := make([]finderItem, 0, len(rows))
@@ -343,12 +343,12 @@ func dropControl(r rune) rune {
 	return r
 }
 
-// finderJump unfolds the rows hiding allRows()[idx] and the group itself when it is one, then moves the cursor to it.
+// finderJump expands the group when allRows()[idx] is one, then moves the cursor to the row.
 func (m *tuiModel) finderJump(idx int) {
 	m.listScrolled = false
 	rows := m.allRows()
 	m.revealRow(rows, idx)
-	// Solo is never hidden, so the target lists without revealing its group's hidden members.
+	// Solo is never folded away, so the target lists without expanding its group.
 	if r := rows[idx]; !r.header {
 		m.applyScope(r.target, "")
 	}
@@ -369,17 +369,10 @@ func (m *tuiModel) finderRun(idx int) {
 	}
 }
 
-// revealRow unfolds the headers above rows[idx] that hide it, and the header itself when it is one.
+// revealRow expands the blocks under rows[idx] when it is a header; a target stays listed as the solo row.
 func (m *tuiModel) revealRow(rows []listRow, idx int) {
-	depth := rows[idx].depth
 	if rows[idx].header {
-		delete(m.collapsed, rows[idx].schema)
-	}
-	for i := idx - 1; i >= 0 && depth > 0; i-- {
-		if r := rows[i]; r.header && r.depth < depth {
-			depth = r.depth
-			delete(m.collapsed, r.schema)
-		}
+		m.setFold(blockKeys(rows, idx), false)
 	}
 }
 
