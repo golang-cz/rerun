@@ -10,20 +10,23 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 )
 
 // shellMeta holds the characters a shell expands, splits, or quotes.
 const shellMeta = "\"'`\\$&|;<>(){}[]*?!#~"
 
 // shellBuiltins are shell keywords and builtins with no binary, so LookPath cannot reject them.
+// Brace and bang keywords are left out: shellMeta already sends them to sh.
 var shellBuiltins = map[string]bool{
-	"cd": true, "exec": true, "export": true, "source": true, ".": true, "eval": true,
+	"cd": true, "exec": true, "export": true, "source": true, ".": true, ":": true, "eval": true,
 	"set": true, "unset": true, "alias": true, "unalias": true, "exit": true, "return": true,
 	"read": true, "trap": true, "ulimit": true, "umask": true, "wait": true, "shift": true,
+	"break": true, "continue": true,
 	"local": true, "readonly": true, "type": true, "command": true, "builtin": true,
 	"if": true, "then": true, "else": true, "elif": true, "fi": true, "for": true,
 	"while": true, "until": true, "do": true, "done": true, "case": true, "esac": true,
-	"function": true, "time": true, "{": true, "}": true, "!": true, "select": true,
+	"function": true, "time": true, "select": true,
 	"coproc": true, "let": true, "declare": true, "typeset": true, "hash": true,
 	"jobs": true, "fg": true, "bg": true, "pushd": true, "popd": true, "dirs": true,
 	"getopts": true, "times": true, "fc": true, "history": true, "help": true,
@@ -56,6 +59,10 @@ func newExecCmd(cmdline []string) *exec.Cmd {
 // plainArgv returns the words of a script that needs no shell, or false to keep /bin/sh.
 func plainArgv(script string) ([]string, bool) {
 	if strings.ContainsAny(script, shellMeta+"\n\r") {
+		return nil, false
+	}
+	// strings.Fields also splits on NBSP, \v and \f, which the shell's IFS keeps in a word.
+	if strings.IndexFunc(script, func(r rune) bool { return unicode.IsSpace(r) && r != ' ' && r != '\t' }) >= 0 {
 		return nil, false
 	}
 	words := strings.Fields(script)

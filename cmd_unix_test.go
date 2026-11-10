@@ -46,6 +46,12 @@ func TestPlainArgv(t *testing.T) {
 		{"whitespace only", " \t ", nil, false},
 		{"newline", "true\nfalse", nil, false},
 		{"carriage return", "true\rfalse", nil, false},
+		{"colon builtin", ":", nil, false},
+		{"break builtin", "break", nil, false},
+		{"continue builtin", "continue", nil, false},
+		{"non-breaking space", "true\u00a0-x", nil, false},
+		{"vertical tab", "true\v-x", nil, false},
+		{"form feed", "true\f-x", nil, false},
 	}
 	for _, c := range shellMeta {
 		cases = append(cases, struct {
@@ -127,5 +133,12 @@ func TestNewExecCmdRelativePathRunsInDir(t *testing.T) {
 	}
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("cmd.Run() in dir: %v", err)
+	}
+}
+
+func TestNewExecCmdColonUsesShell(t *testing.T) {
+	cmd := newExecCmd([]string{":"})
+	if cmd.Path != "/bin/sh" {
+		t.Fatalf("cmd.Path = %q, want /bin/sh", cmd.Path)
 	}
 }
