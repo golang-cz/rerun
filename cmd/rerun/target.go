@@ -645,16 +645,21 @@ func (r *targetRunner) run(ctx context.Context) error {
 	// tree, and the command's output must not wait for it. A run cancelled
 	// while the watcher was built starts nothing. onchange and manual keep the
 	// first generation back, for a change and for r.
+	startFailed := false
 	if ctx.Err() == nil {
 		if !r.userStopped() && r.target.Start == startAuto {
 			if r.target.Build != "" {
 				r.startBuild(nil)
 			} else if err := r.start(ctx); err != nil && !errors.Is(err, errStartAborted) {
 				// Same as spawn: the row shows the failure and the loop stays up for the next change.
+				// The clear below would wipe this error from an ad-hoc screen.
 				r.sink.emit(event{kind: evRunnerErr, target: r.target.Name, err: err})
+				startFailed = true
 			}
 		}
-		r.sink.emit(event{kind: evCleared, target: r.target.Name})
+		if !startFailed {
+			r.sink.emit(event{kind: evCleared, target: r.target.Name})
+		}
 	}
 
 	for {
