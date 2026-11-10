@@ -94,7 +94,6 @@ func newTUIStyles(isDark bool) tuiStyles {
 type seg struct {
 	text  string
 	color string
-	link  string
 	faint bool
 	// italic and strike style a muted or dropped name; they ride on the row's cursor band.
 	italic, strike bool
@@ -796,7 +795,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
 	}
-	name := seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link(), color: t.nameColor(m.now)}
+	name := seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), color: t.nameColor(m.now)}
 	if t.muted || t.dropped {
 		name.italic, name.strike = true, t.dropped
 		if name.color == "" {
@@ -974,9 +973,6 @@ func renderSegs(segs []seg, base lipgloss.Style, width int) string {
 		text := truncate(s.text, width-cells)
 		if text == "" {
 			continue
-		}
-		if s.link != "" {
-			text = osc8(s.link, text)
 		}
 		b.WriteString(style.Render(text))
 		cells += displayWidth(text)

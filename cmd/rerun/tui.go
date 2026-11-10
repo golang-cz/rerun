@@ -1710,12 +1710,6 @@ func (t *tuiTarget) glyph() string {
 	return "·"
 }
 
-// osc8 wraps text in an OSC 8 hyperlink, which terminals that support it make
-// clickable. Others render the text as-is.
-func osc8(url, text string) string {
-	return "\x1b]8;;" + url + "\x1b\\" + text + "\x1b]8;;\x1b\\"
-}
-
 // copyToClipboard is the one path every copy takes: the terminal's OSC 52 clipboard.
 func copyToClipboard(payload string) tea.Cmd {
 	return tea.SetClipboard(payload)

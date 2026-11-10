@@ -393,6 +393,7 @@ func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) [
 		if !running {
 			r = newTargetRunner(spec, g.sink)
 			r.gate = g.gate
+			r.builds = g.builds
 			if g.soloGuard.Load() {
 				// Added while one stream is soloed: hold it for an explicit start.
 				atomic.StoreInt32(&r.stopped, 1)

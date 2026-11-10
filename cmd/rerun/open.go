@@ -25,14 +25,6 @@ func isOpenLink(value string) bool {
 	return openSchemeRE.MatchString(value)
 }
 
-// link is the target's open: value when it is a URL, else "", for the row link.
-func (t Target) link() string {
-	if isOpenLink(t.Open) {
-		return t.Open
-	}
-	return ""
-}
-
 // openExitMsg reports how an open: command ended, so the TUI can say when it failed.
 type openExitMsg struct {
 	first string

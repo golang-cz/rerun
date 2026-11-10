@@ -246,6 +246,9 @@ type targetGroup struct {
 	// itself: the user is focused on a single target, not on new rows.
 	soloGuard atomic.Bool
 
+	// builds shares one build process among the targets that run the same command in the same directory.
+	builds *buildShare
+
 	done   chan struct{}
 	failed int32
 	wg     sync.WaitGroup
@@ -260,11 +263,13 @@ func newTargetGroup(targets []Target, s sink, configPath string) *targetGroup {
 		gate:       newStartGate(staggerLimit),
 		targets:    append([]Target(nil), targets...),
 		configPath: configPath,
+		builds:     newBuildShare(),
 		done:       make(chan struct{}),
 	}
 	for i, target := range targets {
 		r := newTargetRunner(target, s)
 		r.gate = g.gate
+		r.builds = g.builds
 		r.order.Store(int64(i))
 		g.runners = append(g.runners, r)
 	}
@@ -442,7 +447,9 @@ type targetRunner struct {
 	// goroutine reads it, so no lock is needed.
 	exited <-chan struct{}
 
-	// build is the build in flight, nil when none. Run goroutine only.
+	// builds is the group's build share, set before the runner starts. builds and build are the runner's view of it.
+	builds *buildShare
+	// build is this runner's seat in the shared build in flight, nil when none. Run goroutine only.
 	build *buildJob
 	// meta is what the next evStarted reports. Run goroutine only.
 	meta startMeta
@@ -466,6 +473,7 @@ func newTargetRunner(target Target, s sink) *targetRunner {
 		finished:  make(chan struct{}),
 		retire:    make(chan struct{}),
 		watchDone: make(chan struct{}),
+		builds:    newBuildShare(),
 	}
 	r.be = newBackend(target, s, &r.probes)
 	// An unselected target starts off: it stays down until space or r.
@@ -909,9 +917,10 @@ func (r *targetRunner) selfWritten(changeSet rerun.ChangeSet) []string {
 	r.mu.Unlock()
 	ends := []time.Time{r.lastBuildEnd}
 	if r.build != nil {
-		starts = append(starts, r.build.started)
-		if ns := r.build.ended.Load(); ns != 0 {
-			ends = append(ends, time.Unix(0, ns))
+		started, ended := r.builds.window(r.build)
+		starts = append(starts, started)
+		if ended != 0 {
+			ends = append(ends, time.Unix(0, ended))
 		}
 	}
 

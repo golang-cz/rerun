@@ -2,16 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/golang-cz/rerun"
 )
 
 const (
@@ -24,23 +19,16 @@ const (
 // process group can hold the output pipe open and block the reaper.
 var buildCancelWait = 3 * time.Second
 
-type buildJob struct {
-	files     map[string]struct{}
-	started   time.Time
-	ended     atomic.Int64 // unix nanos at exit, set before done is sent
-	cmd       rerun.Command
-	done      chan buildResult
-	cancelled atomic.Bool
-}
-
+// buildResult is one runner's view of a finished shared build.
 type buildResult struct {
-	err   error
-	code  int
-	lines []string
-	dur   time.Duration
+	err     error
+	code    int
+	lines   []string
+	dur     time.Duration
+	files   map[string]struct{}
+	started time.Time
+	ended   time.Time
 }
-
-var errBuildCancelled = errors.New("build cancelled")
 
 type tailBuffer struct {
 	mu      sync.Mutex
@@ -120,54 +108,7 @@ func (r *targetRunner) buildResult() <-chan buildResult {
 }
 
 func (r *targetRunner) startBuild(files map[string]struct{}) {
-	union := make(map[string]struct{}, len(files))
-	if r.build != nil {
-		for f := range r.build.files {
-			union[f] = struct{}{}
-		}
-		r.abortBuild()
-	}
-	for f := range files {
-		union[f] = struct{}{}
-	}
-
-	sorted := sortedFiles(union)
-
-	started := time.Now()
-	r.sink.emit(event{kind: evBuildStarted, target: r.target.Name, files: sorted, at: started})
-
-	buf := &tailBuffer{n: buildTailLines, onLine: func(line string) {
-		r.sink.emit(event{kind: evBuildOutput, target: r.target.Name, line: line, buildAt: started})
-	}}
-	devNull, err := os.Open(os.DevNull)
-	if err != nil {
-		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: sorted, err: err})
-		return
-	}
-	defer devNull.Close()
-	cmd, err := rerun.StartCommand([]string{r.target.Build}, r.target.Grace,
-		rerun.WithDir(r.target.Dir), rerun.WithStdin(devNull), rerun.WithStdout(buf), rerun.WithStderr(buf))
-	if err != nil {
-		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: sorted, err: err})
-		return
-	}
-
-	job := &buildJob{files: union, started: started, cmd: cmd, done: make(chan buildResult, 1)}
-	go func() {
-		_ = cmd.WaitExit(context.Background())
-		job.ended.Store(time.Now().UnixNano())
-		buf.flush()
-		code, werr := cmd.ExitState()
-		res := buildResult{dur: time.Since(started), code: code, lines: buf.tail()}
-		switch {
-		case job.cancelled.Load():
-			res.err = errBuildCancelled
-		case code != 0 || werr != nil:
-			res.err = describeBuildErr(code, werr)
-		}
-		job.done <- res
-	}()
-	r.build = job
+	r.builds.start(r, files)
 }
 
 func describeBuildErr(code int, err error) error {
@@ -184,31 +125,24 @@ func (r *targetRunner) cancelBuild() {
 	}
 }
 
-// abortBuild kills the build quietly, for a rebuild that replaces it.
+// abortBuild leaves the shared build quietly; the process dies with its last member.
 func (r *targetRunner) abortBuild() bool {
 	job := r.build
 	if job == nil {
 		return false
 	}
 	r.build = nil
-	job.cancelled.Store(true)
-	// KillForce itself waits for the reap, so it must not run on the loop.
-	go func() { _ = job.cmd.KillForce() }()
-	select {
-	case <-job.done:
-	case <-time.After(buildCancelWait):
-	}
+	r.builds.leave(job)
 	return true
 }
 
 func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
-	job := r.build
-	r.build = nil
-	if job == nil || errors.Is(res.err, errBuildCancelled) {
+	if r.build == nil {
 		return
 	}
-	r.lastBuildStart, r.lastBuildEnd = job.started, time.Unix(0, job.ended.Load())
-	files := sortedFiles(job.files)
+	r.build = nil
+	r.lastBuildStart, r.lastBuildEnd = res.started, res.ended
+	files := sortedFiles(res.files)
 	if res.err != nil {
 		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, code: res.code, lines: res.lines, err: res.err})
 		return
@@ -218,7 +152,7 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 		return
 	}
 
-	r.noteReplace(job.files)
+	r.noteReplace(res.files)
 	r.meta.buildDur = res.dur
 	if r.meta.restart {
 		r.sink.emit(event{kind: evExited, target: r.target.Name, status: "stopped for restart", restart: true, at: time.Now()})

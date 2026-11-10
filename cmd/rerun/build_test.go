@@ -184,7 +184,7 @@ func TestChangeDuringBuildCancelsAndUnionsFiles(t *testing.T) {
 	script, release := gatedBuild(t)
 	r, log, ctx := buildRunner(t, script, "sleep 30")
 	r.handleChange(ctx, changeOf("a.go"))
-	first := r.build.cmd
+	first := r.build.run.cmd
 	r.handleChange(ctx, changeOf("b.go"))
 
 	if !first.Exited() {
@@ -210,7 +210,7 @@ func TestStopCancelsTheBuild(t *testing.T) {
 	r.handleChange(ctx, changeOf("a.go"))
 	job := r.build
 	r.handleControl(ctx, ctrlMsg{kind: ctrlStop})
-	if r.build != nil || !job.cmd.Exited() {
+	if r.build != nil || !job.run.cmd.Exited() {
 		t.Error("stop left the build running")
 	}
 }
