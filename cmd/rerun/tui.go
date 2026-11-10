@@ -156,7 +156,7 @@ type tuiTarget struct {
 
 	// restartBatch is the batch that restarted the target, cleared when its spawn lands.
 	restartBatch int
-	// building and buildStart track a build in flight, which the status column counts.
+	// building and buildStart track a build in flight, which the build cell shows.
 	building    bool
 	buildStart  time.Time
 	buildFailed bool
@@ -204,9 +204,11 @@ type tuiModel struct {
 	// paneFocus puts the arrow keys on the log pane: up/down scroll it,
 	// left/right pan its columns. False means the left list owns them.
 	paneFocus bool
-	// leftMode is the left column's width, cycled by b.
-	leftMode leftMode
-	paneCol  int // horizontal column offset of the pane
+	// listHidden is b's state: the log takes the full width while the list is off.
+	listHidden bool
+	// showTimes is t's state: the list shows its times column.
+	showTimes bool
+	paneCol   int // horizontal column offset of the pane
 
 	// feed is the change batches the fs events modal lists, oldest first.
 	feed    []feedBatch
@@ -341,6 +343,8 @@ type tuiModel struct {
 	// inputCursor is the text cursor as a rune index into input; inputSel selects the whole input.
 	inputCursor int
 	inputSel    bool
+	// inputHist is the bar input's undo and redo history, fresh each time the input opens.
+	inputHist undoStack
 
 	// searchMatches holds the pane rows any pill hits, searchRow the current hit.
 	searchMatches []int
@@ -522,6 +526,12 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 	if cfg.MakeOnly {
 		m.finder = finderState{open: true}
 	}
+	// Once at startup: a reload must keep the scope the user chose.
+	if r, ok := m.cursorRow(); ok {
+		m.applyRowScope(r)
+	}
+	// The startup scope is automatic, so a later +name reload must still start new targets.
+	m.group.setSoloGuard(false)
 	return m
 }
 
@@ -553,13 +563,10 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.runner.control(ctrlReboot)
 }
 
-// openTarget is `o`: the target's open: value, a URL or a command, else the newest local link it printed.
+// openTarget is ctrl+o: the target's open: value, a URL or a command. Log output never supplies a link.
 func (m *tuiModel) openTarget(i int) tea.Cmd {
 	t := m.targets[i]
 	value := t.spec.Open
-	if value == "" {
-		value = localLink(m.targetLines(i))
-	}
 	if value == "" {
 		m.showNotice(t.spec.Name+" has nothing to open · add open: in rerun.yml", false)
 		return nil
@@ -781,7 +788,6 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	switch ev.kind {
 	case evOutput:
 		m.addLine(i, ev.line)
-		m.captureURL(t, ev.line)
 
 	case evChanged:
 		// The batch writes no pane line; the pane header and the feed show it.
@@ -1475,11 +1481,11 @@ func (m *tuiModel) pruneCells() {
 	m.cellBySeq = live
 }
 
-// status is the row's second column: uptime while running, what happened after.
-// The gear trails: the column is left-aligned, so the duration never moves.
+// status is the times column: uptime while running, what happened after.
+// The build gear has its own cell, so the column never repeats it.
 func (m *tuiModel) status(t *tuiTarget) string {
 	if t.building {
-		return fmtDur(m.now.Sub(t.buildStart)) + " ⚙"
+		return fmtDur(m.now.Sub(t.buildStart))
 	}
 	if t.buildFailed {
 		return "✗ build"

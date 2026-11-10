@@ -9,27 +9,28 @@ import (
 	"github.com/golang-cz/rerun"
 )
 
-// The marker cells sit between the name and the status, so neither touches either.
+// The marker cells sit between the build cell and the status, so neither touches either.
 func TestMarkerCellsSitBetweenNameAndStatus(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.targets[0].state = stateRunning
 	m.targets[1].state = stateRunning
+	m.showTimes = true
 	m.setEdit(colNode{name: "api"}, []Column{{Name: "level", Expr: ".level"}})
 	m.frame()
 
 	leftW, _ := m.layoutWidths()
-	nameW := m.nameWidth(leftW)
+	markerAt := 4 + m.buildColW(leftW)
 	cells := func(y int) []rune { return []rune(ansi.Strip(m.leftLine(y+1, leftW))) }
 
-	if got := string(cells(0)[2+nameW : 4+nameW]); got != "  " {
+	if got := string(cells(0)[markerAt : markerAt+2]); got != "  " {
 		t.Errorf("clean row marker = %q, want two blank cells", got)
 	}
-	if got := string(cells(1)[2+nameW : 4+nameW]); got != "* " {
+	if got := string(cells(1)[markerAt : markerAt+2]); got != "* " {
 		t.Errorf("dirty row marker = %q, want \"* \"", got)
 	}
 	for y := 0; y < 2; y++ {
-		if got := string(cells(y)[4+nameW:]); !strings.HasPrefix(got, "0s") {
-			t.Errorf("row %d status starts at %q, want the uptime at column %d", y, got, 4+nameW)
+		if got := string(cells(y)[leftW-statusW:]); !strings.HasPrefix(got, "0s") {
+			t.Errorf("row %d status starts at %q, want the uptime at column %d", y, got, leftW-statusW)
 		}
 	}
 }
@@ -83,7 +84,7 @@ func TestHelpFitsThirtyRows(t *testing.T) {
 
 	press(m, "?")
 	full := ansi.Strip(m.View().Content)
-	for _, want := range []string{"ctrl+s", "backspace", "enter → a f", "×", "rerun keys"} {
+	for _, want := range []string{"ctrl+s", "backspace", "enter → a =", "×", "rerun keys"} {
 		if !strings.Contains(full, want) {
 			t.Errorf("full help is missing %q", want)
 		}
@@ -246,6 +247,7 @@ func TestMakeTargetStatusIsEmptyAndYamlManualShowsIt(t *testing.T) {
 	}
 
 	ym := newTestModel(t, Target{Name: "job", Cmd: "true", Start: startManual, Selected: true, Grace: rerun.DefaultGrace})
+	ym.showTimes = true
 	if got := ym.status(ym.targets[0]); got != "manual" {
 		t.Errorf("yaml manual status = %q, want manual", got)
 	}
@@ -261,7 +263,7 @@ func TestLongTargetNameIsCapped(t *testing.T) {
 	m.frame()
 
 	leftW, _ := m.layoutWidths()
-	if want := maxNameW + statusW + 4; leftW != want {
+	if want := maxNameW + 6; leftW != want {
 		t.Fatalf("leftW = %d, want %d", leftW, want)
 	}
 	row := ansi.Strip(m.leftLine(1, leftW))
@@ -288,5 +290,18 @@ func TestFreshAutoTargetStartsGray(t *testing.T) {
 	}
 	if got := row.glyph(); got != "●" {
 		t.Errorf("glyph = %q, want ●", got)
+	}
+}
+
+// ctrl+o on a group header explains itself instead of doing nothing.
+func TestCtrlOOnGroupHeaderShowsNotice(t *testing.T) {
+	m := newConfigTUI([]Target{schemaTarget("api", "backend"), target("web")}, &Config{})
+	m.frame()
+	if r, ok := m.cursorRow(); !ok || !r.header {
+		t.Fatalf("cursor row = %+v, want a group header", r)
+	}
+	press(m, "ctrl+o")
+	if m.notice != "ctrl+o opens a target's link" || m.noticeErr {
+		t.Fatalf("notice = %q err=%v, want the ctrl+o hint", m.notice, m.noticeErr)
 	}
 }

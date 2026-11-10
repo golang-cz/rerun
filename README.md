@@ -30,21 +30,19 @@ Left column: one row per target; right pane: one merged log; `?` lists keys.
 Keys: `j/k` move the cursor, `←/→` focus the log pane and then scroll its
 columns (`↑/↓` move its cursor when focused, `home`/`end` jump to its top-left or
 live tail; `esc` goes back to the live tail first, then backs out of the list), `space` start/stop, `r` reboot,
-`e` fs events (last minute), `m` mute a stream. `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
+`e` fs events (last minute), `m` mute a stream. `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. Focusing the pane puts its cursor on the service's last line, or the newest line when that is off screen. Moving the cursor
 scopes the pane to its row; `esc` backs the scope out (a target to its group, a group to all).
-The row whose logs the pane shows is bold. On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). Scrolling up browses the
+The row whose logs the pane shows is bold. On a group header, `space`, `r`, and `m` act on its targets; `[`/`]` or `shift`+`↑`/`↓` jump between groups. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. Scrolling up browses the
 scrollback; `esc` returns to the live tail, and `q` or `ctrl+c` ask first; `enter` or a second `ctrl+c` quits.
 `/` or `f` opens the query bar: `enter` adds the input as pills (a leading `.` runs a yq expression per JSON line);
 `esc` leaves the bar but keeps the pills, `backspace` on an empty input removes the last pill; a selection with `columns`
-always shows them as a table. A JSON output line's top-level `url`,
-`addr`, `listen`, or `port` updates the row's url live.
-
-More keys: `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it. Copy sends the text through the terminal's OSC 52 clipboard sequence, which Ghostty and herdr pass through.
+always shows them as a table. 
+More keys: `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it. Copy sends the text through the terminal's OSC 52 clipboard sequence, which Ghostty and herdr pass through.
 
 The query bar's pills AND together, and one input can hold several: `level=error -healthz` adds two on `enter`.
 Each pill is a filter (`[text]`, solid) or a highlight (`⟨text⟩`, dim): a filter pill hides non-matching lines, a
 highlight pill only marks its hits. Every pill's matches are marked in the pane, and `n`/`N`/`ctrl+g`/`ctrl+shift+g`
-jump between the hit lines. With the bar open, `←`/`→` move the text cursor; `↑` moves focus to the pills row, where `←`/`→` pick, `delete` or `backspace` removes the picked one, `enter` or `↓` moves its text back into the input and `enter` puts it back in place, `space` toggles filter ⇄ highlight, `→` on the last `[@name]` pill expands it into its pills, and `esc` returns to the input. A click on a pill with the bar closed opens it picked. A pill that does not parse keeps the input red, with the error
+jump between the hit lines. With the bar open, `←`/`→` move the text cursor; `↑` moves focus to the pills row, where `←`/`→` pick, `x`, `delete` or `backspace` removes the picked one, `enter` or `↓` moves its text back into the input and `enter` puts it back in place, `space` toggles filter ⇄ highlight, `→` on the last `[@name]` pill expands it into its pills, and `esc` returns to the input. A click on a pill with the bar closed opens it picked. A pill that does not parse keeps the input red, with the error
 in the footer. The bar names the scope, the pill count and the matching/total lines. Typing `@` lists the pane scope's
 saved queries (see `queries:` below).
 
@@ -89,7 +87,7 @@ unsaved columns gets a `*` in its marker column, two cells after its name. A `co
 not rewritten: the footer names it, and you edit rerun.yml by hand. Chips and expansions last for the session only. `cmd+s` works only where the
 terminal forwards it.
 
-With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift`+`↑`/`↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
+With the pane focused, `i` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift`+`↑`/`↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `i` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
 
 Mouse: click a row to show only its stream, double-click to stop/start like `space`,
 the fs row at the top to open the fs events, and a click on a schema header to select
@@ -189,7 +187,7 @@ Each top-level key is one target. Fields:
 | `run` | shell command to run, required. Older spelling: `cmd`; use one |
 | `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
-| `open` | what `o` runs: a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. Older spelling: `url:`, which still works as the link |
+| `open` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. Older spelling: `url:`, which still works as the link |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
 | `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
@@ -376,7 +374,7 @@ groups:
 - `targets:` fails the load when a listed target is gone from the Makefile.
 - Each target is a row that starts manually and does not watch files.
 - An import's `start:` overrides that default: `start: auto` brings every rule up at session start, and a target's or group's own `start:` still wins.
-- Enter in go to runs a make target that is not running; its row shows `▶`. Any other enter jumps to the row and focuses its pane. `ctrl+k` or `g` opens the go-to finder, whose input reads `go to target or run…`.
+- Enter in go to runs a target that is not running, manual and onchange-waiting ones too; its row shows `▶`. Any other enter jumps to the row and focuses its pane. `ctrl+k` or `g` opens the go-to finder, whose input reads `go to target or run…`.
 - A `.mk` file runs as `make -f <file>`.
 - A repo with only a Makefile opens rerun with the finder open.
 

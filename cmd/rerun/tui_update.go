@@ -246,7 +246,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "b":
-		m.cycleLeft()
+		m.toggleList()
+	case "t":
+		m.showTimes = !m.showTimes
 
 	case "h":
 		if m.listFocused() {
@@ -273,7 +275,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			// Hidden, the list owns no visible cursor, so esc brings it back instead of widening scope.
 			if !m.listShown() {
-				m.leftMode = leftFull
+				m.listHidden = false
 				m.paneFocus = false
 				break
 			}
@@ -397,13 +399,20 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.openEvents()
 
 	case "o":
+		m.openLinks()
+
+	case "i":
 		if m.paneFocus {
 			m.openOriginal()
-		} else if i := m.cursorTarget(); i >= 0 {
-			return m, m.openTarget(i)
-		} else if r, ok := m.cursorRow(); ok && r.header {
-			m.showNotice("o opens a target's open: link", false)
+		} else {
+			m.showHint("i inspects a pane line · → focuses the pane")
 		}
+
+	case "ctrl+o":
+		if i := m.cursorTarget(); i >= 0 {
+			return m, m.openTarget(i)
+		}
+		m.showNotice("ctrl+o opens a target's link", false)
 
 	case "alt+i":
 		// The Ghostty cmd+a spelling; the query input keeps its own select-all.
@@ -644,7 +653,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved, m.selKey = nil, false, false }
 
 // keepsSelection reports whether key acts on the selection instead of ending it:
-// c copies it, o opens it, and shift+arrows in the pane grow it.
+// c copies it, i inspects it, and shift+arrows in the pane grow it.
 func (m *tuiModel) keepsSelection(key string) bool {
 	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.eventsModal.open || m.original.open || m.inputMode != inputNone {
 		return false
@@ -652,7 +661,7 @@ func (m *tuiModel) keepsSelection(key string) bool {
 	switch key {
 	case "c":
 		return true
-	case "o", "shift+up", "shift+down":
+	case "i", "shift+up", "shift+down":
 		return m.paneFocus
 	}
 	return false

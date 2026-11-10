@@ -17,40 +17,13 @@ func stubOpen(t *testing.T) *[]string {
 	return &opened
 }
 
-// With no url or open value, o opens the newest localhost link the target printed.
-func TestOpenFallsBackToTheNewestLocalhostLink(t *testing.T) {
-	opened := stubOpen(t)
-	m := newTestModel(t, target("api"))
-	m.addLine(0, "server on http://localhost:8080")
-	m.addLine(0, "\x1b[32mvite ready at http://127.0.0.1:5173/\x1b[0m")
-	m.cursor = 0
-	press(m, "o")
-
-	if len(*opened) != 1 || (*opened)[0] != "http://127.0.0.1:5173/" {
-		t.Fatalf("opened = %q, want the newest link without its ANSI codes", *opened)
-	}
-}
-
-// A 0.0.0.0 bind opens as localhost, and trailing punctuation stays out of the link.
-func TestOpenMapsZeroAddressToLocalhost(t *testing.T) {
-	opened := stubOpen(t)
-	m := newTestModel(t, target("api"))
-	m.addLine(0, "listening (http://0.0.0.0:4000/api).")
-	m.cursor = 0
-	press(m, "o")
-
-	if len(*opened) != 1 || (*opened)[0] != "http://localhost:4000/api" {
-		t.Fatalf("opened = %q, want http://localhost:4000/api", *opened)
-	}
-}
-
 // A target with no link to open says so, and names the key that fixes it.
 func TestOpenWithNothingToOpenSaysWhy(t *testing.T) {
 	opened := stubOpen(t)
 	m := newTestModel(t, target("api"))
 	m.addLine(0, "fetched https://example.com/docs")
 	m.cursor = 0
-	press(m, "o")
+	press(m, "ctrl+o")
 
 	if len(*opened) != 0 {
 		t.Fatalf("opened = %q, want nothing", *opened)
@@ -68,14 +41,14 @@ func TestOpenOnAGroupHeaderSaysWhatItOpens(t *testing.T) {
 	m.cursor = 0 // the backend header
 	press(m, "o")
 
-	if want := "o opens a target's open: link"; m.notice != want {
+	if want := "no links to open · add open: in rerun.yml"; m.notice != want {
 		t.Fatalf("notice = %q, want %q", m.notice, want)
 	}
 }
 
-// The first ? view lists o with the pane's original-lines meaning.
-func TestHelpShortListNamesO(t *testing.T) {
-	want := [2]string{"o", "open the target's open: · pane: original lines"}
+// The first ? view lists o for links and i for the pane's original lines.
+func TestHelpShortListNamesOAndI(t *testing.T) {
+	want := [2]string{"o i", "pick a link · pane i: original lines"}
 	for _, kv := range helpShortKeys {
 		if kv == want {
 			return

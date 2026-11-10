@@ -188,7 +188,7 @@ func TestHelpNamesThePlayGlyph(t *testing.T) {
 	m.width, m.height = 160, 40
 	press(m, "?")
 	press(m, "?")
-	if view := m.View().Content; !strings.Contains(view, "▶ starts its auto targets") {
+	if view := m.View().Content; !strings.Contains(view, "▶ on a group header: space starts its auto targets") {
 		t.Errorf("full help should explain the play glyph:\n%s", view)
 	}
 }

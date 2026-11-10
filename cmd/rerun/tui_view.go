@@ -25,9 +25,9 @@ const (
 	runRed    = "196"
 )
 
-// Left column geometry: glyph, space, name, a two-cell marker, status —
-// nameW + statusW + 4 cells. The status column fits `exit segv`, `4d03h`, and
-// `backoff 10s` (11 cells).
+// Left column geometry: glyph, space, name, a two-cell marker, the build cell,
+// then the times column when shown. The times column fits `exit segv`, `4d03h`,
+// and `backoff 10s` (11 cells).
 const statusW = 11
 
 // maxNameW caps the name column; longer names get a middle ellipsis.
@@ -448,7 +448,7 @@ func (m *tuiModel) pickLines(innerW int) []string {
 
 // layoutWidths splits the screen between the two columns.
 func (m *tuiModel) layoutWidths() (leftW, rightW int) {
-	if m.leftMode == leftHidden {
+	if m.listHidden {
 		// -1 puts the pane's first cell in column 0, with no divider in front of it.
 		return -1, max(1, m.width)
 	}
@@ -468,8 +468,8 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	nameW = min(nameW, maxNameW)
 	leftW = nameW + m.nameMargin()
 	// A wide screen keeps 24 cells, which fits the footer's `· ? help` cue beside
-	// the version; a narrow one shrinks to the names, down to 16. Names-only keeps 16 at any width.
-	if m.leftMode == leftNames || m.width < narrowW {
+	// the version; a narrow one shrinks to 16.
+	if m.width < narrowW {
 		leftW = max(16, leftW)
 	} else {
 		leftW = max(24, leftW)
@@ -483,36 +483,41 @@ func (m *tuiModel) layoutWidths() (leftW, rightW int) {
 	return leftW, max(1, m.width-leftW-1)
 }
 
-// leftMode is the left column's width: full, names only, or hidden for a full-width log.
-type leftMode uint8
-
-const (
-	leftFull leftMode = iota
-	leftNames
-	leftHidden
-)
-
-// cycleLeft is `b`: full, then names, then hidden, then full again.
-func (m *tuiModel) cycleLeft() {
-	m.leftMode = (m.leftMode + 1) % 3
+// toggleList is `b`: shows or hides the left list.
+func (m *tuiModel) toggleList() {
+	m.listHidden = !m.listHidden
 	// Hidden, the list cannot show its cursor, so the keys go to the pane.
-	if !m.listShown() {
+	if m.listHidden {
 		m.paneFocus = true
 	}
 }
 
-func (m *tuiModel) listShown() bool { return m.leftMode != leftHidden }
+func (m *tuiModel) listShown() bool { return !m.listHidden }
 
-// nameMargin is the cells a row keeps beside its name: glyph, space, marker, and the status cell when shown.
+// nameMargin is the cells a row keeps beside its name: glyph, space, marker, build cell, and the times column when shown.
 func (m *tuiModel) nameMargin() int {
-	if m.leftMode == leftFull {
-		return statusW + 4
+	margin := 6
+	if m.showTimes {
+		margin += statusW
 	}
-	return 4
+	return margin
 }
 
 // nameWidth is the name cell's width for a given left column width.
 func (m *tuiModel) nameWidth(leftW int) int { return max(0, leftW-m.nameMargin()) }
+
+// buildColW is where the build cell sits: the longest visible name, capped at the name cell.
+// Headers and `+N more` rows have no build cell, so they do not widen it.
+func (m *tuiModel) buildColW(leftW int) int {
+	w := 0
+	for _, r := range m.listRows() {
+		if r.header || r.more {
+			continue
+		}
+		w = max(w, r.indent()+displayWidth(m.targets[r.target].spec.localName()))
+	}
+	return min(w, m.nameWidth(leftW))
+}
 
 // marker is the two cells after a name: `*` when its columns await ctrl+s, else blank,
 // so the status never shifts.
@@ -766,7 +771,7 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 	t := m.targets[r.target]
 
 	indent := r.indent()
-	nameW := max(0, m.nameWidth(leftW)-indent)
+	nameW := max(0, m.buildColW(leftW)-indent)
 	var segs []seg
 	if indent > 0 {
 		segs = append(segs, seg{text: strings.Repeat(" ", indent)})
@@ -775,9 +780,14 @@ func (m *tuiModel) targetLine(row int, r listRow, leftW int) string {
 		seg{text: t.glyph(), color: stateColor(t)},
 		seg{text: " "},
 		seg{text: padRight(ellipsizeMiddle(t.spec.localName(), nameW), nameW), link: t.spec.link()},
+		seg{text: " "},
+		buildCell(t),
 		seg{text: marker(m.targetDirty(t))},
 	)
-	if m.leftMode == leftFull {
+	if m.showTimes {
+		// The times column stays on the right edge, however short the names are.
+		fill := max(0, leftW-statusW-m.buildColW(leftW)-6)
+		segs = append(segs, seg{text: strings.Repeat(" ", fill)})
 		segs = append(segs, seg{text: padRight(truncate(m.status(t), statusW), statusW), color: statusColor(t)})
 	}
 	style := m.rowStyle(row, r)
@@ -884,6 +894,18 @@ func stateColor(t *tuiTarget) string {
 		return runRed
 	}
 	return colorGray
+}
+
+// buildCell is the build indicator: an orange gear while building, a red ✗ after a failed build.
+// It stays reserved when idle, so the names never shift.
+func buildCell(t *tuiTarget) seg {
+	switch {
+	case t.building:
+		return seg{text: "⚙", color: runYellow}
+	case t.buildFailed:
+		return seg{text: "✗", color: runRed}
+	}
+	return seg{text: " "}
 }
 
 // statusColor keeps the uptime quiet and lets a red or green exit speak.
@@ -1289,7 +1311,8 @@ var helpShortKeys = [][2]string{
 	{"enter", "list: focus the pane, starting a stopped row or group"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"r", "run/reboot the row"},
-	{"o", "open the target's open: · pane: original lines"},
+	{"o i", "pick a link · pane i: original lines"},
+	{"ctrl+o", "open the current target's link"},
 	{"← →", "expand or collapse a group; → on a row focuses the log pane"},
 	{"esc", "scrollback: back to live · else back out one level"},
 	{"e", "fs events (last minute)"},
@@ -1308,20 +1331,21 @@ var helpShortKeys = [][2]string{
 var helpKeys = [][2]string{
 	{"↑/↓ j/k", "move rows; ⇧↑⇧↓ select pane lines; home/end first/last"},
 	{"←/→ enter", "group: expand or collapse · row: its group · pane: focus"},
-	{"space", "start or stop · pane: jump to live · ▶ starts its auto targets"},
+	{"space", "start or stop · pane: jump to live"},
 	{"s", "stop the row · pane: stop what the pane shows"},
 	{"m r h", "mute (group: its targets) · r reboots · h shows idle targets"},
 	{"e", "fs events (last minute)"},
-	{"esc [ ] b", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b list width"},
+	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑⇧↓ groups · b hides · t times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
-	{"o", "open the target's open: · pane: original lines"},
+	{"o i ctrl+o", "pick a link to open · ctrl+o: target's link · i: original lines"},
+	{"alt+z alt+y", "undo/redo text in the bar, Go-to and link picker"},
 	{"/ f", "query bar: pills AND; space toggles filter⇄mark · @ saved"},
 	{"n/N ctrl+g", "jump pill hits · bar: ↑ pills, ←/→ pick, enter edit, → @"},
 	{"ctrl+l", "clear the log; old lines stay in scrollback"},
 	{"c", "copies the line or selection"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u/ctrl+d); a full page in focus"},
-	{"enter → a f", "pane: expand/collapse the line · a add key, f filter value"},
-	{"backspace ×", "pane: last pill · bar: ↑ picks, del drops · click ×"},
+	{"enter → a =", "pane: expand/collapse the line · a add key, = filter value"},
+	{"backspace ×", "pane: last pill · bar: ↑ picks, x or del drops · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }
@@ -1329,9 +1353,12 @@ var helpKeys = [][2]string{
 // helpMouse is the help overlay's mouse notes and legend, shown under the full view.
 var helpMouse = []string{
 	"click a row scopes to it; double-click starts or stops it",
-	"click a group scopes to its targets; the fs row opens the fs events",
-	"drag copies a range; shift-drag uses the terminal's selection",
-	"⚙ building  ● starting  ● run  ▲ unhealthy  ■ failed",
+	"click a group scopes to its targets; its ▾ folds it; the fs row opens the fs events",
+	"click a +N row reveals its hidden targets; a log line expands, or copies if plain",
+	"drag copies a range; shift-drag uses the terminal's selection; the wheel scrolls the list or log",
+	"▶ on a group header: space starts its auto targets",
+	"orange ⚙ building  red ✗ build failed",
+	"● starting  ● run  ▲ unhealthy  ■ failed",
 	"✓ ok  ✗ exit  ○ stopped  · off",
 }
 

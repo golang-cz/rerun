@@ -241,12 +241,12 @@ func TestMoreRowFitsEightyColumnsInEveryListMode(t *testing.T) {
 	m.width, m.height = 80, 30
 	m.frame()
 	press(m, "right")
-	for _, mode := range []leftMode{leftFull, leftNames} {
-		m.leftMode = mode
+	for _, times := range []bool{false, true} {
+		m.showTimes = times
 		leftW, _ := m.layoutWidths()
 		for y := range m.listLen() {
 			if got := displayWidth(ansi.Strip(m.leftLine(y, leftW))); got > leftW {
-				t.Fatalf("mode %d row %d is %d cells, wider than %d", mode, y, got, leftW)
+				t.Fatalf("times %v row %d is %d cells, wider than %d", times, y, got, leftW)
 			}
 		}
 	}

@@ -65,13 +65,13 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream,
 `enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor row narrows the pane to its target or
 schema's targets (`esc` backs out), and that row is bold. On a schema header, `space`, `r`, and `m` act on its
-targets. `o` opens the target's `open:` (a URL, or a command it runs), else the newest localhost link its output printed (a `0.0.0.0` bind opens as localhost), and says so when it has neither; on a group header it says what `o` opens; with the pane focused, `o` opens the original lines (see below). `esc` returns to the live output. The right pane is always the merged stream; the cursor row
+targets. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor row
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. A `muted: true` field in rerun.yml starts a target's stream muted; `hide: true` does too, and a group's `collapsed: true` also collapses its header. A target's own `hide: false` overrides a group's `collapsed: true`. A target's `hide: false` unmutes it, but the group header still starts collapsed. A root group named after an import collapses that import's section. Folding is a start state; a reload keeps your collapse for groups already shown. The pane's top line is
 the cursor row's command, with its url linked. Mouse: click a row to show only its
 stream, double-click to stop/start like `space`, and a click on a schema header to select its targets. `m` mutes; the footer notice names it.
 
-More keys: `b` cycles the left list: full, names only (the state glyph and name), or hidden for a full-width log with a `b list` cue on the bottom line; `esc` there shows the list again. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback). With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
+More keys: `b` hides or shows the left list: hidden gives a full-width log with a `b list` cue on the bottom line, and `esc` there shows the list again. `t` shows or hides the times column beside each name. `c` copies the selected lines, or the pane cursor line when nothing is selected; `e` opens the fs events list (last minute), `s` stops the row (with the pane focused, every target the pane shows), `space` with the pane focused jumps to the live tail, `→` expands the line under the cursor and `←` collapses it, `ctrl+g` and `ctrl+shift+g` step to the next and previous pill hit, and `ctrl+l` clears the log (older lines stay in scrollback), and `ctrl+u` / `ctrl+d` scroll the pane half a page. The mouse wheel scrolls the list or the log. With the pane focused, `shift`+`↑`/`↓` select lines from the cursor, the same highlight as a drag; any other key clears it.
 
 `/` or `f` opens the query bar: `enter` turns the input into pills that AND together (`level=error -healthz`
 adds two). Pill syntax: `timeout` full text, `"two words"` phrase, `-healthz` negated, `level=error` field equals
@@ -87,7 +87,7 @@ becomes `built <duration>` or `✗ build failed`. Its output collapses under the
 the rule line, or press `enter`. A failed build opens itself, and a `▶` rule collapses its command when the
 pane cuts it short; a click on a cut rule expands it to the full command.
 
-With the pane focused, `o` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift+↑/↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `o` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
+With the pane focused, `i` opens the original lines: the cursor line exactly as printed, with no cut, columns or color, and long lines wrap. A line selection (`shift+↑/↓` or a drag) shows those lines as NDJSON. `cmd+a` (`alt+i`) selects every line the pills kept, so `cmd+a` then `i` shows the raw filtered log. `f` toggles raw and pretty JSON, pretty only when every line is JSON. `c` copies what the modal shows, and `esc` closes it.
 
 Expand JSON lines: each JSON object line shows a `(+)` cell at the right edge. A click on
 it, or `enter` with the pane focused, expands the pretty-printed object; `(−)` collapses
@@ -224,7 +224,7 @@ targets:
     run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
     build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
     health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
-    open: http://localhost:5173    # o opens it; the row links to it (or a shell command to run)
+    open: http://localhost:5173    # ctrl+o opens it; the row links to it (or a shell command to run)
     open-on-start: true            # open (or run) it once at startup
     delay: 200ms                  # batch file events before restarting
     cooldown: 2s                  # min time between restarts (event storms)

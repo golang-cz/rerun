@@ -42,7 +42,7 @@ func TestOpenLinkUsesSystemOpener(t *testing.T) {
 	web.Open = "http://localhost:5173"
 	m := newTestModel(t, web)
 	m.cursor = 0
-	if cmd := press(m, "o"); cmd != nil {
+	if cmd := press(m, "ctrl+o"); cmd != nil {
 		t.Fatalf("o on a link returned a command")
 	}
 	if len(*opened) != 1 || (*opened)[0] != "http://localhost:5173" || len(*ran) != 0 {
@@ -58,7 +58,7 @@ func TestOpenCommandRunsInTargetDirOffTheUILoop(t *testing.T) {
 	web.Dir = "/work/app"
 	m := newTestModel(t, web)
 	m.cursor = 0
-	cmd := press(m, "o")
+	cmd := press(m, "ctrl+o")
 	if cmd == nil {
 		t.Fatal("o on a command returned no command to run it")
 	}
@@ -84,7 +84,7 @@ func TestOpenCommandNonZeroExitNamesTheFirstWord(t *testing.T) {
 	web.Open = "make dev --watch"
 	m := newTestModel(t, web)
 	m.cursor = 0
-	msg := press(m, "o")()
+	msg := press(m, "ctrl+o")()
 	m.Update(msg)
 	if m.notice != "open: make exited 3" || !m.noticeErr {
 		t.Fatalf("notice = %q err=%v, want the exit as an error", m.notice, m.noticeErr)
@@ -97,7 +97,7 @@ func TestOpenCommandStartErrorShowsNotice(t *testing.T) {
 	web.Open = "./run.sh"
 	m := newTestModel(t, web)
 	m.cursor = 0
-	m.Update(press(m, "o")())
+	m.Update(press(m, "ctrl+o")())
 	if !strings.Contains(m.notice, "open: ./run.sh did not start") || !m.noticeErr {
 		t.Fatalf("notice = %q, want a start error naming ./run.sh", m.notice)
 	}

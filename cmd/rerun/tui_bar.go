@@ -159,6 +159,7 @@ func (m *tuiModel) openBar() {
 	m.input = ""
 	m.inputCursor = 0
 	m.inputSel = false
+	m.inputHist = undoStack{}
 	m.editKindOn = false
 	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
 }
@@ -180,6 +181,7 @@ func (m *tuiModel) closeBar() {
 	m.input = ""
 	m.inputCursor = 0
 	m.inputSel = false
+	m.inputHist = undoStack{}
 	m.editKindOn = false
 	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
 	m.barFocus = false
@@ -260,7 +262,7 @@ func (m *tuiModel) editPill(idx int) {
 	}
 	m.barSel = -1
 	m.editKind, m.editKindOn, m.editAt = p.kind, true, idx
-	m.inputSet(text, len([]rune(p.raw)))
+	m.inputLoad(text, len([]rune(p.raw)))
 	m.pillsChanged()
 }
 
@@ -426,7 +428,7 @@ func (m *tuiModel) pickSelected() {
 		return
 	}
 	m.pills = append(m.pills, p[0])
-	m.inputSet("", 0)
+	m.inputLoad("", 0)
 	m.pillsChanged()
 }
 
@@ -498,6 +500,11 @@ func (m *tuiModel) escList() {
 // arrows pick and enter edits. Only Ctrl-C escapes the bar.
 func (m *tuiModel) handleBarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := barKeyName(msg)
+	if undo, redo := historyKey(key); undo || redo {
+		m.barSel = -1
+		m.inputHistory(redo)
+		return m, nil
+	}
 	if m.pickActive() {
 		switch key {
 		case "up", "ctrl+p":

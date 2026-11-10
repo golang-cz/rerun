@@ -862,7 +862,7 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 	folded := r.collapsed && n > 0
 	suffix := fmt.Sprintf("· %d hidden", n)
 	name := ellipsizeMiddle(r.label, nameW)
-	if folded && m.leftMode != leftFull {
+	if folded && !m.showTimes {
 		tail := truncate(" "+suffix, nameW)
 		name = ellipsizeMiddle(r.label, max(0, nameW-displayWidth(tail))) + tail
 	}
@@ -872,8 +872,9 @@ func (m *tuiModel) schemaLine(row int, r listRow, leftW int) string {
 		{text: " "},
 		{text: padRight(name, nameW)},
 		{text: marker(m.editIndex(colNode{schema: true, name: r.schema}) >= 0)},
+		{text: " "},
 	}
-	if m.leftMode == leftFull {
+	if m.showTimes {
 		status := fmt.Sprintf("%d/%d", running, len(r.members))
 		if folded {
 			status = suffix

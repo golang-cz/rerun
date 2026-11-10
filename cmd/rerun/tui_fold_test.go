@@ -85,6 +85,7 @@ func TestNestedCollapseRestoresOnExpand(t *testing.T) {
 
 func TestCollapsedHeaderCountsAllMembers(t *testing.T) {
 	m := nestedFixture(t)
+	m.showTimes = true
 	toggleKey(t, m, importKeyPrefix+"omsx")
 	if line := leftPane(m)[1]; !strings.HasPrefix(line, "▸") || !strings.Contains(line, "0/4") {
 		t.Fatalf("collapsed import header = %q, want ▸ with its 0/4 count", line)

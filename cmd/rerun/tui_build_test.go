@@ -69,6 +69,7 @@ func TestBuildNeverChangesTheRowCount(t *testing.T) {
 
 func TestBuildStatusTextPerState(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.showTimes = true
 	m.targets[0].state = stateRunning
 	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
@@ -78,21 +79,22 @@ func TestBuildStatusTextPerState(t *testing.T) {
 		t.Fatalf("idle row = %q, want the uptime", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "4s ⚙") {
-		t.Fatalf("building row = %q, want the run mark and 4s ⚙", got)
+	if got := row(); !strings.HasPrefix(got, "● api") || !strings.HasSuffix(got, "4s") || strings.Count(got, "⚙") != 1 {
+		t.Fatalf("building row = %q, want the run mark, 4s, and one ⚙", got)
 	}
 	m.now = buildAt.Add(64 * time.Second)
-	if got := row(); !strings.HasSuffix(got, "1m04s ⚙") {
-		t.Fatalf("long build row = %q, want 1m04s ⚙", got)
+	if got := row(); !strings.HasSuffix(got, "1m04s") {
+		t.Fatalf("long build row = %q, want 1m04s", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second)})
-	if got := row(); !strings.HasSuffix(got, "✗ build") {
-		t.Fatalf("failed row = %q, want ✗ build", got)
+	if got := row(); !strings.HasSuffix(got, "✗ build") || strings.Count(got, "⚙") != 0 || strings.Count(got, "✗") != 3 {
+		t.Fatalf("failed row = %q, want ✗ glyph, ✗ cell and ✗ build, no ⚙", got)
 	}
 }
 
 func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.showTimes = true
 	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
 	leftW, _ := m.layoutWidths()
@@ -102,7 +104,7 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 	long := leftLineRaw(m, 0)
 	m.applyEvents([]event{buildFail("api", time.Second)})
 	failed := leftLineRaw(m, 0)
-	for want, line := range map[string]string{"1m04s ⚙": long, "✗ build": failed} {
+	for want, line := range map[string]string{"1m04s": long, "✗ build": failed} {
 		if displayWidth(line) != leftW || statusCell(line) != want {
 			t.Fatalf("row = %q, want status %q in the %d-cell column", line, want, leftW)
 		}
@@ -112,6 +114,7 @@ func TestBuildStatusKeepsColumnWidth(t *testing.T) {
 // The duration must start in the same cell whether the gear shows or not.
 func TestBuildDurationStaysPutWhenGearShows(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"))
+	m.showTimes = true
 	m.targets[0].state = stateRunning
 	m.targets[0].lastStart = buildAt
 	m.now = buildAt.Add(4 * time.Second)
@@ -140,8 +143,8 @@ func TestBuildFailedStatusHoldsUntilNextSuccessOrStart(t *testing.T) {
 		t.Fatalf("status after a stop = %q, want ✗ build until the next build", got)
 	}
 	m.applyEvents([]event{buildStart("api", buildAt)})
-	if got := m.status(tg); !strings.HasSuffix(got, "⚙") {
-		t.Fatalf("status on the next build start = %q, want a trailing ⚙", got)
+	if got := m.status(tg); strings.Contains(got, "⚙") || strings.Contains(got, "build") {
+		t.Fatalf("status on the next build start = %q, want the duration only", got)
 	}
 	m.applyEvents([]event{buildFail("api", time.Second), buildStart("api", buildAt), buildOK("api", time.Second)})
 	if got := m.status(tg); strings.Contains(got, "build") {
@@ -493,14 +496,14 @@ func TestCancelledBuildRuleSaysCancelled(t *testing.T) {
 	}
 }
 
-func TestBKeyNoLongerDoesAnything(t *testing.T) {
+func TestBKeyHidesOnlyTheList(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{buildStart("api", buildAt), buildOut("api", buildAt, "compiling")})
 	m.frame()
 	before := len(m.merged)
 	press(m, "b")
-	if m.solo != -1 || m.paneFocus || len(m.expanded) != 0 || len(m.merged) != before {
-		t.Fatalf("b changed the view: solo=%d paneFocus=%v expanded=%v", m.solo, m.paneFocus, m.expanded)
+	if m.solo != -1 || !m.listHidden || len(m.expanded) != 0 || len(m.merged) != before {
+		t.Fatalf("b changed more than the list: solo=%d listHidden=%v expanded=%v", m.solo, m.listHidden, m.expanded)
 	}
 }
 
@@ -661,5 +664,75 @@ func TestClickOnBuildIconInSingleViewTogglesRule(t *testing.T) {
 	click(m, m.layout.leftW+1+3, m.titleHeight()+row-m.vp.YOffset())
 	if !m.expanded[buildRuleSeq(m)] {
 		t.Fatal("a click on the build icon in single view did not open the rule")
+	}
+}
+
+func TestBuildCellShowsGearOnlyWhileBuilding(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	tg := m.targets[0]
+	if c := buildCell(tg); c.text != " " {
+		t.Fatalf("idle build cell = %+v, want blank", c)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	if c := buildCell(tg); c.text != "⚙" || c.color != runYellow {
+		t.Fatalf("building cell = %+v, want an orange ⚙", c)
+	}
+	m.applyEvents([]event{buildFail("api", time.Second)})
+	if c := buildCell(tg); c.text != "✗" || c.color != runRed {
+		t.Fatalf("failed cell = %+v, want a red ✗", c)
+	}
+	m.applyEvents([]event{buildStart("api", buildAt), buildOK("api", time.Second)})
+	if c := buildCell(tg); c.text != " " {
+		t.Fatalf("cell after a good build = %+v, want blank", c)
+	}
+}
+
+// The build cell is reserved while idle, so a build never moves the name.
+func TestBuildCellKeepsNameWidth(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"), target("web"))
+	m.frame()
+	leftW, _ := m.layoutWidths()
+	idle := leftLineRaw(m, 0)
+	m.applyEvents([]event{buildStart("api", buildAt)})
+	m.frame()
+	building := leftLineRaw(m, 0)
+	if w, _ := m.layoutWidths(); w != leftW {
+		t.Fatalf("leftW = %d while building, want %d", w, leftW)
+	}
+	at := func(line string) int { return displayWidth(line[:strings.Index(line, "api")]) }
+	if at(idle) != at(building) || strings.Contains(idle, "⚙") || !strings.Contains(building, "⚙") {
+		t.Fatalf("idle %q and building %q: want the name in one cell, the gear only while building", idle, building)
+	}
+}
+
+// The build cell sits one space after the longest visible name, in one column for every row.
+func TestBuildCellAlignsAfterLongestName(t *testing.T) {
+	m := newTestModel(t, target("service 1"), target("service 2"), target("svc3"))
+	m.showTimes = true
+	m.applyEvents([]event{buildStart("service 1", buildAt), buildStart("svc3", buildAt)})
+	m.frame()
+	cellAt := func(i int) int {
+		line := leftLineRaw(m, i)
+		return displayWidth(line[:strings.Index(line, "⚙")])
+	}
+	want := displayWidth("  service 2") + 1
+	if got := cellAt(0); got != want {
+		t.Fatalf("build cell at %d, want %d (one space after the longest name)", got, want)
+	}
+	if got := cellAt(2); got != want {
+		t.Fatalf("svc3 cell at %d, want %d", got, want)
+	}
+	if strings.Contains(leftLineRaw(m, 1), "⚙") {
+		t.Fatal("idle row shows a build cell")
+	}
+	leftW, _ := m.layoutWidths()
+	for i := 0; i < 3; i++ {
+		line := leftLineRaw(m, i)
+		if displayWidth(line) != leftW {
+			t.Fatalf("row %d = %q, want %d cells", i, line, leftW)
+		}
+		if gap := sliceCells(line, want+1, want+3); gap != "  " {
+			t.Fatalf("row %d gap after the build cell = %q, want blank cells before the times", i, gap)
+		}
 	}
 }

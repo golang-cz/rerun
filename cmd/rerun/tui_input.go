@@ -10,11 +10,36 @@ func (m *tuiModel) inputPos() int {
 	return min(max(0, m.inputCursor), len([]rune(m.input)))
 }
 
-// inputSet is the one place the text and its cursor change, keeping the two in step.
-func (m *tuiModel) inputSet(text string, pos int) {
+// inputSet is the one place the text and its cursor change; typed groups the undo step.
+func (m *tuiModel) inputSet(text string, pos int, typed rune) {
+	from := inputSnap{m.input, m.inputPos()}
 	m.input = text
 	m.inputCursor = min(max(0, pos), len([]rune(text)))
+	if to := (inputSnap{text, m.inputCursor}); to != from {
+		m.inputHist.edit(from, to, typed)
+	}
 	m.inputSel = false
+	m.inputChanged()
+}
+
+// inputLoad sets the input from code, so the change is not one alt+z can undo.
+func (m *tuiModel) inputLoad(text string, pos int) {
+	m.inputSet(text, pos, 0)
+	m.inputHist = undoStack{}
+}
+
+// inputHistory undoes or redoes the bar input's last edit; the restore itself is not recorded.
+func (m *tuiModel) inputHistory(redo bool) {
+	cur := inputSnap{m.input, m.inputPos()}
+	step := m.inputHist.undoStep
+	if redo {
+		step = m.inputHist.redoStep
+	}
+	s, ok := step(cur)
+	if !ok {
+		return
+	}
+	m.input, m.inputCursor, m.inputSel = s.text, s.pos, false
 	m.inputChanged()
 }
 
@@ -27,12 +52,14 @@ func (m *tuiModel) inputInsert(s string) {
 	}
 	r := []rune(m.input)
 	from, to := m.inputPos(), m.inputPos()
+	typed := typedRune(s)
 	if m.inputSel {
 		from, to = 0, len(r)
+		// Replacing a selection starts its own step, never a word already typed.
+		typed = 0
 	}
 	out := append(append([]rune{}, r[:from]...), []rune(s)...)
-	m.inputSel = false
-	m.inputSet(string(append(out, r[to:]...)), from+len([]rune(s)))
+	m.inputSet(string(append(out, r[to:]...)), from+len([]rune(s)), typed)
 }
 
 // inputMoveRune walks one rune; movement is what drops a selection.
@@ -78,7 +105,7 @@ func (m *tuiModel) inputDeleteSpan(from, to int) {
 		m.inputCursor = from
 		return
 	}
-	m.inputSet(string(append(r[:from:from], r[to:]...)), from)
+	m.inputSet(string(append(r[:from:from], r[to:]...)), from, 0)
 }
 
 // inputDeleteBefore drops the rune before the cursor, or the whole selection.
@@ -124,7 +151,7 @@ func (m *tuiModel) inputSelectAll() {
 
 // inputClearSel drops the whole selection, so backspace and delete empty the box.
 func (m *tuiModel) inputClearSel() {
-	m.inputSet("", 0)
+	m.inputSet("", 0, 0)
 }
 
 // inputWindow is the visible slice of the input plus the caret's cells inside it,

@@ -3,21 +3,16 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-// b cycles the left list full, names, hidden, then full again.
-func TestBCyclesTheListWidth(t *testing.T) {
+// b shows or hides the left list; hidden gives the log the full width.
+func TestBTogglesTheList(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.frame()
 	fullW, _ := m.layoutWidths()
-
-	press(m, "b")
-	namesW, _ := m.layoutWidths()
-	if namesW >= fullW {
-		t.Fatalf("names leftW = %d, want less than the full %d", namesW, fullW)
-	}
 
 	press(m, "b")
 	if leftW, rightW := m.layoutWidths(); leftW != -1 || rightW != m.width {
@@ -26,25 +21,49 @@ func TestBCyclesTheListWidth(t *testing.T) {
 
 	press(m, "b")
 	if leftW, _ := m.layoutWidths(); leftW != fullW {
-		t.Fatalf("back to full leftW = %d, want %d", leftW, fullW)
+		t.Fatalf("back to shown leftW = %d, want %d", leftW, fullW)
 	}
 }
 
-// Names mode keeps the state glyph and the name, and drops the status words.
-func TestNamesModeDropsStatusKeepsGlyphAndName(t *testing.T) {
+// t shows or hides the times column on its own, whatever b does.
+func TestTTogglesTheTimesColumn(t *testing.T) {
+	m := newTestModel(t, target("web"))
+	m.targets[0].state = stateRunning
+	m.targets[0].lastStart = m.now.Add(-4 * time.Second)
+	m.frame()
+	if got := ansi.Strip(m.leftLine(1, m.layout.leftW)); strings.Contains(got, "4s") {
+		t.Fatalf("row = %q, want no times column before t", got)
+	}
+
+	press(m, "t")
+	m.frame()
+	if got := ansi.Strip(m.leftLine(1, m.layout.leftW)); !strings.Contains(got, "4s") {
+		t.Fatalf("row = %q, want the uptime after t", got)
+	}
+
+	press(m, "b", "b")
+	if !m.showTimes {
+		t.Fatal("b cleared the times column")
+	}
+	press(m, "t")
+	if m.showTimes || m.listHidden {
+		t.Fatalf("t: showTimes=%v listHidden=%v, want the column off and the list shown", m.showTimes, m.listHidden)
+	}
+}
+
+// The default list keeps the state glyph and the name, and drops the times column.
+func TestDefaultListDropsTimesKeepsGlyphAndName(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.targets[0].state = stateExited
 	m.targets[0].exitLabel = "exit 1"
 	m.frame()
-	press(m, "b")
-	m.frame()
 
 	row := ansi.Strip(m.leftLine(1, m.layout.leftW))
 	if !strings.Contains(row, "web") || !strings.Contains(row, "✗") {
-		t.Fatalf("names row = %q, want the glyph and the name", row)
+		t.Fatalf("row = %q, want the glyph and the name", row)
 	}
 	if strings.Contains(row, "exit 1") {
-		t.Fatalf("names row = %q, want no status word", row)
+		t.Fatalf("row = %q, want no times word", row)
 	}
 }
 
@@ -53,7 +72,7 @@ func TestHidingTheListFocusesThePane(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	addLines(m, "web", "hello")
 	m.frame()
-	press(m, "b", "b")
+	press(m, "b")
 	if !m.paneFocus {
 		t.Fatal("hiding the list left the keys on the unseen list")
 	}
@@ -72,7 +91,7 @@ func TestHidingTheListFocusesThePane(t *testing.T) {
 func TestHiddenListKeepsFocusOnLeftArrow(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.frame()
-	press(m, "b", "b", "left")
+	press(m, "b", "left")
 	if !m.paneFocus {
 		t.Fatal("← moved the focus to the hidden list")
 	}
@@ -82,7 +101,7 @@ func TestHiddenListKeepsFocusOnLeftArrow(t *testing.T) {
 func TestHiddenListFinderJumpKeepsKeysOnPane(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"), target("worker"))
 	m.frame()
-	press(m, "b", "b")
+	press(m, "b")
 	m.Update(ctrlK)
 	press(m, "w", "r", "k", "enter")
 	if !m.paneFocus || m.listFocused() {
@@ -107,12 +126,12 @@ func TestHiddenListFinderJumpKeepsKeysOnPane(t *testing.T) {
 func TestHiddenListEscRevealsListAndKeepsScope(t *testing.T) {
 	m := newTestModel(t, target("web"), target("api"))
 	m.frame()
-	press(m, "b", "b")
+	press(m, "b")
 	m.solo = 1
 
 	press(m, "esc")
-	if m.leftMode != leftFull || m.paneFocus {
-		t.Fatalf("esc: leftMode=%d paneFocus=%v, want the list shown and focused", m.leftMode, m.paneFocus)
+	if m.listHidden || m.paneFocus {
+		t.Fatalf("esc: listHidden=%v paneFocus=%v, want the list shown and unfocused", m.listHidden, m.paneFocus)
 	}
 	if m.solo != 1 {
 		t.Fatalf("esc cleared the scope while the list was hidden: solo=%d", m.solo)
@@ -128,7 +147,7 @@ func TestHiddenListEscRevealsListAndKeepsScope(t *testing.T) {
 func TestHiddenListBottomLineCarriesHelpCue(t *testing.T) {
 	m := newTestModel(t, target("web"))
 	m.width, m.height = 80, 20
-	press(m, "b", "b")
+	press(m, "b")
 	lines := paneOf(m)
 	if got := strings.TrimRight(ansi.Strip(lines[len(lines)-1]), " "); got != "b list · ? help" {
 		t.Fatalf("bottom line = %q, want the list and help cues", got)

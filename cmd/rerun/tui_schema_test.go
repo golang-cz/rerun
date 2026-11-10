@@ -35,6 +35,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 		schemaTarget("worker", "backend"),
 		target("job"),
 	)
+	m.showTimes = true
 	want := []string{"▾backend", "api", "worker", "▾data", "db", "▾all", "web", "job"}
 	if got := listNames(m); !reflect.DeepEqual(got, want) {
 		t.Fatalf("list = %v, want %v", got, want)
@@ -58,6 +59,7 @@ func TestSchemaGroupsListBeforeUngroupedTargets(t *testing.T) {
 // The header counts running members, and a stopped member drops out of it.
 func TestSchemaHeaderCountsRunningMembers(t *testing.T) {
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("worker", "backend"))
+	m.showTimes = true
 	m.targets[1].state = stateStopped
 	if got := leftPane(m)[1]; !strings.Contains(got, "1/2") {
 		t.Fatalf("header = %q, want 1/2 with one member stopped", got)

@@ -12,7 +12,7 @@ func TestListRowBuildStatusUsesFmtDur(t *testing.T) {
 	row.building = true
 	row.buildStart = m.now.Add(-200 * time.Millisecond)
 
-	if got := m.status(row); got != "0s ⚙" {
+	if got := m.status(row); got != "0s" {
 		t.Fatalf("status = %q, want 0s ⚙", got)
 	}
 }

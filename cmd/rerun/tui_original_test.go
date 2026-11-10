@@ -15,7 +15,7 @@ func originalBody(m *tuiModel) string { return ansi.Strip(m.originalView()) }
 // openPaneOriginal focuses the pane and presses o on it.
 func openPaneOriginal(m *tuiModel) {
 	m.focusPane()
-	press(m, "o")
+	press(m, "i")
 }
 
 func TestOriginalOpensCursorLineRawWithoutANSI(t *testing.T) {
@@ -83,7 +83,7 @@ func TestOriginalSelectionShowsEachLineRaw(t *testing.T) {
 	m.pauseTail()
 	m.focusPane()
 	press(m, "shift+up", "shift+up")
-	press(m, "o")
+	press(m, "i")
 
 	want := []string{`{"a":1}`, "plain", `{"b":2}`}
 	if !reflect.DeepEqual(m.original.lines, want) {
@@ -100,7 +100,7 @@ func TestOriginalAltISelectsKeptLinesForTheModal(t *testing.T) {
 	m.frame()
 	commitPill(m, "GET")
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 
 	want := []string{"GET /a 200", "GET /c 200"}
 	if !reflect.DeepEqual(m.original.lines, want) {
@@ -147,7 +147,7 @@ func TestOriginalFIsNoOpOnMixedLines(t *testing.T) {
 	m.frame()
 	m.pauseTail()
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 
 	body := originalBody(m)
 	if strings.Contains(body, "f pretty") || strings.Contains(body, "f raw") {
@@ -190,7 +190,7 @@ func TestOriginalScrollsAndCloses(t *testing.T) {
 	addLines(m, "web", lines...)
 	m.frame()
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 
 	press(m, "pgdown")
 	if m.original.top == 0 {
@@ -219,6 +219,22 @@ func TestOriginalListFocusedOKeepsOpeningTheTarget(t *testing.T) {
 	}
 }
 
+// o opens the link picker from the pane too; i is the key that shows original lines.
+func TestOWithPaneFocusedOpensLinkPicker(t *testing.T) {
+	web := target("web")
+	web.Open = "http://localhost:8080"
+	m := newTestModel(t, web)
+	addLines(m, "web", "one")
+	m.frame()
+	m.focusPane()
+	press(m, "o")
+
+	if m.original.open || !m.finder.open || !m.finder.links {
+		t.Fatalf("o with the pane focused: original=%v finder=%v links=%v, want the link picker only",
+			m.original.open, m.finder.open, m.finder.links)
+	}
+}
+
 // alt+i over the whole pane keeps only service lines: rerun's exit rule is not output.
 func TestOriginalAltISkipsRerunRules(t *testing.T) {
 	m := newTestModel(t, target("web"))
@@ -226,7 +242,7 @@ func TestOriginalAltISkipsRerunRules(t *testing.T) {
 	m.applyEvents([]event{{kind: evExited, target: "web", code: 1}})
 	m.frame()
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 
 	if want := []string{"one", "two"}; !reflect.DeepEqual(m.original.lines, want) {
 		t.Fatalf("lines = %q, want only the service lines %q", m.original.lines, want)
@@ -289,7 +305,7 @@ func TestOriginalCopyIsCapped(t *testing.T) {
 	addLines(m, "web", big, big)
 	m.frame()
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 
 	_, cmd := m.Update(keyMsg("c"))
 	got := clipboardText(t, cmd)
@@ -310,7 +326,7 @@ func TestOriginalResizeReclampsScroll(t *testing.T) {
 	m.applyEvents(streamEvents("web", "line", 60).events)
 	m.frame()
 	m.focusPane()
-	press(m, "alt+i", "o")
+	press(m, "alt+i", "i")
 	press(m, "pgdown", "pgdown", "pgdown")
 	if m.original.top == 0 {
 		t.Fatal("setup: the modal did not scroll")
@@ -337,7 +353,7 @@ func TestOriginalOnARuleShowsHint(t *testing.T) {
 		t.Fatal("setup: the cursor is not on a rule line")
 	}
 
-	press(m, "o")
+	press(m, "i")
 
 	if m.original.open {
 		t.Fatal("o on a rule opened the modal")

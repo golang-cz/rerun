@@ -539,6 +539,8 @@ func TestFinderJumpToHiddenTargetDoesNotRevealGroup(t *testing.T) {
 	}
 
 	press(m, "esc")
+	// enter started serve; stop it again so auto-hide applies once the cursor moves away.
+	m.targets[targetIndex(m, "serve")].state = stateStopped
 	m.cursor = rowAtKey(t, m, "target:build")
 	m.liveSelect()
 	if got := listedNames(m); slices.Contains(got, "serve") {
@@ -621,5 +623,259 @@ func TestFuzzyMatchStyleUsesFzfGreenPerTheme(t *testing.T) {
 		if !st.GetBold() {
 			t.Errorf("%s match style is not bold", name)
 		}
+	}
+}
+
+// stubOpenURL records the urls the finder's link rows open, instead of launching a browser.
+func stubOpenURL(t *testing.T) *[]string {
+	t.Helper()
+	var opened []string
+	old := openURL
+	openURL = func(url string) error {
+		opened = append(opened, url)
+		return nil
+	}
+	t.Cleanup(func() { openURL = old })
+	return &opened
+}
+
+func manualTarget(name string) Target {
+	t := target(name)
+	t.Start = startManual
+	return t
+}
+
+func TestFinderEnterStartsManualRowAndFocusesIt(t *testing.T) {
+	m := newTestModel(t, manualTarget("docs"), target("api"))
+	i := targetIndex(m, "docs")
+	m.Update(ctrlK)
+	press(m, "d", "o", "c", "s")
+	if !strings.Contains(ansi.Strip(m.finderView()), "▶ docs") {
+		t.Fatalf("a manual row should show ▶:\n%s", ansi.Strip(m.finderView()))
+	}
+	press(m, "enter")
+	if got := queuedCtrl(t, m.targets[i].runner); got != ctrlStart {
+		t.Fatalf("control = %v, want ctrlStart", got)
+	}
+	if m.targets[i].state != stateRunning {
+		t.Fatalf("state = %v, want running", m.targets[i].state)
+	}
+	if m.solo != i || !m.paneFocus {
+		t.Fatalf("solo = %d paneFocus = %v, want docs focused", m.solo, m.paneFocus)
+	}
+}
+
+// o on the list opens the link modal; enter opens the pick and leaves focus where it was.
+func TestOOpensLinkModalAndEnterOpensWithoutMovingFocus(t *testing.T) {
+	web := target("web")
+	web.Open = "http://localhost:8080"
+	m := newTestModel(t, web, target("api"))
+	opened := stubOpenURL(t)
+	before := m.paneFocus
+	press(m, "o")
+	if !m.finder.open || !m.finder.links {
+		t.Fatal("o did not open the link modal")
+	}
+	press(m, "8", "0", "8", "0")
+	if res := m.finderResults(m.finder.query); len(res) != 1 || res[0].kind != "link" {
+		t.Fatalf("results for %q = %v, want the web link only", m.finder.query, res)
+	}
+	press(m, "enter")
+	if m.finder.open {
+		t.Fatal("enter did not close the modal")
+	}
+	if !slices.Equal(*opened, []string{"http://localhost:8080"}) {
+		t.Fatalf("opened = %v, want the open: URL", *opened)
+	}
+	if m.paneFocus != before || m.solo != -1 {
+		t.Fatalf("paneFocus = %v solo = %d, want focus and scope unchanged", m.paneFocus, m.solo)
+	}
+}
+
+// o with no open: value anywhere says so instead of opening an empty modal.
+func TestOWithNoLinksSaysSoAndOpensNothing(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	press(m, "o")
+	if m.finder.open {
+		t.Fatal("o opened the modal with no links")
+	}
+	if want := "no links to open · add open: in rerun.yml"; m.notice != want {
+		t.Fatalf("notice = %q, want %q", m.notice, want)
+	}
+}
+
+// The modal lists each open: target in target order; the go-to bar lists none.
+func TestLinkModalListsOpenTargetsAndGoToHasNone(t *testing.T) {
+	web := target("web")
+	web.Open = "http://localhost:8080"
+	worker := target("worker")
+	worker.Open = "http://localhost:9090"
+	m := newTestModel(t, web, target("api"), worker)
+	m.finder = finderState{open: true, links: true}
+	res := m.finderResults("")
+	if len(res) != 2 || res[0].name != "web" || res[1].name != "worker" || res[0].kind != "link" || res[1].kind != "link" {
+		t.Fatalf("modal rows = %v, want web then worker", res)
+	}
+	m.finder = finderState{open: true}
+	for _, c := range m.finderResults("") {
+		if c.kind == "link" {
+			t.Fatalf("go-to bar lists a link row: %+v", c)
+		}
+	}
+	if res := m.finderResults("8080"); len(res) != 0 {
+		t.Fatalf("go-to results for 8080 = %v, want none", res)
+	}
+}
+
+// Past the page, down keeps the cursor on screen, so the tail rows of the modal are reachable.
+func TestLinkModalDownScrollsToTailRows(t *testing.T) {
+	var targets []Target
+	for i := range 30 {
+		tg := target("t" + strconv.Itoa(i))
+		tg.Open = "http://localhost:" + strconv.Itoa(9000+i)
+		targets = append(targets, tg)
+	}
+	m := newTestModel(t, targets...)
+	press(m, "o")
+	n := len(m.finderResults(""))
+	for range n {
+		press(m, "down")
+	}
+	if m.finder.sel != n-1 {
+		t.Fatalf("sel = %d after %d downs, want the last row %d", m.finder.sel, n, n-1)
+	}
+	if view := ansi.Strip(m.finderView()); !strings.Contains(view, "localhost:9029") {
+		t.Fatalf("last link row is not on screen:\n%s", view)
+	}
+}
+
+// A query spanning the name and the open value finds the modal row.
+func TestLinkModalJointQueryMatchesNameAndOpenValue(t *testing.T) {
+	hooks := target("webhooks")
+	hooks.Open = "http://localhost:8080"
+	m := newTestModel(t, hooks, target("api"))
+	press(m, "o")
+	press(m, "w", "e", "b", " ", "8", "0", "8", "0")
+	res := m.finderResults(m.finder.query)
+	if len(res) != 1 || res[0].kind != "link" || res[0].name != "webhooks" {
+		t.Fatalf("results for %q = %v, want the webhooks link row", m.finder.query, res)
+	}
+}
+
+// A make target's modal row keeps the make flag, and a blank open: gets no row.
+func TestLinkModalCopiesMakeAndIgnoresBlankOpen(t *testing.T) {
+	m := newMakeTUI(t)
+	i := targetIndex(m, "make/test")
+	m.targets[i].spec.Open = "http://localhost:1"
+	m.targets[targetIndex(m, "web")].spec.Open = "   "
+	var link *finderItem
+	for _, c := range m.finderLinkCandidates() {
+		if c.target == targetIndex(m, "web") {
+			t.Fatalf("blank open: got a link row for web: %+v", c)
+		}
+		if c.target == i {
+			link = &c
+		}
+	}
+	if link == nil || !link.make {
+		t.Fatalf("make/test link row = %+v, want one with the make flag", link)
+	}
+}
+
+// An open: command runs through the open path, so enter returns its command and closes the modal.
+func TestLinkModalEnterOnCommandReturnsCmd(t *testing.T) {
+	web := target("web")
+	web.Open = "echo hi"
+	m := newTestModel(t, web)
+	ran := stubOpenCommand(t, 0, nil)
+	opened := stubOpenURL(t)
+	press(m, "o")
+	press(m, "e", "c", "h", "o")
+	cmd := press(m, "enter")
+	if cmd == nil {
+		t.Fatal("enter on a command link returned no command")
+	}
+	if m.finder.open {
+		t.Fatal("enter did not close the modal")
+	}
+	if len(*opened) != 0 {
+		t.Fatalf("opened URLs = %v, want none for a command", *opened)
+	}
+	if _, ok := cmd().(openExitMsg); !ok {
+		t.Fatal("command did not report an openExitMsg")
+	}
+	if len(*ran) != 1 {
+		t.Fatalf("ran = %v, want the open: command once", *ran)
+	}
+}
+
+// ctrl+o on the list opens the cursor target's link without a modal or a focus change.
+func TestCtrlOOpensCursorTargetLink(t *testing.T) {
+	web := target("web")
+	web.Open = "http://localhost:8080"
+	m := newTestModel(t, web)
+	opened := stubOpenURL(t)
+	m.cursor = 0
+	if cmd := press(m, "ctrl+o"); cmd != nil {
+		t.Fatal("ctrl+o on a URL returned a command")
+	}
+	if m.finder.open || !slices.Equal(*opened, []string{"http://localhost:8080"}) {
+		t.Fatalf("finder open=%v opened=%v, want no modal and the URL opened", m.finder.open, *opened)
+	}
+}
+
+// ctrl+o in the go-to bar opens the selected target's link and closes the popup, without jumping.
+func TestCtrlOInGoToOpensSelectedTarget(t *testing.T) {
+	web := target("web")
+	web.Open = "http://localhost:8080"
+	m := newTestModel(t, web)
+	opened := stubOpenURL(t)
+	m.Update(ctrlK)
+	press(m, "w", "e", "b")
+	press(m, "ctrl+o")
+	if m.finder.open {
+		t.Fatal("ctrl+o did not close the go-to bar")
+	}
+	if !slices.Equal(*opened, []string{"http://localhost:8080"}) || m.solo != -1 {
+		t.Fatalf("opened = %v solo = %d, want the URL opened and no jump", *opened, m.solo)
+	}
+}
+
+// An onchange target waiting for its first change gets ▶ and enter starts it, like a manual one.
+func TestFinderEnterStartsOnChangeRow(t *testing.T) {
+	watch := target("docs")
+	watch.Start = startOnChange
+	m := newTestModel(t, watch, target("api"))
+	i := targetIndex(m, "docs")
+	m.Update(ctrlK)
+	press(m, "d", "o", "c", "s")
+	if !strings.Contains(ansi.Strip(m.finderView()), "▶ docs") {
+		t.Fatalf("an onchange row should show ▶:\n%s", ansi.Strip(m.finderView()))
+	}
+	press(m, "enter")
+	if got := queuedCtrl(t, m.targets[i].runner); got != ctrlStart {
+		t.Fatalf("control = %v, want ctrlStart", got)
+	}
+}
+
+// A stopped target gets ▶ and enter starts it; a failed one keeps no ▶.
+func TestFinderEnterStartsStoppedRow(t *testing.T) {
+	m := newTestModel(t, target("api"), target("web"))
+	m.targets[0].state = stateStopped
+	m.targets[1].state = stateExited
+	i := targetIndex(m, "api")
+	m.Update(ctrlK)
+	press(m, "a", "p", "i")
+	if !strings.Contains(ansi.Strip(m.finderView()), "▶ api") {
+		t.Fatalf("a stopped row should show ▶:\n%s", ansi.Strip(m.finderView()))
+	}
+	press(m, "enter")
+	if got := queuedCtrl(t, m.targets[i].runner); got != ctrlStart {
+		t.Fatalf("control = %v, want ctrlStart", got)
+	}
+	m.Update(ctrlK)
+	press(m, "w", "e", "b")
+	if strings.Contains(ansi.Strip(m.finderView()), "▶") {
+		t.Fatalf("a failed row should not show ▶:\n%s", ansi.Strip(m.finderView()))
 	}
 }

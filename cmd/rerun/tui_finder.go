@@ -26,11 +26,14 @@ type finderState struct {
 	open  bool
 	query string
 	sel   int
+	top   int  // the first match row on screen; finderTop keeps sel inside it
+	links bool // the open modal: link rows only, opened by o on the list
+	undo  undoStack
 }
 
 // finderItem is one candidate: what it is, the text it matches on, and what Enter does.
 type finderItem struct {
-	kind    string // "target" or "group"
+	kind    string // "target", "link" (open modal only), or "group"
 	name    string
 	desc    string
 	matched []int // rune indexes of name that the query matched
@@ -40,9 +43,16 @@ type finderItem struct {
 	enter  func(m *tuiModel)
 }
 
-// finderRuns is whether enter starts the row's command: a make target that is not up.
+// finderRuns is whether enter starts the row: a make target that is not up, or a manual, onchange, or stopped target.
 func (m *tuiModel) finderRuns(c finderItem) bool {
-	return c.make && c.target >= 0 && !m.targets[c.target].state.up()
+	if c.kind != "target" || c.target < 0 {
+		return false
+	}
+	st := m.targets[c.target].state
+	if c.make {
+		return !st.up()
+	}
+	return st == stateManual || st == stateOnChange || st == stateStopped
 }
 
 // finderDesc collapses a description onto one line, so a newline cannot break the popup.
@@ -63,11 +73,40 @@ func (m *tuiModel) finderCandidates() []finderItem {
 			target: r.target, enter: func(m *tuiModel) { m.finderJump(i) }}
 		if item.make {
 			item.name = finderMakeLabel(t.Name)
+		}
+		if m.finderRuns(item) {
 			item.enter = func(m *tuiModel) { m.finderRun(i) }
 		}
 		out = append(out, item)
 	}
 	return out
+}
+
+// finderLinkCandidates lists each target with an open: value, in target order, for the open modal.
+func (m *tuiModel) finderLinkCandidates() []finderItem {
+	var out []finderItem
+	for i, tg := range m.targets {
+		open := strings.TrimSpace(tg.spec.Open)
+		if open == "" {
+			continue
+		}
+		name := tg.spec.Name
+		make := tg.spec.Kind == makeKind
+		if make {
+			name = finderMakeLabel(name)
+		}
+		out = append(out, finderItem{kind: "link", name: name, desc: finderDesc(open), make: make, target: i})
+	}
+	return out
+}
+
+// openLinks is o on the list: the open modal over every target's open: value, or a notice when there are none.
+func (m *tuiModel) openLinks() {
+	if len(m.finderLinkCandidates()) == 0 {
+		m.showNotice("no links to open · add open: in rerun.yml", false)
+		return
+	}
+	m.finder = finderState{open: true, links: true}
 }
 
 // finderMakeLabel shows a make target as its command: the last slash becomes a space.
@@ -118,6 +157,9 @@ func fuzzyAll(words, data []string) []fuzzyHit {
 // finderResults ranks candidates: name matches first, then desc-only matches, each by score.
 func (m *tuiModel) finderResults(query string) []finderItem {
 	cands := m.finderCandidates()
+	if m.finder.links {
+		cands = m.finderLinkCandidates()
+	}
 	words := strings.Fields(finderMatchText(query))
 	if len(words) == 0 {
 		return cands
@@ -134,7 +176,7 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	for i, h := range nameHits {
 		if h.hits != len(words) {
 			descIdx = append(descIdx, i)
-			descs = append(descs, cands[i].desc)
+			descs = append(descs, finderSearchDesc(cands[i]))
 		}
 	}
 	descHits := fuzzyAll(words, descs)
@@ -167,6 +209,27 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	return out
 }
 
+// finderSearchDesc is the text the desc pass reads: a link row also reads its target name, so "web 8080" finds it.
+func finderSearchDesc(c finderItem) string {
+	if c.kind == "link" {
+		return finderMatchText(c.name) + " " + c.desc
+	}
+	return c.desc
+}
+
+// finderTop is the first visible match row: the stored window, moved just enough to keep sel on screen.
+func (m *tuiModel) finderTop(n int) int {
+	rows := max(1, m.finderListRows())
+	top := min(m.finder.top, max(0, n-rows))
+	if m.finder.sel < top {
+		top = m.finder.sel
+	}
+	if m.finder.sel >= top+rows {
+		top = m.finder.sel - rows + 1
+	}
+	return max(0, top)
+}
+
 // finderInnerH is the box height inside its border; it depends only on the terminal.
 func (m *tuiModel) finderInnerH() int {
 	_, h := m.modalSize()
@@ -190,29 +253,47 @@ func (m *tuiModel) finderListRows() int {
 // handleFinderKey routes keys while the finder is open; enter jumps, esc and ctrl+k close.
 func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	res := m.finderResults(m.finder.query)
-	n := min(len(res), m.finderListRows())
-	m.finder.sel = min(m.finder.sel, max(0, n-1))
-	switch msg.String() {
+	m.finder.sel = min(m.finder.sel, max(0, len(res)-1))
+	key := barKeyName(msg)
+	if undo, redo := historyKey(key); undo || redo {
+		m.finderHistory(redo)
+		return m, nil
+	}
+	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "ctrl+[", "ctrl+k":
 		m.finder = finderState{}
 	case "enter", "ctrl+m":
 		// With no match, enter keeps the popup and its query open.
-		if m.finder.sel >= n {
+		if m.finder.sel >= len(res) {
 			return m, nil
 		}
-		res[m.finder.sel].enter(m)
+		sel := res[m.finder.sel]
 		m.finder = finderState{}
+		if sel.kind == "link" {
+			// Opens the target's open: value without moving focus.
+			return m, m.openTarget(sel.target)
+		}
+		sel.enter(m)
+	case "ctrl+o":
+		// Quick open: the selected row's target link, without a jump.
+		if m.finder.sel < len(res) && res[m.finder.sel].target >= 0 {
+			i := res[m.finder.sel].target
+			m.finder = finderState{}
+			return m, m.openTarget(i)
+		}
 	case "up", "ctrl+p":
 		m.finder.sel = max(0, m.finder.sel-1)
 	case "down", "ctrl+n":
-		m.finder.sel = min(max(0, n-1), m.finder.sel+1)
+		m.finder.sel = min(max(0, len(res)-1), m.finder.sel+1)
 	// ctrl+h is how the enhanced decoder spells backspace (kitty disambiguation).
 	case "backspace", "ctrl+h":
 		if r := []rune(m.finder.query); len(r) > 0 {
+			from := m.finderSnap()
 			m.finder.query = string(r[:len(r)-1])
 			m.finder.sel = 0
+			m.finder.undo.edit(from, m.finderSnap(), 0)
 		}
 	default:
 		m.finderPaste(msg.Text)
@@ -221,13 +302,35 @@ func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.finderPaste(string(msg.Code))
 		}
 	}
+	if m.finder.open {
+		m.finder.top = m.finderTop(len(m.finderResults(m.finder.query)))
+	}
 	return m, nil
 }
 
 // finderPaste drops control characters, so a pasted newline cannot split the query.
 func (m *tuiModel) finderPaste(s string) {
 	if q := strings.Map(dropControl, s); q != "" {
+		from := m.finderSnap()
 		m.finder.query += q
+		m.finder.sel = 0
+		m.finder.undo.edit(from, m.finderSnap(), typedRune(q))
+	}
+}
+
+// finderSnap is the query as an undo state; the finder's caret always sits at its end.
+func (m *tuiModel) finderSnap() inputSnap {
+	return inputSnap{m.finder.query, utf8.RuneCountInString(m.finder.query)}
+}
+
+// finderHistory undoes or redoes a query edit; the list re-filters on the restored query.
+func (m *tuiModel) finderHistory(redo bool) {
+	step := m.finder.undo.undoStep
+	if redo {
+		step = m.finder.undo.redoStep
+	}
+	if s, ok := step(m.finderSnap()); ok {
+		m.finder.query = s.text
 		m.finder.sel = 0
 	}
 }
@@ -258,7 +361,7 @@ func (m *tuiModel) finderJump(idx int) {
 	m.focusPane()
 }
 
-// finderRun is enter on a make row: it jumps there, then starts it unless it is already up.
+// finderRun is enter on a runnable row: it jumps there, then starts it unless it is already up.
 func (m *tuiModel) finderRun(idx int) {
 	m.finderJump(idx)
 	if r := m.allRows()[idx]; !m.targets[r.target].state.up() {
@@ -300,7 +403,8 @@ func (m *tuiModel) finderView() string {
 	innerW := m.modalInnerW(outerW)
 	res := m.finderResults(m.finder.query)
 	rows := m.finderListRows()
-	nameW := finderNameWidth(res[:min(len(res), rows)], innerW)
+	top := m.finderTop(len(res))
+	nameW := finderNameWidth(res[top:min(len(res), top+rows)], innerW)
 
 	n := 0
 	if len(res) > 0 {
@@ -311,7 +415,11 @@ func (m *tuiModel) finderView() string {
 	input := m.styles.chip.Render(inputPrompt)
 	m.layout.caretW = 0
 	if m.finder.query == "" {
-		input += " " + m.styles.hint.Render("go to target or run…")
+		hint := "go to target or run…"
+		if m.finder.links {
+			hint = "open a link…"
+		}
+		input += " " + m.styles.hint.Render(hint)
 	} else {
 		tail := finderTail(m.finder.query, innerW-2-lipgloss.Width(count)-2)
 		input += tail
@@ -325,8 +433,8 @@ func (m *tuiModel) finderView() string {
 		switch {
 		case i == 0 && len(res) == 0:
 			body = append(body, "  "+m.styles.hint.Render("no matches for \""+m.finder.query+"\""))
-		case i < len(res):
-			body = append(body, m.finderLine(res[i], i == m.finder.sel, nameW, innerW))
+		case top+i < len(res):
+			body = append(body, m.finderLine(res[top+i], top+i == m.finder.sel, nameW, innerW))
 		default:
 			body = append(body, "")
 		}
@@ -334,8 +442,12 @@ func (m *tuiModel) finderView() string {
 	footer := ""
 	if m.finderHasFooter() {
 		footer = "↑↓ move  enter go to  esc close"
-		if m.finder.sel < len(res) && m.finderRuns(res[m.finder.sel]) {
-			footer = "↑↓ move  enter run  esc close"
+		if m.finder.links {
+			footer = "↑↓ move  enter open  ctrl+o open  esc close"
+		} else if m.finder.sel < len(res) && m.finderRuns(res[m.finder.sel]) {
+			footer = "↑↓ move  enter run  ctrl+o open  esc close"
+		} else if m.finder.sel < len(res) && res[m.finder.sel].target >= 0 {
+			footer = "↑↓ move  enter go to  ctrl+o open  esc close"
 		}
 		if len(res) == 0 {
 			footer = "esc close"
@@ -365,7 +477,10 @@ func (m *tuiModel) finderLine(c finderItem, selected bool, nameW, innerW int) st
 		marker = paint(m.styles.chip).Render("▌") + paint(lipgloss.NewStyle()).Render(" ")
 	}
 	glyph := "  "
-	if m.finderRuns(c) {
+	switch {
+	case c.kind == "link":
+		glyph = "↗ "
+	case m.finderRuns(c):
 		glyph = "▶ "
 	}
 	row := marker + paint(lipgloss.NewStyle()).Render(glyph) + m.finderName(c, selected, nameW)

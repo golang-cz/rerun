@@ -101,6 +101,8 @@ func keyMsg(s string) tea.Msg {
 		return tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl | tea.ModShift}
 	case "ctrl+i":
 		return tea.KeyPressMsg{Code: 'i', Mod: tea.ModCtrl}
+	case "ctrl+o":
+		return tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
 	case "ctrl+m":
 		return tea.KeyPressMsg{Code: 'm', Mod: tea.ModCtrl}
 	case "ctrl+[":
@@ -483,17 +485,18 @@ func TestMouseClicksTheBottomRowWithoutAFooter(t *testing.T) {
 	}
 }
 
-// The left column is nameW + the fixed glyph, space, two-cell marker, and status.
+// The left column is nameW + the fixed glyph, space, space, build cell, two-cell marker, and times column.
 func TestLeftColumnIsNameWidthPlusFixedColumns(t *testing.T) {
 	m := newTestModel(t, target("omsx"), target("backoffice-webapp"))
+	m.showTimes = true
 	leftW, _ := m.layoutWidths()
 
 	wantName := len("backoffice-webapp")
 	if got := m.nameWidth(leftW); got != wantName {
 		t.Fatalf("name width = %d, want %d", got, wantName)
 	}
-	if leftW != wantName+15 {
-		t.Fatalf("leftW = %d, want %d", leftW, wantName+15)
+	if leftW != wantName+17 {
+		t.Fatalf("leftW = %d, want %d", leftW, wantName+17)
 	}
 	if statusW != 11 {
 		t.Fatalf("statusW = %d, want 11", statusW)
@@ -680,7 +683,7 @@ func TestHelpOverlayToggles(t *testing.T) {
 	}
 	press(m, "?")
 	view := m.View().Content
-	for _, want := range []string{"mute", "scope", "open the target's open:"} {
+	for _, want := range []string{"mute", "undo/redo", "pick a link to open"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("full help overlay is missing %q", want)
 		}
@@ -766,6 +769,7 @@ func TestViewShowsGlyphStatusAndButton(t *testing.T) {
 	m.now = m.targets[0].lastStart.Add(48 * time.Second)
 	m.targets[1].state = stateExited
 	m.targets[1].exitCode = 0
+	m.showTimes = true
 	m.targets[1].exitLabel = "exit 0"
 	m.toggleMute(0)
 
@@ -1118,16 +1122,16 @@ func TestOpenKeyAndAutoOpen(t *testing.T) {
 		t.Fatalf("opened = %q, want the url exactly once", opened)
 	}
 
-	// o opens the highlighted row's url, and does nothing without one.
+	// ctrl+o opens the highlighted row's url, and does nothing without one.
 	m.cursor = 1
-	press(m, "o")
+	press(m, "ctrl+o")
 	if len(opened) != 1 {
-		t.Fatalf("o on a target without a url opened %q", opened)
+		t.Fatalf("ctrl+o on a target without a url opened %q", opened)
 	}
 	m.cursor = 0
-	press(m, "o")
+	press(m, "ctrl+o")
 	if len(opened) != 2 {
-		t.Fatalf("o did not open the url, opened = %q", opened)
+		t.Fatalf("ctrl+o did not open the url, opened = %q", opened)
 	}
 }
 
@@ -1173,6 +1177,7 @@ func TestRowStatusTextForStartModes(t *testing.T) {
 	if got := m.targets[0].glyph(); got != "·" {
 		t.Errorf("glyph = %q, want ·", got)
 	}
+	m.showTimes = true
 	frame := strings.Split(m.View().Content, "\n")
 	if got := frame[1]; !strings.Contains(got, "waiting") {
 		t.Errorf("row 1 = %q, want the waiting status", got)

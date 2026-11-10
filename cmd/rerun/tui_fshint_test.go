@@ -193,7 +193,7 @@ func TestHiddenListWatchFailureShowsOnBottomLine(t *testing.T) {
 		change: changeWithError(map[string]fsnotify.Op{"a.go": fsnotify.Write}, errors.New("too many open files")),
 	})
 	m.now = spawnClock.Add(3 * time.Second)
-	press(m, "b", "b")
+	press(m, "b")
 
 	lines := paneOf(m)
 	bottom := lines[len(lines)-1]
