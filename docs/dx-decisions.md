@@ -2,6 +2,7 @@
 
 This file logs product and developer-experience decisions, each with a short why.
 
+- 2026-11-10 · the watcher ignores pure attribute changes (`touch`) and saves whose content didn't change. Why: a rebuild without a change is wasted work, and AI agents and formatters rewrite files as-is.
 - 2026-11-10 · links come only from `open:` in rerun.yml; rerun no longer reads URLs from JSON log lines. Why: log-derived addresses like `[::]:8900` were noise, not links.
 - 2026-11-09 · `c` copies everywhere: the selection or pane cursor line, and the fs events modal. Why: one copy key to learn.
 - 2026-11-09 · `→` lands on the last service line: focusing the pane skips rerun's own rules. Why: the newest service output is what the reader wants.

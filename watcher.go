@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"io"
 	"os"
 	"os/exec"
@@ -38,6 +39,8 @@ type Watcher struct {
 	pinned       map[string]struct{}            // explicit on: roots, never ignored themselves
 	fileOnlyDirs map[string]map[string]struct{} // dir -> single-file roots watched through it
 	fullyWatched map[string]struct{}            // dirs watched by the directory walk
+	hashes       map[string]uint64              // file -> content hash at its last event, to drop saves that changed nothing
+	seed         maphash.Seed                   // fixed per watcher so stored hashes stay comparable
 	done         chan struct{}
 	watchOnce    sync.Once
 	closeOnce    sync.Once
@@ -76,6 +79,8 @@ func NewWatcher() (*Watcher, error) {
 		pinned:           make(map[string]struct{}),
 		fileOnlyDirs:     make(map[string]map[string]struct{}),
 		fullyWatched:     make(map[string]struct{}),
+		hashes:           make(map[string]uint64),
+		seed:             maphash.MakeSeed(),
 		respectGitignore: true,
 		stderr:           os.Stderr,
 		done:             make(chan struct{}),
@@ -185,8 +190,8 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 							return
 						}
 
-						// Ignore CHMOD.
-						if event.Op&fsnotify.Chmod == fsnotify.Chmod {
+						// Pure CHMOD only: kqueue merges a save into Write|Chmod.
+						if event.Op == fsnotify.Chmod {
 							continue
 						}
 
@@ -220,6 +225,9 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 
 						if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
 							w.forgetDir(event.Name)
+							delete(w.hashes, event.Name)
+						} else if !isDir && w.sameContent(event.Name) {
+							continue
 						}
 
 						// A dir made after startup is invisible to fsnotify until
@@ -288,6 +296,30 @@ func (w *Watcher) Watch(delay time.Duration) <-chan ChangeSet {
 	})
 
 	return changes
+}
+
+// maxHashBytes caps the files hashed per event; bigger ones always pass.
+const maxHashBytes = 10 << 20
+
+// sameContent reports whether name's bytes match its hash from the last event,
+// and stores the new hash. Unknown, unreadable and oversized files report false.
+func (w *Watcher) sameContent(name string) bool {
+	info, err := os.Stat(name)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	if info.Size() > maxHashBytes {
+		delete(w.hashes, name)
+		return false
+	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return false
+	}
+	sum := maphash.Bytes(w.seed, data)
+	prev, known := w.hashes[name]
+	w.hashes[name] = sum
+	return known && prev == sum
 }
 
 // newDirFileCap keeps a huge tree dropped into a watched dir from stalling event draining.

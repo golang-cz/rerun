@@ -216,7 +216,14 @@ func TestRuleFileEditsInvalidateTheCache(t *testing.T) {
 			}
 			writeFiles(t, generated)
 			assertNoChange(t, changes, 400*time.Millisecond)
-			writeUntilChange(t, changes, main, 2*time.Second)
+			// Same bytes would be dropped as an unchanged save, so each poke differs.
+			n := 0
+			pokeUntilChange(t, changes, main, 2*time.Second, func() {
+				n++
+				if err := os.WriteFile(main, []byte(fmt.Sprintf("package x // %d\n", n)), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			})
 		})
 	}
 }

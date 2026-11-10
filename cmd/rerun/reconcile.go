@@ -163,7 +163,7 @@ func (g *targetGroup) watchConfig(path string) {
 			if !w.interesting(filepath.Clean(ev.Name)) {
 				continue
 			}
-			if ev.Op&fsnotify.Chmod == fsnotify.Chmod {
+			if ev.Op == fsnotify.Chmod {
 				continue
 			}
 			if timer == nil {

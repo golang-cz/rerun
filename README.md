@@ -5,6 +5,8 @@ Credit for this library goes to https://github.com/VojtechVitek/rerun
 
 Lightweight file-watcher that re-runs given command on FS changes. It has simple CLI and optional config file. By default, it uses 200ms delay, which gives enough time for tools like git to update all directories/files within repository before killing the old process (when you switch branches etc).
 
+touch and saves with identical content don't trigger a rebuild.
+
 # Usage
 
 ```
