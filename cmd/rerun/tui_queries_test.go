@@ -543,7 +543,7 @@ func deepQueryChain(n int) string {
 // A legacy queries: block loads even when a saved query is named like a
 // target field; the block shape never reads as a target.
 func TestLegacyQueryNamedLikeATargetFieldLoads(t *testing.T) {
-	path := writeQueriesConfig(t, "queries:\n  run: sleep 1\nweb:\n  run: sleep 1\n")
+	path := writeQueriesConfig(t, "queries:\n  run: sleep 1\ntargets:\n  web:\n    run: sleep 1\n")
 	cfg, err := ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
@@ -555,7 +555,7 @@ func TestLegacyQueryNamedLikeATargetFieldLoads(t *testing.T) {
 		t.Fatalf("targets = %+v, want only web", cfg.Targets)
 	}
 
-	path = writeQueriesConfig(t, "queries:\n  errors: level=error\nweb:\n  run: sleep 1\n")
+	path = writeQueriesConfig(t, "queries:\n  errors: level=error\ntargets:\n  web:\n    run: sleep 1\n")
 	cfg, err = ParseConfig(path)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)

@@ -29,8 +29,6 @@ type importSpec struct {
 	optional bool
 	// autoFold is the import's `fold:`; nil leaves it to the root group or the Makefile default.
 	autoFold *bool
-	// retired names the old spellings of fold: the entry used, for one notice each.
-	retired  []string
 	groups   []string
 	services []string
 	profiles []string
@@ -61,11 +59,6 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			spec, err := parseImportSpec(src, deref(item))
 			if err != nil {
 				return err
-			}
-			for _, old := range spec.retired {
-				if n := filepath.Base(rootFile) + ": " + old + ": is now fold:"; !slices.Contains(cfg.Notices, n) {
-					cfg.Notices = append(cfg.Notices, n)
-				}
 			}
 			specs = append(specs, spec)
 		}
@@ -232,7 +225,6 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if err != nil {
 					return err
 				}
-				cfg.Notices = append(cfg.Notices, file.notices...)
 				if len(spec.groups) > 0 {
 					for _, g := range spec.groups {
 						if _, ok := file.schemas[g]; !ok {
@@ -427,7 +419,7 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 				spec.group, spec.groupNode = strings.TrimSpace(value.Value), value
 			}
 
-		case "fold", "auto-fold", "auto-hide", "hide":
+		case "fold":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %s", field, yamlType(value)))
 			}
@@ -435,15 +427,7 @@ func parseImportSpec(src *configSource, node *yaml.Node) (importSpec, error) {
 			if err != nil {
 				return spec, src.at(value, nodeSpan(value), fmt.Sprintf("import: field %q: expected a boolean, got %q", field, value.Value))
 			}
-			if field != "fold" {
-				spec.retired = append(spec.retired, field)
-			}
-			// Retired spellings may sit beside each other; true wins.
-			if spec.autoFold == nil {
-				spec.autoFold = &b
-			} else if b {
-				*spec.autoFold = true
-			}
+			spec.autoFold = &b
 
 		case "optional":
 			if value.Kind != yaml.ScalarNode || value.Tag != "!!bool" {

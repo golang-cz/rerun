@@ -148,7 +148,6 @@ $ find . -name '*.go' | rerun -- go test ./...
 -cooldown <dur>   minimum time between restarts (default 0s)
 -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
 -no-gitignore     do not filter watched files through .gitignore
--migrate          move rerun.yml's top-level targets under targets:, and list a Makefile under imports:
 -h, -help         show this help
 -version          show version
 ```
@@ -191,10 +190,10 @@ Each top-level key is one target. Fields:
 | `run` | shell command to run, required |
 | `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
-| `open` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. Older spelling: `url:`, which still works as the link |
+| `open` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice. |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
-| `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. Older spelling: `schema`, with `schemas:` |
+| `group` | name of a `groups:` entry to take columns from; the target's own `columns` win. |
 | `muted` | start the stream muted (default false); a group's `muted` fills in when unset. `m` still toggles it |
 | `selected` | start this target on a bare `rerun` (default true); naming a target on the command line overrides it either way |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
@@ -219,9 +218,7 @@ targets:
     on: [cmd, internal]
 ```
 
-- The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:`, `targets:` and `queries:`. Any other top-level key is an error, so a typo surfaces.
-- A file without a `targets:` key is read the old way, with its targets at the top level. rerun shows one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
-- `rerun -migrate` rewrites the nearest rerun.yml in place, so its targets move under `targets:`. It keeps comments and key order, and drops blank lines. It also adds an `imports:` entry, with `optional: true`, for a Makefile beside it that loaded without one.
+- The top level holds only rerun's own keys: `imports:`, `groups:`, `targets:` and `queries:`. Any other top-level key is an error, so a typo surfaces.
 - A target under `targets:` may be called `imports` or `groups`, because it no longer collides with those reserved top-level keys.
 
 #### Groups
@@ -245,8 +242,7 @@ A target's own `columns` wins over its group's. A group's `queries:` pass their 
 queries to the members, and a target's own entry wins a name clash. A group's `start:` sets the
 first run for its members, and a target's own `start:` wins. A `group:` that names no
 group is a config error. A group's `muted: true` starts its members muted, and a
-target's own `muted: false` overrides it. A group's `fold: true` folds its idle members; folding never mutes. A root group named after an import takes that import's section. A group may be empty (`webapps: {}`). `schemas:` and
-`schema:` are the older spelling and still work; a file uses one spelling, not both. Quote each column entry: a `{` inside a plain entry
+target's own `muted: false` overrides it. A group's `fold: true` folds its idle members; folding never mutes. A root group named after an import takes that import's section. A group may be empty (`webapps: {}`). Quote each column entry: a `{` inside a plain entry
 of a `[...]` list is a YAML error.
 
 #### Fold
@@ -326,7 +322,7 @@ targets:
 - An `imports:` key inside an imported file is ignored, with a notice. Imports go one level deep.
 - The same file imported twice loads once. A file that imports itself is an error.
 - An unknown import key is an error. A compose file is imported as its services. See Docker Compose below.
-- With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one. `rerun -migrate` adds the entry for a file that loaded before.
+- With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one.
 
 #### Docker Compose
 

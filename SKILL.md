@@ -172,7 +172,7 @@ A rerun.yml import's targets default to `auto`; a Makefile or compose import's t
 The import's `path` is required. Unknown keys are errors. An `imports:` key in an
 imported file is ignored. A compose file is imported as its services. See Docker Compose below.
 
-With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one. `rerun -migrate` adds the entry for a file that loaded before.
+With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one.
 
 ### Makefile: a make file's targets
 
@@ -217,7 +217,7 @@ imports:
 
 ## Building rerun.yml
 
-Flat top-level map, one entry per target (Makefile-like). `run` (older spelling: `cmd`) is required;
+Flat top-level map, one entry per target (Makefile-like). `run` is required;
 everything else is optional. Durations are Go-style strings (`200ms`, `5s`).
 
 ```yaml
@@ -259,7 +259,7 @@ the reserved top-level `groups:` key (`groups: {backend: {columns: ["level {.lev
 and set `group: backend` on each target. A target's own `columns` wins over its
 group's, and a `group:` naming no group is an error. A group's `start:` sets the
 first run for its members, and a target's own `start:` wins. A group may be empty (`webapps: {}`).
-The older `schemas:`/`schema:` spelling still works; use one spelling per file. Quote each column entry,
+Quote each column entry,
 since a `{` inside a plain `[...]` entry is a YAML error.
 
 A column can also hold literal text and several `{expr}` placeholders. Each
@@ -268,7 +268,7 @@ spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both
 fields shows `disk full ENOSPC`, and a line with only `.error` shows `ENOSPC`. A
 bad expression shows `bad column "msg": <error>` in the title row.
 
-### `targets:` and `-migrate`
+### `targets:`
 
 Targets sit under a top-level `targets:` key:
 
@@ -278,16 +278,13 @@ targets:
     run: go run ./cmd/api
 ```
 
-- The top level holds only rerun's own keys: `imports:`, `groups:`, `schemas:` and `targets:`. Any other key is an error.
-- A file without `targets:` still loads the old way, with one footer notice: `rerun.yml uses top-level targets; run rerun -migrate`.
-- `rerun -migrate` rewrites the nearest rerun.yml in place under `targets:`, keeping comments and key order and dropping blank lines.
+- The top level holds only rerun's own keys: `imports:`, `groups:` and `targets:`. Any other key is an error.
 - A target under `targets:` may be called `imports` or `groups`.
 
 ## Flags
 
 - `-delay`, `-cooldown`, `-grace` — override per run (CLI wins over rerun.yml)
 - `-no-gitignore` — turn off .gitignore filtering and watch ignored files too
-- `-migrate` — move rerun.yml's top-level targets under `targets:`
 - `-h`, `-version`
 
 ## Shutdown

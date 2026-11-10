@@ -10,15 +10,16 @@ import (
 
 // threeTargetsYAML is the fixture the arg-flow tests share: one default-on
 // target, one `selected: false`, one default-on target nobody names.
-const threeTargetsYAML = `frontend:
-  run: pnpm run dev
+const threeTargetsYAML = `targets:
+  frontend:
+    run: pnpm run dev
 
-api:
-  run: go run ./cmd/api
-  selected: false
+  api:
+    run: go run ./cmd/api
+    selected: false
 
-test:
-  run: go test ./...
+  test:
+    run: go test ./...
 `
 
 // captureStdio points os.Stdout/os.Stderr at temp files for the duration of
@@ -60,7 +61,7 @@ func captureStdio(t *testing.T, run func() int) (stdout, stderr string, code int
 // hint. Stdout stays empty and the usage wall never appears.
 func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ConfigFileName), "api:\n  run: echo hi\n  bogus: true\n")
+	writeFile(t, filepath.Join(dir, ConfigFileName), "targets:\n  api:\n    run: echo hi\n    bogus: true\n")
 	t.Chdir(dir)
 
 	stdout, stderr, code := captureStdio(t, func() int { return runConfigMode(Args{}) })
@@ -71,9 +72,9 @@ func TestRunConfigModeBrokenConfigIsStderrOnly(t *testing.T) {
 	if stdout != "" {
 		t.Errorf("stdout = %q, want empty", stdout)
 	}
-	want := "rerun: " + filepath.Join(dir, ConfigFileName) + ":3:3: target \"api\": unknown field \"bogus\"\n\n" +
-		"  3 |   bogus: true\n" +
-		"    |   ^^^^^\n" +
+	want := "rerun: " + filepath.Join(dir, ConfigFileName) + ":4:5: target \"api\": unknown field \"bogus\"\n\n" +
+		"  4 |     bogus: true\n" +
+		"    |     ^^^^^\n" +
 		"fields: " + strings.Join(targetFields, ", ") + "\n\n" +
 		"rerun: hint: " + configHint + "\n"
 	if stderr != want {

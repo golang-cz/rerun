@@ -2,9 +2,7 @@ package main
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -132,99 +130,5 @@ func TestConfigOpenStringIsTheLinkOrCommand(t *testing.T) {
 	}
 	if len(cfg.Notices) != 0 {
 		t.Errorf("notices = %q, want none for the new spelling", cfg.Notices)
-	}
-}
-
-func TestConfigURLIsTheLinkWithOneNotice(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "web:\n  run: x\n  url: http://localhost:5173\n  open: true\napp:\n  run: y\n  url: http://localhost:1\n")
-	if err != nil {
-		t.Fatalf("ParseConfig: %v", err)
-	}
-	if cfg.Targets[0].Open != "http://localhost:5173" {
-		t.Errorf("web open = %q", cfg.Targets[0].Open)
-	}
-	var urlNotes, boolNotes int
-	for _, n := range cfg.Notices {
-		if strings.Contains(n, "url: is now open:") {
-			urlNotes++
-		}
-		if strings.Contains(n, "open-on-start: removed, press o") {
-			boolNotes++
-		}
-	}
-	if urlNotes != 1 || boolNotes != 1 {
-		t.Errorf("notices = %q, want one url notice and one open-bool notice", cfg.Notices)
-	}
-}
-
-func TestConfigURLWithStringOpenIsAnError(t *testing.T) {
-	_, err := writeOpenConfig(t, "web:\n  run: x\n  url: http://a\n  open: make dev\n")
-	if err == nil || !strings.Contains(err.Error(), `"web"`) || !strings.Contains(err.Error(), "url") {
-		t.Fatalf("err = %v, want a config error naming target web and url", err)
-	}
-}
-
-func TestConfigBooleanOpenIsRemovedWithANote(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "web:\n  run: x\n  open: false\n")
-	if err != nil {
-		t.Fatalf("ParseConfig: %v", err)
-	}
-	if cfg.Targets[0].Open != "" {
-		t.Errorf("open = %q, want none", cfg.Targets[0].Open)
-	}
-	if !slices.ContainsFunc(cfg.Notices, func(n string) bool { return strings.Contains(n, "open-on-start: removed, press o") }) {
-		t.Errorf("notices = %q, want the open-on-start note", cfg.Notices)
-	}
-}
-
-func TestMigrateRenamesURLAndDropsBooleanOpen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  web:\n    run: x\n    url: http://localhost:5173\n    open: true\n")
-	status, err := migrateConfig(path)
-	if err != nil {
-		t.Fatalf("migrateConfig: %v", err)
-	}
-	if status != migrateRenamed {
-		t.Fatalf("status = %v, want migrateRenamed", status)
-	}
-	text := readConfigText(t, path)
-	if !strings.Contains(text, "open: http://localhost:5173") || strings.Contains(text, "open: true") {
-		t.Fatalf("migrated file wants the link under open: and no boolean open:\n%s", text)
-	}
-	if strings.Contains(text, "url:") {
-		t.Fatalf("migrated file still has url::\n%s", text)
-	}
-	after, err := ParseConfig(path)
-	if err != nil {
-		t.Fatalf("ParseConfig after migrate: %v", err)
-	}
-	if len(after.Notices) != 0 {
-		t.Errorf("notices after migrate = %q, want none", after.Notices)
-	}
-	if status, err := migrateConfig(path); err != nil || status != migrateAlready {
-		t.Errorf("second migrate = %v, %v, want migrateAlready", status, err)
-	}
-}
-
-func TestMigrateLegacyTopLevelRenamesKeys(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "web:\n  run: x\n  url: http://a\n")
-	if _, err := migrateConfig(path); err != nil {
-		t.Fatalf("migrateConfig: %v", err)
-	}
-	text := readConfigText(t, path)
-	if !strings.Contains(text, "open: http://a") || strings.Contains(text, "url:") {
-		t.Fatalf("legacy migrate kept url:\n%s", text)
-	}
-}
-
-func TestMigrateRejectsURLWithStringOpen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ConfigFileName)
-	writeFile(t, path, "targets:\n  web:\n    run: x\n    url: http://a\n    open: make dev\n")
-	if _, err := migrateConfig(path); err == nil || !strings.Contains(err.Error(), `"web"`) {
-		t.Fatalf("err = %v, want the conflict named", err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatal(err)
 	}
 }

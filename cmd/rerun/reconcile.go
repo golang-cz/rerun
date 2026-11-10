@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -311,23 +310,6 @@ func nearestDir(dir string) string {
 	}
 }
 
-// migrateNotified is the config paths whose migrate notice a front-end already showed.
-var migrateNotified sync.Map
-
-// dedupNotices drops the migrate notice's repeats, so one process shows it once per config path.
-func dedupNotices(cfg *Config) []string {
-	out := make([]string, 0, len(cfg.Notices))
-	for _, n := range cfg.Notices {
-		if strings.Contains(n, migrateNoticeText) {
-			if _, seen := migrateNotified.LoadOrStore(filepath.Clean(cfg.Path), struct{}{}); seen {
-				continue
-			}
-		}
-		out = append(out, n)
-	}
-	return out
-}
-
 // reload parses the config again and reconciles the running targets with it. A
 // reload returns the parsed config, or nil when it did not load.
 func (g *targetGroup) reload(path string) *Config {
@@ -337,7 +319,7 @@ func (g *targetGroup) reload(path string) *Config {
 		return nil
 	}
 	g.sink.emit(event{kind: evConfigOK})
-	for _, n := range dedupNotices(cfg) {
+	for _, n := range cfg.Notices {
 		g.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
 	}
 	g.mu.Lock()

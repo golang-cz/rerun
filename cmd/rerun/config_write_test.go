@@ -11,14 +11,15 @@ import (
 
 const writeFixture = `# rerun config for the team
 
-api:
-  # the API server
-  run: go run ./cmd/api # local dev
-  on: &watch [cmd, internal]
+targets:
+  api:
+    # the API server
+    run: go run ./cmd/api # local dev
+    on: &watch [cmd, internal]
 
-web:
-  run: pnpm dev
-  on: *watch
+  web:
+    run: pnpm dev
+    on: *watch
 `
 
 func writeConfigFixture(t *testing.T, content string) string {
@@ -46,15 +47,16 @@ func TestSetColumnsTargetKeepsCommentsAnchorsAndBlankLines(t *testing.T) {
 
 	want := `# rerun config for the team
 
-api:
-  # the API server
-  run: go run ./cmd/api # local dev
-  on: &watch [cmd, internal]
-  columns: ['level {.level}', 'msg {.msg}']
+targets:
+  api:
+    # the API server
+    run: go run ./cmd/api # local dev
+    on: &watch [cmd, internal]
+    columns: ['level {.level}', 'msg {.msg}']
 
-web:
-  run: pnpm dev
-  on: *watch
+  web:
+    run: pnpm dev
+    on: *watch
 `
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
@@ -63,13 +65,14 @@ web:
 
 func TestSetColumnsSchemaReplacesColumnsInPlace(t *testing.T) {
 	path := writeConfigFixture(t, `# shared log shapes
-schemas:
+groups:
   backend:
     columns: [level] # the JSON log shape
 
-api:
-  schema: backend
-  run: go run ./cmd/api
+targets:
+  api:
+    group: backend
+    run: go run ./cmd/api
 `)
 
 	if err := setColumns(path, "backend", "api", []string{"status {.status}"}); err != nil {
@@ -77,13 +80,14 @@ api:
 	}
 
 	want := `# shared log shapes
-schemas:
+groups:
   backend:
     columns: ['status {.status}'] # the JSON log shape
 
-api:
-  schema: backend
-  run: go run ./cmd/api
+targets:
+  api:
+    group: backend
+    run: go run ./cmd/api
 `
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
@@ -91,20 +95,20 @@ api:
 }
 
 func TestSetColumnsCreatesMissingSchemasBlock(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: echo hi\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: echo hi\n")
 
 	if err := setColumns(path, "backend", "", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\n  run: echo hi\ngroups:\n  backend:\n    columns: ['level {.level}']\n"
+	want := "targets:\n  api:\n    run: echo hi\ngroups:\n  backend:\n    columns: ['level {.level}']\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestSetColumnsRoundTripsThroughParse(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  schema: backend\n  run: echo hi\n\nschemas:\n  backend:\n    columns: [\"a {.b}\"]\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    group: backend\n    run: echo hi\n\ngroups:\n  backend:\n    columns: [\"a {.b}\"]\n")
 
 	want := []Column{{Name: "level", Expr: ".level"}, {Name: "msg", Expr: ".msg"}}
 	if err := setColumns(path, "backend", "", []string{"level {.level}", "msg {.msg}"}); err != nil {
@@ -122,7 +126,7 @@ func TestSetColumnsRoundTripsThroughParse(t *testing.T) {
 }
 
 func TestSetColumnsAliasValueIsReplacedAndAnchorKept(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: x\n  columns: &cols [\"a {.b}\"]\n\nweb:\n  run: y\n  columns: *cols\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: x\n    columns: &cols [\"a {.b}\"]\n\n  web:\n    run: y\n    columns: *cols\n")
 
 	if err := setColumns(path, "", "web", []string{"c {.d}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
@@ -157,52 +161,52 @@ func TestSetColumnsRejectsBadInputWithoutWriting(t *testing.T) {
 }
 
 func TestSetColumnsKeepsFourSpaceIndent(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n    run: go run\n    on: [cmd]\n\nweb:\n    run: pnpm dev\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n      run: go run\n      on: [cmd]\n\n  web:\n      run: pnpm dev\n")
 
 	if err := setColumns(path, "", "api", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\n    run: go run\n    on: [cmd]\n    columns: ['level {.level}']\n\nweb:\n    run: pnpm dev\n"
+	want := "targets:\n  api:\n      run: go run\n      on: [cmd]\n      columns: ['level {.level}']\n\n  web:\n      run: pnpm dev\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestSetColumnsReplacesBlockListAndKeepsTheRest(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: go run\n  columns:\n    - level {.level}\n    - msg {.msg} # the text\n  on: [cmd]\n\nweb:\n  run: pnpm dev\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: go run\n    columns:\n      - level {.level}\n      - msg {.msg} # the text\n    on: [cmd]\n\n  web:\n    run: pnpm dev\n")
 
 	if err := setColumns(path, "", "api", []string{"status {.status}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\n  run: go run\n  columns: ['status {.status}']\n  on: [cmd]\n\nweb:\n  run: pnpm dev\n"
+	want := "targets:\n  api:\n    run: go run\n    columns: ['status {.status}']\n    on: [cmd]\n\n  web:\n    run: pnpm dev\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestSetColumnsKeepsCRLFLineEndings(t *testing.T) {
-	path := writeConfigFixture(t, "api:\r\n  run: go run\r\n\r\nweb:\r\n  run: pnpm dev\r\n")
+	path := writeConfigFixture(t, "targets:\n  api:\r\n    run: go run\r\n\r\n  web:\r\n    run: pnpm dev\r\n")
 
 	if err := setColumns(path, "", "api", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\r\n  run: go run\r\n  columns: ['level {.level}']\r\n\r\nweb:\r\n  run: pnpm dev\r\n"
+	want := "targets:\n  api:\r\n    run: go run\r\n    columns: ['level {.level}']\r\n\r\n  web:\r\n    run: pnpm dev\r\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file = %q\nwant %q", got, want)
 	}
 }
 
 func TestSetColumnsKeepsMissingFinalNewline(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: go run\nweb:\n  run: pnpm dev")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: go run\n  web:\n    run: pnpm dev")
 
 	if err := setColumns(path, "", "web", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "api:\n  run: go run\nweb:\n  run: pnpm dev\n  columns: ['level {.level}']"
+	want := "targets:\n  api:\n    run: go run\n  web:\n    run: pnpm dev\n    columns: ['level {.level}']"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file = %q\nwant %q", got, want)
 	}
@@ -211,7 +215,7 @@ func TestSetColumnsKeepsMissingFinalNewline(t *testing.T) {
 func TestSetColumnsWritesThroughSymlinkAndKeepsMode(t *testing.T) {
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real.yml")
-	writeFile(t, real, "api:\n  run: go run\n")
+	writeFile(t, real, "targets:\n  api:\n    run: go run\n")
 	if err := os.Chmod(real, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +231,7 @@ func TestSetColumnsWritesThroughSymlinkAndKeepsMode(t *testing.T) {
 	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("symlink replaced: info=%v err=%v", info, err)
 	}
-	if got := readConfigText(t, real); got != "api:\n  run: go run\n  columns: ['level {.level}']\n" {
+	if got := readConfigText(t, real); got != "targets:\n  api:\n    run: go run\n    columns: ['level {.level}']\n" {
 		t.Errorf("real file = %q", got)
 	}
 	info, err := os.Stat(real)
@@ -240,7 +244,7 @@ func TestSetColumnsWritesThroughSymlinkAndKeepsMode(t *testing.T) {
 }
 
 func TestSetColumnsRefusesAnchorUsedByAlias(t *testing.T) {
-	const fixture = "api:\n  run: x\n  columns: &cols ['a {.b}']\n\nweb:\n  run: y\n  columns: *cols\n"
+	const fixture = "targets:\n  api:\n    run: x\n    columns: &cols ['a {.b}']\n\n  web:\n    run: y\n    columns: *cols\n"
 	path := writeConfigFixture(t, fixture)
 
 	err := setColumns(path, "", "api", []string{"c {.d}"})
@@ -254,31 +258,31 @@ func TestSetColumnsRefusesAnchorUsedByAlias(t *testing.T) {
 }
 
 func TestSetColumnsWritesAnchorWithoutAliasesInPlace(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: x\n  columns: &cols ['a {.b}']\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: x\n    columns: &cols ['a {.b}']\n")
 
 	if err := setColumns(path, "", "api", []string{"c {.d}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
-	if got := readConfigText(t, path); got != "api:\n  run: x\n  columns: &cols ['c {.d}']\n" {
+	if got := readConfigText(t, path); got != "targets:\n  api:\n    run: x\n    columns: &cols ['c {.d}']\n" {
 		t.Errorf("file = %q", got)
 	}
 }
 
 func TestSetColumnsSchemaCreatesEntryUnderEmptySchemas(t *testing.T) {
-	path := writeConfigFixture(t, "schemas:\napi:\n  run: echo hi\n")
+	path := writeConfigFixture(t, "groups:\ntargets:\n  api:\n    run: echo hi\n")
 
 	if err := setColumns(path, "backend", "", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "schemas:\n  backend:\n    columns: ['level {.level}']\napi:\n  run: echo hi\n"
+	want := "groups:\n  backend:\n    columns: ['level {.level}']\ntargets:\n  api:\n    run: echo hi\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestSetColumnsLongListStaysOnOneLine(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: x\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: x\n")
 	var cols []string
 	for i := 0; i < 12; i++ {
 		cols = append(cols, fmt.Sprintf("column%02d {.field%02d}", i, i))
@@ -289,32 +293,32 @@ func TestSetColumnsLongListStaysOnOneLine(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSuffix(readConfigText(t, path), "\n"), "\n")
-	if len(lines) != 3 || !strings.HasPrefix(lines[2], "  columns: [") || !strings.HasSuffix(lines[2], "]") {
+	if len(lines) != 4 || !strings.HasPrefix(lines[3], "    columns: [") || !strings.HasSuffix(lines[3], "]") {
 		t.Fatalf("expected one columns line, got %q", lines)
 	}
 }
 
 func TestSetColumnsGroupsBlockKeepsItsSpelling(t *testing.T) {
-	path := writeConfigFixture(t, "groups:\n  backend:\n    columns: [level]\n\napi:\n  group: backend\n  run: echo hi\n")
+	path := writeConfigFixture(t, "groups:\n  backend:\n    columns: [level]\n\ntargets:\n  api:\n    group: backend\n    run: echo hi\n")
 
 	if err := setColumns(path, "backend", "", []string{"status {.status}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "groups:\n  backend:\n    columns: ['status {.status}']\n\napi:\n  group: backend\n  run: echo hi\n"
+	want := "groups:\n  backend:\n    columns: ['status {.status}']\n\ntargets:\n  api:\n    group: backend\n    run: echo hi\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestSetColumnsFillsFlowEmptyGroup(t *testing.T) {
-	path := writeConfigFixture(t, "groups:\n  webapps: {}\n\napi:\n  group: webapps\n  run: echo hi\n")
+	path := writeConfigFixture(t, "groups:\n  webapps: {}\n\ntargets:\n  api:\n    group: webapps\n    run: echo hi\n")
 
 	if err := setColumns(path, "webapps", "", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "groups:\n  webapps:\n    columns: ['level {.level}']\n\napi:\n  group: webapps\n  run: echo hi\n"
+	want := "groups:\n  webapps:\n    columns: ['level {.level}']\n\ntargets:\n  api:\n    group: webapps\n    run: echo hi\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
@@ -324,13 +328,13 @@ func TestSetColumnsFillsFlowEmptyGroup(t *testing.T) {
 }
 
 func TestSetColumnsFillsFlowEmptyGroupsBlock(t *testing.T) {
-	path := writeConfigFixture(t, "groups: {}\napi:\n  run: echo hi\n")
+	path := writeConfigFixture(t, "groups: {}\ntargets:\n  api:\n    run: echo hi\n")
 
 	if err := setColumns(path, "backend", "", []string{"level {.level}"}); err != nil {
 		t.Fatalf("setColumns: %v", err)
 	}
 
-	want := "groups:\n  backend:\n    columns: ['level {.level}']\napi:\n  run: echo hi\n"
+	want := "groups:\n  backend:\n    columns: ['level {.level}']\ntargets:\n  api:\n    run: echo hi\n"
 	if got := readConfigText(t, path); got != want {
 		t.Errorf("file =\n%s\nwant\n%s", got, want)
 	}
@@ -340,7 +344,7 @@ func TestSetColumnsFillsFlowEmptyGroupsBlock(t *testing.T) {
 }
 
 func TestTemplateColumnsRoundTripThroughWriteAndParse(t *testing.T) {
-	path := writeConfigFixture(t, "api:\n  run: echo hi\n")
+	path := writeConfigFixture(t, "targets:\n  api:\n    run: echo hi\n")
 	edit := colEdit{node: colNode{name: "api"}, cols: []Column{
 		{Name: "msg", Template: "{.message} {.error}"},
 		{Name: "level", Expr: ".level"},

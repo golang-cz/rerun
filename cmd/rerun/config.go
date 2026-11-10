@@ -67,7 +67,7 @@ type Target struct {
 	Desc   string
 	On     []string
 	Except []string
-	// Cmd is the `run:` command, or the older `cmd:` spelling.
+	// Cmd is the `run:` command.
 	Cmd string
 	// Build, when set, runs before each (re)start and gates the swap to a new run.
 	Build string
@@ -87,7 +87,7 @@ type Target struct {
 	ownQueries     map[string]string
 	groupQueries   map[string]string
 	groupQueryCols []Column
-	// Schema names the top-level `schemas:` entry the target uses, or "".
+	// Schema names the top-level `groups:` entry the target uses, or "".
 	Schema   string
 	Delay    time.Duration
 	Cooldown time.Duration
@@ -362,10 +362,6 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}, Queries: file.queries}
-	if file.legacy {
-		cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s %s", filepath.Base(abs), migrateNoticeText))
-	}
-	cfg.Notices = append(cfg.Notices, file.notices...)
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
 		return nil, err
 	}
@@ -425,23 +421,6 @@ type parsedFile struct {
 	targets []Target
 	schemas map[string]groupDef
 	queries map[string]string
-	// legacy is set for a file whose targets sit at the top level: no `targets:` key, at least one top-level target.
-	legacy bool
-	// notices name the retired spellings the file used, one line each.
-	notices []string
-}
-
-// oldFormNotes collects one notice per retired spelling per file.
-type oldFormNotes struct {
-	file  string
-	lines []string
-}
-
-func (n *oldFormNotes) once(text string) {
-	line := filepath.Base(n.file) + ": " + text
-	if !slices.Contains(n.lines, line) {
-		n.lines = append(n.lines, line)
-	}
 }
 
 // groupDef is one `groups:` entry: its columns, and the `muted:`, `fold:` and `start:` its members start with.
@@ -457,11 +436,9 @@ type groupDef struct {
 	startSet bool
 }
 
-// parseFileBody reads a file's groups and targets in the form the file writes:
-// under `targets:`, or, for a file with no such key, at the top level.
+// parseFileBody reads a file's groups and its targets, which sit under `targets:`.
 func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile, error) {
-	notes := &oldFormNotes{file: file}
-	schemas, err := parseSchemas(src, root, notes)
+	schemas, err := parseSchemas(src, root)
 	if err != nil {
 		return parsedFile{}, err
 	}
@@ -472,29 +449,17 @@ func parseFileBody(src *configSource, root *yaml.Node, file string) (parsedFile,
 			return parsedFile{}, err
 		}
 	}
-
-	if key, block := mappingEntry(root, targetsKey); block != nil {
-		// A legacy target named `targets` reads as the new form's block, so catch it first.
-		if looksLikeTarget(block) {
-			return parsedFile{}, src.at(key, len(key.Value), errTargetsReserved)
-		}
-		if err := checkTopLevel(src, root); err != nil {
-			return parsedFile{}, err
-		}
-		if block.Kind == yaml.ScalarNode && block.Tag == "!!null" {
-			return out, nil
-		}
-		if block.Kind != yaml.MappingNode {
-			return parsedFile{}, src.at(block, nodeSpan(block), "targets: expected a mapping of target names")
-		}
-		out.targets, err = parseTargets(src, block, schemas, file, false, notes)
-		out.notices = notes.lines
-		return out, err
+	if err := checkTopLevel(src, root); err != nil {
+		return parsedFile{}, err
 	}
-
-	out.legacy = hasTopLevelTargets(root)
-	out.targets, err = parseTargets(src, root, schemas, file, true, notes)
-	out.notices = notes.lines
+	_, block := mappingEntry(root, targetsKey)
+	if block == nil || (block.Kind == yaml.ScalarNode && block.Tag == "!!null") {
+		return out, nil
+	}
+	if block.Kind != yaml.MappingNode {
+		return parsedFile{}, src.at(block, nodeSpan(block), "targets: expected a mapping of target names")
+	}
+	out.targets, err = parseTargets(src, block, schemas, file)
 	return out, err
 }
 
@@ -507,49 +472,18 @@ func checkTopLevel(src *configSource, root *yaml.Node) error {
 			return src.at(key, 1, "top-level keys must be strings")
 		}
 		switch key.Value {
-		case targetsKey, importsKey, groupsBlock.block, schemasBlock.block, queriesKey:
+		case targetsKey, importsKey, groupsKey, queriesKey:
 			continue
 		}
 		e := src.at(key, len(key.Value), fmt.Sprintf("unknown top-level key %q", key.Value))
-		e.note = "top-level keys: imports, groups, schemas, targets, queries"
+		e.note = "top-level keys: imports, groups, targets, queries"
 		return e
 	}
 	return nil
 }
 
-// looksLikeTarget tells a legacy target named `targets` apart from the new form's block.
-func looksLikeTarget(node *yaml.Node) bool {
-	if node.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key, value := deref(node.Content[i]), deref(node.Content[i+1])
-		if key.Kind == yaml.ScalarNode && slices.Contains(targetFields, key.Value) && value.Kind != yaml.MappingNode {
-			return true
-		}
-	}
-	return false
-}
-
-// hasTopLevelTargets reports whether a file without `targets:` holds an actual target at the top level.
-func hasTopLevelTargets(root *yaml.Node) bool {
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		key := deref(root.Content[i])
-		if key.Kind != yaml.ScalarNode {
-			return true
-		}
-		switch key.Value {
-		case importsKey, groupsBlock.block, schemasBlock.block, queriesKey:
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-// parseTargets reads the target entries of a mapping. In a legacy file the same
-// mapping also holds the reserved keys, which are skipped.
-func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupDef, file string, legacy bool, notes *oldFormNotes) ([]Target, error) {
+// parseTargets reads the target entries of the `targets:` mapping.
+func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupDef, file string) ([]Target, error) {
 	var out []Target
 	seen := make(map[string]bool)
 	for i := 0; i+1 < len(block.Content); i += 2 {
@@ -562,16 +496,8 @@ func parseTargets(src *configSource, block *yaml.Node, schemas map[string]groupD
 			return nil, src.at(key, len(name), fmt.Sprintf("duplicate target %q", name))
 		}
 		seen[name] = true
-		if legacy {
-			if name == importsKey && value.Kind != yaml.SequenceNode && !(value.Kind == yaml.ScalarNode && value.Tag == "!!null") {
-				return nil, src.at(key, len(name), "`imports` is reserved; rename the target")
-			}
-			if name == groupsBlock.block || name == schemasBlock.block || name == importsKey || name == queriesKey {
-				continue
-			}
-		}
 
-		target, err := parseTarget(src, name, key, value, schemas, notes)
+		target, err := parseTarget(src, name, key, value, schemas)
 		if err != nil {
 			return nil, err
 		}
@@ -602,19 +528,10 @@ func mappingValue(root *yaml.Node, key string) *yaml.Node {
 	return value
 }
 
-// groupBlock is one spelling of the top-level group block and of the target key
-// that names a group. `groups`/`group` is primary; `schemas`/`schema` still parses.
-type groupBlock struct {
-	block string
-	field string
-}
+// groupsKey is the top-level key of the shared column groups; a target names one with group:.
+const groupsKey = "groups"
 
-var (
-	groupsBlock  = groupBlock{block: "groups", field: "group"}
-	schemasBlock = groupBlock{block: "schemas", field: "schema"}
-)
-
-// targetsKey is the reserved top-level key holding the targets, the new form.
+// targetsKey is the reserved top-level key holding the targets.
 const targetsKey = "targets"
 
 // queriesKey is the reserved key holding saved query pills, at the top level,
@@ -737,59 +654,41 @@ func checkQueryRef(lookup func(string) (queryRef, bool), stack []string, name st
 	return nil
 }
 
-// migrateNoticeText is the footer notice a file in the legacy form shows.
-const migrateNoticeText = "uses top-level targets; run rerun -migrate"
-
-// openOnStartGone is the notice for the removed open-on-start: and its old boolean open: spelling.
-const openOnStartGone = "open-on-start: removed, press o"
-
-// errTargetsReserved rejects a legacy target named `targets`, which reads as the new form's block.
-const errTargetsReserved = "targets is reserved; rename the target or move targets under targets:"
-
 // schemaFields is the accepted keys inside a group entry.
 var schemaFields = []string{"columns", "queries", "muted", "fold", "start"}
 
-// parseSchemas reads the top-level `groups:` or `schemas:` block into name ->
-// group. The two spellings cannot both appear. A null block is an empty one,
-// and a group with no columns, null or `{}`, is valid.
-func parseSchemas(src *configSource, root *yaml.Node, notes *oldFormNotes) (map[string]groupDef, error) {
+// parseSchemas reads the top-level `groups:` block into name -> group. A null
+// block is an empty one, and a group with no columns, null or `{}`, is valid.
+func parseSchemas(src *configSource, root *yaml.Node) (map[string]groupDef, error) {
 	schemas := make(map[string]groupDef)
-	var kw groupBlock
 	found := false
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key := deref(root.Content[i])
-		if key.Kind != yaml.ScalarNode || (key.Value != groupsBlock.block && key.Value != schemasBlock.block) {
+		if key.Kind != yaml.ScalarNode || key.Value != groupsKey {
 			continue
 		}
 		if found {
-			if key.Value != kw.block {
-				return nil, src.at(key, len(key.Value), fmt.Sprintf("both %q and %q are set; use one", kw.block, key.Value))
-			}
 			return nil, src.at(key, len(key.Value), fmt.Sprintf("duplicate top-level key %q", key.Value))
 		}
 		found = true
-		kw = groupsBlock
-		if key.Value == schemasBlock.block {
-			kw = schemasBlock
-		}
 
 		block := deref(root.Content[i+1])
 		if block.Kind == yaml.ScalarNode && block.Tag == "!!null" {
 			continue
 		}
 		if block.Kind != yaml.MappingNode {
-			return nil, src.at(block, nodeSpan(block), fmt.Sprintf("%s: expected a mapping of %s names", kw.block, kw.field))
+			return nil, src.at(block, nodeSpan(block), "groups: expected a mapping of group names")
 		}
 		for j := 0; j+1 < len(block.Content); j += 2 {
 			nameNode, value := deref(block.Content[j]), deref(block.Content[j+1])
 			if nameNode.Kind != yaml.ScalarNode {
-				return nil, src.at(nameNode, 1, kw.field+" names must be strings")
+				return nil, src.at(nameNode, 1, "group names must be strings")
 			}
 			name := nameNode.Value
 			if _, ok := schemas[name]; ok {
-				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate %s %q", kw.field, name))
+				return nil, src.at(nameNode, len(name), fmt.Sprintf("duplicate group %q", name))
 			}
-			def, err := parseSchema(src, kw, name, value, notes)
+			def, err := parseSchema(src, name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -799,9 +698,9 @@ func parseSchemas(src *configSource, root *yaml.Node, notes *oldFormNotes) (map[
 	return schemas, nil
 }
 
-func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node, notes *oldFormNotes) (groupDef, error) {
+func parseSchema(src *configSource, name string, node *yaml.Node) (groupDef, error) {
 	node = deref(node)
-	owner := fmt.Sprintf("%s %q", kw.field, name)
+	owner := fmt.Sprintf("group %q", name)
 	if node.Kind == yaml.ScalarNode && node.Tag == "!!null" {
 		return groupDef{}, nil
 	}
@@ -839,16 +738,12 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node,
 			}
 			def.muted = &b
 
-		case "fold", "auto-fold", "collapsed", "auto-hide", "hide":
-			if field != "fold" {
-				notes.once(field + ": is now fold:")
-			}
+		case "fold":
 			b, err := boolField(src, name, field, deref(node.Content[i+1]))
 			if err != nil {
 				return groupDef{}, err
 			}
-			// Retired spellings may sit beside each other; true wins.
-			def.autoFold, def.autoFoldSet = def.autoFold || b, true
+			def.autoFold, def.autoFoldSet = b, true
 
 		case "start":
 			m, err := parseStartMode(src, owner, field, deref(node.Content[i+1]))
@@ -876,10 +771,10 @@ func parseSchema(src *configSource, kw groupBlock, name string, node *yaml.Node,
 
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
-// fails when the two drift apart. `schema` parses too but is not listed.
+// fails when the two drift apart.
 var targetFields = []string{"desc", "on", "except", "run", "build", "health", "open", "columns", "queries", "group", "muted", "selected", "start", "delay", "cooldown", "grace"}
 
-func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef, notes *oldFormNotes) (Target, error) {
+func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
 	if node.Kind != yaml.MappingNode {
 		return Target{}, src.at(node, nodeSpan(node), fmt.Sprintf("target %q: expected a mapping of fields", name))
@@ -888,9 +783,7 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 	owner := fmt.Sprintf("target %q", name)
 	target := Target{Name: name, Delay: defaultDelay, Grace: rerun.DefaultGrace, Selected: true}
 	seen := make(map[string]bool)
-	var hide *bool
-	var queriesNode, urlKey *yaml.Node
-	openString := false
+	var queriesNode *yaml.Node
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := deref(node.Content[i])
 		field := key.Value
@@ -899,12 +792,6 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: duplicate field %q", name, field))
 		}
 		seen[field] = true
-		if seen["run"] && seen["cmd"] {
-			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"run\" and \"cmd\" are set; use run", name))
-		}
-		if seen["group"] && seen["schema"] {
-			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: both \"group\" and \"schema\" are set; use one", name))
-		}
 
 		switch field {
 		case "desc":
@@ -925,16 +812,13 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Except = list
 			}
 
-		case "run", "cmd", "build", "health":
+		case "run", "build", "health":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
 			switch field {
-			case "run", "cmd":
-				if field == "cmd" {
-					notes.once("cmd: is now run:")
-				}
+			case "run":
 				target.Cmd = s
 			case "build":
 				target.Build = s
@@ -942,36 +826,12 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Health = s
 			}
 
-		case "url":
-			// Retired: the link moved to open:, which also takes a command.
-			s, err := scalarField(src, name, field, value)
-			if err != nil {
-				return Target{}, err
-			}
-			target.Open = s
-			urlKey = key
-			notes.once("url: is now open:")
-
 		case "open":
-			if deref(value).Kind == yaml.ScalarNode && deref(value).Tag == "!!bool" {
-				if _, err := boolField(src, name, field, value); err != nil {
-					return Target{}, err
-				}
-				notes.once(openOnStartGone)
-				break
-			}
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
 			target.Open = s
-			openString = true
-
-		case "open-on-start":
-			if _, err := boolField(src, name, field, value); err != nil {
-				return Target{}, err
-			}
-			notes.once(openOnStartGone)
 
 		case "columns":
 			cols, err := parseColumnList(src, owner, field, value)
@@ -985,13 +845,13 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 			// Validated after the group merge, so the effective columns resolve its fields.
 			queriesNode = value
 
-		case "group", "schema":
+		case "group":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
 			if _, ok := schemas[s]; !ok {
-				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field %q: unknown %s %q", name, field, field, s))
+				return Target{}, src.at(value, nodeSpan(value), fmt.Sprintf("target %q: field \"group\": unknown group %q", name, s))
 			}
 			target.Schema = s
 
@@ -1008,14 +868,6 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				return Target{}, err
 			}
 			target.Muted = &b
-
-		case "hide":
-			b, err := boolField(src, name, field, value)
-			if err != nil {
-				return Target{}, err
-			}
-			hide = &b
-			notes.once("hide: is now muted:")
 
 		case "selected":
 			b, err := boolField(src, name, field, value)
@@ -1045,13 +897,6 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 		}
 	}
 
-	if urlKey != nil && openString {
-		return Target{}, src.at(urlKey, len("url"), fmt.Sprintf("target %q: both \"url\" and a string \"open\" are set; use open: alone", name))
-	}
-	// Own muted beats the retired hide, and both beat the group's muted.
-	if target.Muted == nil && hide != nil {
-		target.Muted = hide
-	}
 	if target.Schema != "" {
 		group := schemas[target.Schema]
 		if !seen["columns"] {

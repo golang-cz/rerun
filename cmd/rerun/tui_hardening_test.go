@@ -175,7 +175,7 @@ func TestExpandedYAMLRoundTrips(t *testing.T) {
 		"esc\x1b[2J", "bel\x07", "csi\u009b2J", "nel\u0085x", "ls x", "ps x", "bom\ufeffx",
 		"multi\nline", "lead\n  two", "  lead space\nline", "trail\n", "two\n\n", "\n", "\n\n",
 		"x\n\n\ny", "émoji 🙂", "nul\x00x", ".inf", ".NaN", "y", "no", "a b",
-		"key: value\nnext: 2", "#comment", "? question", "| pipe", "> fold",
+		"targets:\n  key: value\n  next: 2", "#comment", "? question", "| pipe", "> fold",
 	}
 	for _, s := range cases {
 		line, _ := json.Marshal(map[string]string{"v": s})

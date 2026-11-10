@@ -128,12 +128,13 @@ func countLines(path string) int {
 }
 
 func TestRunTargetsParallelPrefixesOutput(t *testing.T) {
-	out, stop, dir := startRunner(t, `a:
-  on: src
-  run: echo a > a.out && echo a-finished
-b:
-  on: src
-  run: echo b > b.out && echo b-finished
+	out, stop, dir := startRunner(t, `targets:
+  a:
+    on: src
+    run: echo a > a.out && echo a-finished
+  b:
+    on: src
+    run: echo b > b.out && echo b-finished
 `)
 
 	waitForOutput(t, out, "[a] a-finished", 3*time.Second)
@@ -154,9 +155,10 @@ b:
 }
 
 func TestRunTargetsSelfExitDoesNotRestart(t *testing.T) {
-	out, stop, dir := startRunner(t, `t:
-  on: src
-  run: echo tick >> count.txt
+	out, stop, dir := startRunner(t, `targets:
+  t:
+    on: src
+    run: echo tick >> count.txt
 `)
 
 	count := filepath.Join(dir, "count.txt")
@@ -175,9 +177,10 @@ func TestRunTargetsSelfExitDoesNotRestart(t *testing.T) {
 }
 
 func TestRunTargetsReportsSignalExit(t *testing.T) {
-	out, stop, _ := startRunner(t, `t:
-  on: src
-  run: kill -TERM $$
+	out, stop, _ := startRunner(t, `targets:
+  t:
+    on: src
+    run: kill -TERM $$
 `)
 
 	waitForOutput(t, out, "[t] exited (signal: terminated)", 3*time.Second)
@@ -188,12 +191,13 @@ func TestRunTargetsReportsSignalExit(t *testing.T) {
 }
 
 func TestRunTargetsCooldown(t *testing.T) {
-	_, stop, dir := startRunner(t, `t:
-  on: src
-  run: echo tick >> count.txt; sleep 5
-  delay: 20ms
-  cooldown: 900ms
-  grace: 200ms
+	_, stop, dir := startRunner(t, `targets:
+  t:
+    on: src
+    run: echo tick >> count.txt; sleep 5
+    delay: 20ms
+    cooldown: 900ms
+    grace: 200ms
 `)
 
 	count := filepath.Join(dir, "count.txt")
@@ -261,30 +265,32 @@ func saveUntilLine(t *testing.T, out *safeBuffer, path, yml, sub string, timeout
 // reports the delta as one banner line, and a config rerun cannot parse leaves
 // every running target alone.
 func TestRunTargetsReloadsTheConfig(t *testing.T) {
-	out, stop, dir := startRunner(t, `web:
-  on: src
-  run: echo web-up && sleep 30
+	out, stop, dir := startRunner(t, `targets:
+  web:
+    on: src
+    run: echo web-up && sleep 30
 
-api:
-  on: src
-  run: echo api-up && sleep 30
+  api:
+    on: src
+    run: echo api-up && sleep 30
 `)
 
 	waitForOutput(t, out, "[web] web-up", 3*time.Second)
 	waitForOutput(t, out, "[api] api-up", 3*time.Second)
 
 	// One save: web's cmd changes and worker appears; api is untouched.
-	reloaded := `web:
-  on: src
-  run: echo web-v2 && sleep 30
+	reloaded := `targets:
+  web:
+    on: src
+    run: echo web-v2 && sleep 30
 
-api:
-  on: src
-  run: echo api-up && sleep 30
+  api:
+    on: src
+    run: echo api-up && sleep 30
 
-worker:
-  on: src
-  run: echo worker-up && sleep 30
+  worker:
+    on: src
+    run: echo worker-up && sleep 30
 `
 	banner := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), reloaded, "config reloaded", 5*time.Second)
 	if !strings.Contains(banner, "~web(cmd)") || !strings.Contains(banner, "+worker") {
@@ -297,7 +303,7 @@ worker:
 	}
 
 	// A save rerun cannot parse only reports itself.
-	line := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), "web:\n  run:\n", "config reload failed", 5*time.Second)
+	line := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), "targets:\n  web:\n    run:\n", "config reload failed", 5*time.Second)
 	if !strings.Contains(line, `target "web"`) {
 		t.Fatalf("error line = %q, want the parse error naming web", line)
 	}
@@ -355,9 +361,10 @@ func TestShutdownLeavesNoChildProcess(t *testing.T) {
 	for _, sig := range []os.Signal{syscall.SIGINT, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			dir := t.TempDir()
-			writeFile(t, filepath.Join(dir, ConfigFileName), `svc1:
-  on: src
-  run: 'sleep 60 & echo "$$ $!" > pids; wait'
+			writeFile(t, filepath.Join(dir, ConfigFileName), `targets:
+  svc1:
+    on: src
+    run: 'sleep 60 & echo "$$ $!" > pids; wait'
 `)
 			if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 				t.Fatal(err)
@@ -441,11 +448,12 @@ func TestDrainSpecsKeepsLatestAndStashesOthers(t *testing.T) {
 // prompt, and must leave no child of the previous generation behind.
 func TestShutdownDuringCooldownKillsTheChild(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ConfigFileName), `svc1:
-  on: src
-  run: 'sleep 60 & echo $! > sleep.pid; echo $$ > sh.pid; wait'
-  delay: 20ms
-  cooldown: 5s
+	writeFile(t, filepath.Join(dir, ConfigFileName), `targets:
+  svc1:
+    on: src
+    run: 'sleep 60 & echo $! > sleep.pid; echo $$ > sh.pid; wait'
+    delay: 20ms
+    cooldown: 5s
 `)
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -600,24 +608,25 @@ func TestRunTargetsStaggersStarts(t *testing.T) {
 	staggerLimit = 4
 	staggerSlotTimeout = 10 * time.Second
 
-	_, stop, dir := startRunner(t, `t1:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
-t2:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
-t3:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
-t4:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
-t5:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
-t6:
-  on: src
-  run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+	_, stop, dir := startRunner(t, `targets:
+  t1:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+  t2:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+  t3:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+  t4:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+  t5:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
+  t6:
+    on: src
+    run: echo tick >> started.txt; sleep 2; echo up; sleep 30
 `)
 
 	started := filepath.Join(dir, "started.txt")
@@ -637,18 +646,19 @@ func TestShutdownWhileQueuedDoesNotHang(t *testing.T) {
 	staggerLimit = 1
 	staggerSlotTimeout = time.Hour
 
-	_, stop, _ := startRunner(t, `t1:
-  on: src
-  run: sleep 30
-t2:
-  on: src
-  run: sleep 30
-t3:
-  on: src
-  run: sleep 30
-t4:
-  on: src
-  run: sleep 30
+	_, stop, _ := startRunner(t, `targets:
+  t1:
+    on: src
+    run: sleep 30
+  t2:
+    on: src
+    run: sleep 30
+  t3:
+    on: src
+    run: sleep 30
+  t4:
+    on: src
+    run: sleep 30
 `)
 
 	time.Sleep(300 * time.Millisecond) // let the first one take the only slot
@@ -1036,9 +1046,10 @@ func writeUntil(t *testing.T, path string, cond func() bool) {
 // start: auto is the default: the target spawns at session start and a change
 // restarts it.
 func TestAutoStartsAtSessionStart(t *testing.T) {
-	g, dir := startRunnerGroup(t, `t:
-  on: src
-  run: sleep 30
+	g, dir := startRunnerGroup(t, `targets:
+  t:
+    on: src
+    run: sleep 30
 `)
 	r := g.runners[0]
 	first := waitForCmd(t, r)
@@ -1049,10 +1060,11 @@ func TestAutoStartsAtSessionStart(t *testing.T) {
 // start: onchange holds the first generation back until a file changes, then
 // behaves like auto.
 func TestOnChangeWaitsForTheFirstChange(t *testing.T) {
-	g, dir := startRunnerGroup(t, `t:
-  on: src
-  start: onchange
-  run: sleep 30
+	g, dir := startRunnerGroup(t, `targets:
+  t:
+    on: src
+    start: onchange
+    run: sleep 30
 `)
 	r := g.runners[0]
 	waitForWatcher(t, r)
@@ -1069,10 +1081,11 @@ func TestOnChangeWaitsForTheFirstChange(t *testing.T) {
 // A running onchange target still bounces on a config edit, so its new cmd
 // applies. An onchange one keeps waiting instead.
 func TestRunningOnChangeTargetBouncesOnASpecChange(t *testing.T) {
-	g, dir := startRunnerGroup(t, `t:
-  on: src
-  start: onchange
-  run: sleep 30
+	g, dir := startRunnerGroup(t, `targets:
+  t:
+    on: src
+    start: onchange
+    run: sleep 30
 `)
 	r := g.runners[0]
 	waitForWatcher(t, r)
@@ -1093,10 +1106,11 @@ func TestRunningOnChangeTargetBouncesOnASpecChange(t *testing.T) {
 
 // start: manual never builds a watcher, so no change can start it; r does.
 func TestManualWaitsForControl(t *testing.T) {
-	g, dir := startRunnerGroup(t, `t:
-  on: src
-  start: manual
-  run: sleep 30
+	g, dir := startRunnerGroup(t, `targets:
+  t:
+    on: src
+    start: manual
+    run: sleep 30
 `)
 	r := g.runners[0]
 
@@ -1125,17 +1139,19 @@ func TestManualWaitsForControl(t *testing.T) {
 // A reload that switches a running target to manual leaves its process alone
 // and drops its watcher, so a change no longer restarts it.
 func TestRunTargetsReloadToManualKeepsTheProcess(t *testing.T) {
-	out, stop, dir := startRunner(t, `t:
-  on: src
-  run: echo tick >> count.txt; sleep 30
+	out, stop, dir := startRunner(t, `targets:
+  t:
+    on: src
+    run: echo tick >> count.txt; sleep 30
 `)
 	count := filepath.Join(dir, "count.txt")
 	waitForCount(t, count, 1, 3*time.Second)
 
-	manual := `t:
-  on: src
-  start: manual
-  run: echo tick >> count.txt; sleep 30
+	manual := `targets:
+  t:
+    on: src
+    start: manual
+    run: echo tick >> count.txt; sleep 30
 `
 	banner := saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), manual, "config reloaded", 5*time.Second)
 	if !strings.Contains(banner, "↺t(watch)") {
@@ -1157,18 +1173,20 @@ func TestRunTargetsReloadToManualKeepsTheProcess(t *testing.T) {
 
 // A reload from manual to auto starts a target that never ran.
 func TestRunTargetsReloadToAutoStarts(t *testing.T) {
-	out, stop, dir := startRunner(t, `t:
-  on: src
-  start: manual
-  run: echo tick >> count.txt
+	out, stop, dir := startRunner(t, `targets:
+  t:
+    on: src
+    start: manual
+    run: echo tick >> count.txt
 `)
 	count := filepath.Join(dir, "count.txt")
 	waitForStableCount(t, count, 0, 300*time.Millisecond)
 
-	auto := `t:
-  on: src
-  start: auto
-  run: echo tick >> count.txt
+	auto := `targets:
+  t:
+    on: src
+    start: auto
+    run: echo tick >> count.txt
 `
 	saveUntilLine(t, out, filepath.Join(dir, ConfigFileName), auto, "config reloaded", 5*time.Second)
 	waitForCount(t, count, 1, 3*time.Second)

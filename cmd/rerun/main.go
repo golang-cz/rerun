@@ -32,21 +32,19 @@ Lists are also read from stdin when it is not a TTY:
 
 Everything after -- is the command, passed through verbatim.
 
-rerun.yml targets: a top-level targets: block holds them (older files keep them at
-  the top level; run rerun -migrate to move them under targets:)
+rerun.yml targets: a top-level targets: block holds them
 
 rerun.yml groups: a top-level groups: block shares columns, and a target names one
-  with group: (older spelling: schemas and schema; use one spelling per file)
+  with group:
 
-rerun.yml target keys: run (older spelling: cmd), build, health, desc, on, except, url,
-  columns, group, open, selected, start, delay, cooldown, grace
+rerun.yml target keys: run, build, health, desc, on, except, open,
+  columns, group, selected, start, delay, cooldown, grace
 
 Flags:
   -delay <dur>      batch window before restarting a command (default 200ms)
   -cooldown <dur>   minimum time between restarts (default 0s)
   -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
   -no-gitignore     do not filter watched files through .gitignore
-  -migrate          rewrite retired keys (fold, muted, run, open, open-on-start); move top-level targets under targets:
   -h, -help         show this help
   -version          show version
 
@@ -85,8 +83,6 @@ func main() {
 	case args.Version:
 		fmt.Fprintf(os.Stdout, "rerun %s\n", version)
 		os.Exit(0)
-	case args.Migrate:
-		os.Exit(runMigrate())
 	}
 
 	if len(args.Cmd) == 0 {
@@ -94,40 +90,6 @@ func main() {
 	}
 
 	os.Exit(runAdHoc(args, os.Stdout, nil))
-}
-
-// runMigrate rewrites the nearest rerun.yml in place, so its targets sit under
-// the reserved `targets:` key and new reserved keys can never collide.
-func runMigrate() int {
-	path, err := findConfig(".")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)
-		return 1
-	}
-	status, err := migrateConfig(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "rerun: migrate: %v\n", err)
-		return 1
-	}
-	switch status {
-	case migrated:
-		fmt.Fprintf(os.Stdout, "rerun: %s: targets now live under targets:\n", path)
-	case migrateAlready:
-		fmt.Fprintf(os.Stdout, "rerun: %s already uses targets:\n", path)
-	case migrateRenamed:
-		fmt.Fprintf(os.Stdout, "rerun: %s: rewrote retired keys (url:, cmd:, hide:, collapsed:, auto-hide:, open-on-start:)\n", path)
-	default:
-		fmt.Fprintf(os.Stdout, "rerun: %s has no top-level targets to move\n", path)
-	}
-	added, err := migrateImports(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "rerun: migrate: %v\n", err)
-		return 1
-	}
-	for _, name := range added {
-		fmt.Fprintf(os.Stdout, "rerun: %s: added %s to imports:\n", path, name)
-	}
-	return 0
 }
 
 func runConfigMode(args Args) int {
@@ -199,7 +161,7 @@ func startTargets(targets []Target, cfg *Config) int {
 	if isTerminal(os.Stdout) && isTerminal(os.Stdin) {
 		return runTUI(targets, cfg, nil)
 	}
-	for _, n := range dedupNotices(cfg) {
+	for _, n := range cfg.Notices {
 		fmt.Fprintf(os.Stderr, "rerun: %s\n", n)
 	}
 	for _, m := range cfg.Missing {

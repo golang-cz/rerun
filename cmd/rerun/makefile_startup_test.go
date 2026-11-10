@@ -16,7 +16,7 @@ import (
 func makeDir(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeFile(t, filepath.Join(dir, ".git", "HEAD"), "targets:\n  ref: refs/heads/main\n")
 	for rel, content := range files {
 		writeFile(t, filepath.Join(dir, rel), content)
 	}
@@ -43,7 +43,7 @@ func TestLoadConfigMakefileOnlyStartsFromTheMakefile(t *testing.T) {
 func TestLoadConfigWithRerunYMLIsNotMakeOnly(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
-		ConfigFileName: "web:\n  run: sleep 30\n",
+		ConfigFileName: "targets:\n  web:\n    run: sleep 30\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -113,7 +113,7 @@ func newMakeTUI(t *testing.T) *tuiModel {
 	t.Helper()
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "test:\n\ttrue\n\nlint:\n\ttrue\n",
-		ConfigFileName: "imports:\n  - path: Makefile\n\nweb:\n  run: sleep 30\n",
+		ConfigFileName: "imports:\n  - path: Makefile\n\ntargets:\n  web:\n    run: sleep 30\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -211,7 +211,7 @@ func TestConfigWatchPicksUpARerunYMLCreatedAfterMakeOnlyStart(t *testing.T) {
 		t.Fatal("web loaded before rerun.yml existed")
 	}
 
-	create := func() { writeFile(t, filepath.Join(dir, ConfigFileName), "web:\n  run: sleep 30\n") }
+	create := func() { writeFile(t, filepath.Join(dir, ConfigFileName), "targets:\n  web:\n    run: sleep 30\n") }
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, create)
 
 	if _, ok := findSnapshot(group, "web"); !ok {
@@ -239,7 +239,7 @@ func TestRunConfigModeMakeOnlyWithoutTTYExitsWithHint(t *testing.T) {
 func TestUnlistedMakefileDoesNotShadowRootMakeTarget(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n\ntest:\n\tgo test\n",
-		ConfigFileName: "make/build:\n  run: echo root\n",
+		ConfigFileName: "targets:\n  make/build:\n    run: echo root\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestUnlistedMakefileDoesNotShadowRootMakeTarget(t *testing.T) {
 func TestRootGroupMakeSkipsImplicitMakefileSilently(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
-		ConfigFileName: "groups:\n  make:\n    columns: [\"x {.x}\"]\n\nweb:\n  run: sleep 30\n",
+		ConfigFileName: "groups:\n  make:\n    columns: [\"x {.x}\"]\n\ntargets:\n  web:\n    run: sleep 30\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -277,7 +277,7 @@ func TestImportClaimingMakeNoticesTheUnlistedMakefile(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
 		"tools.mk":     "lint:\n\tgo vet\n",
-		ConfigFileName: "web:\n  run: sleep 30\n\nimports:\n  - path: tools.mk\n    group: make\n",
+		ConfigFileName: "targets:\n  web:\n    run: sleep 30\n\nimports:\n  - path: tools.mk\n    group: make\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestImportClaimingMakeNoticesTheUnlistedMakefile(t *testing.T) {
 	if _, ok := cfg.Find("make/lint"); !ok {
 		t.Errorf("targets = %v, want make/lint from the explicit import", targetNames(cfg))
 	}
-	if got := withoutMigrateNotice(cfg.Notices); len(got) != 1 || !strings.Contains(got[0], "Makefile not imported") {
+	if got := cfg.Notices; len(got) != 1 || !strings.Contains(got[0], "Makefile not imported") {
 		t.Errorf("notices = %v, want only the not-imported notice", got)
 	}
 }
@@ -303,7 +303,7 @@ func containsNotice(cfg *Config, sub string) bool {
 func TestConfigWatchPicksUpAMakefileOnceRerunYMLListsIt(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
-		ConfigFileName: "web:\n  run: sleep 30\n",
+		ConfigFileName: "targets:\n  web:\n    run: sleep 30\n",
 	})
 	group, sink := startConfigWatch(t, filepath.Join(dir, ConfigFileName))
 	if _, ok := findSnapshot(group, "make/build"); ok {
@@ -311,7 +311,7 @@ func TestConfigWatchPicksUpAMakefileOnceRerunYMLListsIt(t *testing.T) {
 	}
 
 	list := func() {
-		writeFile(t, filepath.Join(dir, ConfigFileName), "imports:\n  - path: Makefile\n\nweb:\n  run: sleep 30\n")
+		writeFile(t, filepath.Join(dir, ConfigFileName), "imports:\n  - path: Makefile\n\ntargets:\n  web:\n    run: sleep 30\n")
 	}
 	waitForKindPoking(t, sink, evReconcile, 10*time.Second, list)
 	if _, ok := findSnapshot(group, "make/build"); !ok {
@@ -360,7 +360,7 @@ func TestSoloNonMakeRowKeepsItsOwnEmptyHint(t *testing.T) {
 func TestEmptyPaneHintDropsUnfoldWhenMakeIsUnfolded(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "test:\n\ttrue\n",
-		ConfigFileName: "groups:\n  make:\n    fold: false\n\nimports:\n  - path: Makefile\n\nweb:\n  run: sleep 30\n",
+		ConfigFileName: "groups:\n  make:\n    fold: false\n\nimports:\n  - path: Makefile\n\ntargets:\n  web:\n    run: sleep 30\n",
 	})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -380,7 +380,7 @@ func TestUnreadableListedMakefileFailsTheLoad(t *testing.T) {
 	}
 	dir := makeDir(t, map[string]string{
 		"Makefile":     "build:\n\tgo build\n",
-		ConfigFileName: "imports:\n  - path: Makefile\n\nweb:\n  run: sleep 30\n",
+		ConfigFileName: "imports:\n  - path: Makefile\n\ntargets:\n  web:\n    run: sleep 30\n",
 	})
 	if err := os.Chmod(filepath.Join(dir, "Makefile"), 0); err != nil {
 		t.Fatal(err)

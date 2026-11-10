@@ -10,10 +10,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-const twoTargets = `web:
-  run: sleep 1
-api:
-  run: sleep 1
+const twoTargets = `targets:
+  web:
+    run: sleep 1
+  api:
+    run: sleep 1
 `
 
 // cursorTo puts the pane cursor on the expansion row of the field with key.

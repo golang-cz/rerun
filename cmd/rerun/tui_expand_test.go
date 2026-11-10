@@ -430,16 +430,17 @@ func TestErrorNoticeOutranksUnsavedFooter(t *testing.T) {
 	}
 }
 
-const schemaConfig = `schemas:
+const schemaConfig = `groups:
   backend:
     columns: ['level {.level}']
 
-api:
-  schema: backend
-  run: sleep 1
+targets:
+  api:
+    group: backend
+    run: sleep 1
 
-web:
-  run: sleep 1
+  web:
+    run: sleep 1
 `
 
 // ctrl+s writes the selected schema's columns, clears the dirty flag, and keeps the chips

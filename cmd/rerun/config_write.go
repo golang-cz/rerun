@@ -11,8 +11,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// setColumns writes cols to `groups.<schema>.columns` (or `schemas`, whichever
-// the file uses) when schema is set, else to `<target>.columns`. Only the edited key's lines change; the rest of the file
+// setColumns writes cols to `groups.<schema>.columns` when schema is set, else
+// to `<target>.columns`. Only the edited key's lines change; the rest of the file
 // keeps its bytes. A symlink is followed, so the file it names is the one written.
 func setColumns(path, schema, target string, cols []string) error {
 	for _, raw := range cols {
@@ -46,7 +46,7 @@ func setColumns(path, schema, target string, cols []string) error {
 
 	ed := newLineEdit(string(data))
 	if schema != "" {
-		err = ed.setSchemaColumns(root, groupBlockOf(root), schema, cols)
+		err = ed.setSchemaColumns(root, schema, cols)
 	} else {
 		err = ed.setTargetColumns(targetsMapping(root), target, cols)
 	}
@@ -113,13 +113,12 @@ func (ed *lineEdit) String() string {
 	return b.String()
 }
 
-// targetsMapping is the mapping that holds the target entries: the `targets:`
-// block of the new form, else the top-level mapping of a legacy file.
+// targetsMapping is the `targets:` mapping; a file without one has no targets to edit.
 func targetsMapping(root *yaml.Node) *yaml.Node {
 	if block := mappingValue(root, targetsKey); block != nil && block.Kind == yaml.MappingNode {
 		return block
 	}
-	return root
+	return &yaml.Node{Kind: yaml.MappingNode}
 }
 
 // setTargetColumns writes the columns of the target named target.
@@ -131,31 +130,20 @@ func (ed *lineEdit) setTargetColumns(root *yaml.Node, target string, cols []stri
 	return ed.setColumnsIn(root, kn, vn, target, cols)
 }
 
-// groupBlockOf is the top-level spelling the file already uses. A file with
-// neither gets the primary `groups`.
-func groupBlockOf(root *yaml.Node) groupBlock {
-	if k, _ := entry(root, groupsBlock.block); k == nil {
-		if k, _ := entry(root, schemasBlock.block); k != nil {
-			return schemasBlock
-		}
-	}
-	return groupsBlock
-}
-
-// setSchemaColumns writes the columns of the group named schema under the block
-// kw, creating the block or the group entry when either is missing.
-func (ed *lineEdit) setSchemaColumns(root *yaml.Node, kw groupBlock, schema string, cols []string) error {
-	sk, sv := entry(root, kw.block)
+// setSchemaColumns writes the columns of the group named schema under `groups:`,
+// creating the block or the group entry when either is missing.
+func (ed *lineEdit) setSchemaColumns(root *yaml.Node, schema string, cols []string) error {
+	sk, sv := entry(root, groupsKey)
 	if sk == nil {
 		return ed.appendTo(root, 0, []string{
-			kw.block + ":",
+			groupsKey + ":",
 			pad(ed.unit) + yamlKey(schema) + ":",
 			pad(2*ed.unit) + columnsLine(cols),
 		})
 	}
 	switch {
 	case sv.Kind == yaml.AliasNode:
-		return fmt.Errorf("%s is an alias, edit it by hand", kw.block)
+		return fmt.Errorf("%s is an alias, edit it by hand", groupsKey)
 	case isEmpty(sv):
 		if err := ed.openFlowEmpty(root, sk, sv); err != nil {
 			return err
@@ -167,7 +155,7 @@ func (ed *lineEdit) setSchemaColumns(root *yaml.Node, kw groupBlock, schema stri
 		})
 		return nil
 	case sv.Kind != yaml.MappingNode:
-		return fmt.Errorf("%s: expected a mapping of %s names", kw.block, kw.field)
+		return fmt.Errorf("%s: expected a mapping of group names", groupsKey)
 	}
 	kn, vn := entry(sv, schema)
 	if kn == nil {

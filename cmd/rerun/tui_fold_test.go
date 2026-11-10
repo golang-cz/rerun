@@ -18,8 +18,8 @@ func toggleKey(t *testing.T, m *tuiModel, key string) {
 
 func TestRootGroupNamedLikeImportListsInItsSection(t *testing.T) {
 	f := newImportFixture(t,
-		"groups:\n  bpn:\n    columns: [\"msg {.msg}\"]\nimports:\n  - path: ../bpn/rerun.yml\nlocal:\n  group: bpn\n  run: echo hi\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+		"groups:\n  bpn:\n    columns: [\"msg {.msg}\"]\nimports:\n  - path: ../bpn/rerun.yml\ntargets:\n  local:\n    group: bpn\n    run: echo hi\n",
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestArrowClickOnSubHeaderFoldsItsGroup(t *testing.T) {
 
 func TestFoldedImportSectionStartsFolded(t *testing.T) {
 	f := newImportFixture(t, "imports:\n  - path: ../bpn/rerun.yml\n    fold: true\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
@@ -175,8 +175,8 @@ func TestFoldedImportSectionStartsFolded(t *testing.T) {
 
 func TestRootFoldGroupNamedLikeImportFoldsTheSection(t *testing.T) {
 	f := newImportFixture(t,
-		"groups:\n  bpn:\n    fold: true\nimports:\n  - path: ../bpn/rerun.yml\nlocal:\n  group: bpn\n  run: echo hi\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+		"groups:\n  bpn:\n    fold: true\nimports:\n  - path: ../bpn/rerun.yml\ntargets:\n  local:\n    group: bpn\n    run: echo hi\n",
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func TestRootFoldGroupNamedLikeImportFoldsTheSection(t *testing.T) {
 func TestImportedGroupFoldFoldsOnItsSubKey(t *testing.T) {
 	f := newImportFixture(t,
 		"imports:\n  - path: ../bpn/rerun.yml\n",
-		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    fold: true\ntools-api:\n  group: tools\n  run: echo api\nweb:\n  run: echo web\n"})
+		map[string]string{"bpn/rerun.yml": "groups:\n  tools:\n    fold: true\ntargets:\n  tools-api:\n    group: tools\n    run: echo api\n  web:\n    run: echo web\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestReloadFoldingTheCursorRowMovesCursorToHeader(t *testing.T) {
 func TestImportFoldReloadKeepsUserExpansion(t *testing.T) {
 	f := newImportFixture(t,
 		"imports:\n  - path: ../bpn/rerun.yml\n    fold: true\n",
-		map[string]string{"bpn/rerun.yml": "api:\n  run: echo api\n"})
+		map[string]string{"bpn/rerun.yml": "targets:\n  api:\n    run: echo api\n"})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatal(err)

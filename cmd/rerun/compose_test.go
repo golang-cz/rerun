@@ -749,7 +749,7 @@ func TestComposeImportRejectsMisuse(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newImportFixture(t, tt.root, map[string]string{
 				"devbox/docker-compose.yml": composeYML,
-				"bpn/rerun.yml":             "api:\n  run: echo\n",
+				"bpn/rerun.yml":             "targets:\n  api:\n    run: echo\n",
 			})
 			_, err := ParseConfig(f.root)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
@@ -768,7 +768,7 @@ func TestComposeImportWithoutDocker(t *testing.T) {
 		t.Fatalf("required import err = %v, want docker not found", err)
 	}
 
-	f = newImportFixture(t, "api:\n  run: echo\n\nimports:\n  - path: ../devbox/docker-compose.yml\n    optional: true\n", map[string]string{"devbox/docker-compose.yml": composeYML})
+	f = newImportFixture(t, "targets:\n  api:\n    run: echo\n\nimports:\n  - path: ../devbox/docker-compose.yml\n    optional: true\n", map[string]string{"devbox/docker-compose.yml": composeYML})
 	cfg, err := ParseConfig(f.root)
 	if err != nil {
 		t.Fatalf("optional import err = %v, want a skip", err)
@@ -793,7 +793,7 @@ func TestComposeImportWithoutProfilesKeepsGatedServices(t *testing.T) {
 	if got := targetNames(cfg); fmt.Sprint(got) != "[devbox/adminer devbox/postgres]" {
 		t.Fatalf("targets = %v, want both services without a profiles filter", got)
 	}
-	if got := withoutMigrateNotice(cfg.Notices); len(got) != 0 {
+	if got := cfg.Notices; len(got) != 0 {
 		t.Errorf("notices = %v, want none for a non-empty import", got)
 	}
 }
@@ -803,7 +803,7 @@ func TestComposeImportWithNoServicesSaysSo(t *testing.T) {
 	dir := fakeDocker(t)
 	writeFake(t, dir, "config.json", `{"name":"devbox","services":{}}`)
 	composeYML := "services: {}\n"
-	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\napi:\n  run: echo hi\n",
+	f := newImportFixture(t, "imports:\n  - path: ../devbox/docker-compose.yml\ntargets:\n  api:\n    run: echo hi\n",
 		map[string]string{"devbox/docker-compose.yml": composeYML})
 
 	cfg, err := ParseConfig(f.root)
