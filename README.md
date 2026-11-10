@@ -198,6 +198,8 @@ Each top-level key is one target. Fields:
 | `cooldown` | minimum time between restarts (default 0s) |
 | `grace` | time between SIGTERM and SIGKILL (default 5s) |
 
+Plain commands without shell syntax run directly; anything else runs via `/bin/sh -c`.
+
 A column can also hold literal text and several `{expr}` placeholders. Each
 placeholder evaluates on its own, a missing value renders as nothing, and runs of
 spaces collapse. With `columns: ["msg {.message} {.error}"]`, a line with both

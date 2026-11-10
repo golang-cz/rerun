@@ -10,12 +10,38 @@ import (
 	"time"
 )
 
+// shellMeta holds the characters a shell expands, splits, or quotes.
+const shellMeta = "\"'`\\$&|;<>(){}[]*?!#~"
+
+// shellBuiltins are shell keywords and builtins with no binary, so LookPath cannot reject them.
+var shellBuiltins = map[string]bool{
+	"cd": true, "exec": true, "export": true, "source": true, ".": true, "eval": true,
+	"set": true, "unset": true, "alias": true, "unalias": true, "exit": true, "return": true,
+	"read": true, "trap": true, "ulimit": true, "umask": true, "wait": true, "shift": true,
+	"local": true, "readonly": true, "type": true, "command": true, "builtin": true,
+	"if": true, "then": true, "else": true, "elif": true, "fi": true, "for": true,
+	"while": true, "until": true, "do": true, "done": true, "case": true, "esac": true,
+	"function": true, "time": true, "{": true, "}": true, "!": true, "select": true,
+	"coproc": true, "let": true, "declare": true, "typeset": true, "hash": true,
+	"jobs": true, "fg": true, "bg": true, "pushd": true, "popd": true, "dirs": true,
+	"getopts": true, "times": true, "fc": true, "history": true, "help": true,
+	"bind": true, "enable": true, "logout": true, "suspend": true, "disown": true,
+	"caller": true, "complete": true, "compgen": true, "shopt": true,
+}
+
 func newPlatformCmd(cmdline []string, grace time.Duration, opts ...Option) Command {
 	return newCommand(cmdline, grace, opts...)
 }
 
 func newExecCmd(cmdline []string) *exec.Cmd {
-	cmd := exec.Command("/bin/sh", "-c", ShellScript(cmdline))
+	script := ShellScript(cmdline)
+	var cmd *exec.Cmd
+	if argv, ok := plainArgv(script); ok {
+		// exec.Command resolves argv[0] itself and keeps the typed word in Args.
+		cmd = exec.Command(argv[0], argv[1:]...)
+	} else {
+		cmd = exec.Command("/bin/sh", "-c", script)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -25,9 +51,25 @@ func newExecCmd(cmdline []string) *exec.Cmd {
 	return cmd
 }
 
+// plainArgv returns the words of a script that needs no shell, or false to keep /bin/sh.
+func plainArgv(script string) ([]string, bool) {
+	if strings.ContainsAny(script, shellMeta+"\n\r") {
+		return nil, false
+	}
+	words := strings.Fields(script)
+	if len(words) == 0 || strings.Contains(words[0], "=") || shellBuiltins[words[0]] {
+		return nil, false
+	}
+	// A missing or non-executable program stays on sh so its error text is unchanged.
+	if _, err := exec.LookPath(words[0]); err != nil {
+		return nil, false
+	}
+	return words, true
+}
+
 // quoteWord single-quotes a word the shell would otherwise split or expand.
 func quoteWord(word string) string {
-	if word != "" && !strings.ContainsAny(word, " \t\n\r\"'`\\$&|;<>(){}[]*?!#~") {
+	if word != "" && !strings.ContainsAny(word, " \t\n\r"+shellMeta) {
 		return word
 	}
 	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"

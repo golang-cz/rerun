@@ -247,6 +247,8 @@ targets:
     start: onchange               # auto (default), onchange, or manual
 ```
 
+Plain commands without shell syntax run directly; anything else runs via `/bin/sh -c`.
+
 Defaults: `on: ./`, `delay: 200ms`, `cooldown: 0s`, `grace: 5s`,
 `start: auto`, `keep: 10000`.
 Naming a target on the command line starts only the named ones; the others stay off (still listed, still startable with `space`).
