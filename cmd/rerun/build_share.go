@@ -71,7 +71,8 @@ type emission struct {
 }
 
 // start joins or begins the shared build for r's key. Runner goroutine only.
-func (s *buildShare) start(r *targetRunner, files map[string]struct{}) {
+// restart replaces a running process; otherwise a fresh run takes r as a member.
+func (s *buildShare) start(r *targetRunner, files map[string]struct{}, restart bool) {
 	job := r.build
 	if job == nil {
 		job = &buildJob{name: r.target.Name, sink: r.sink, done: make(chan buildResult, 1)}
@@ -90,7 +91,7 @@ func (s *buildShare) start(r *targetRunner, files map[string]struct{}) {
 		s.mu.Lock()
 		if s.open[key] != cur {
 			s.mu.Unlock()
-			s.start(r, files)
+			s.start(r, files, restart)
 			return
 		}
 	}
@@ -108,7 +109,7 @@ func (s *buildShare) start(r *targetRunner, files map[string]struct{}) {
 	case cur.replacing:
 		// The run that is waiting to relaunch picks this trigger up.
 		cur.adoptLocked(job, union)
-	case cur.cancelled || files == nil || late || cur.ended.Load() != 0:
+	case cur.cancelled || restart || late || cur.ended.Load() != 0:
 		// The process may have read the files already, or is going away: rerun once with everyone.
 		cur.cancelled, cur.replacing = true, true
 		s.mu.Unlock()

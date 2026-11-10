@@ -786,7 +786,7 @@ func (r *targetRunner) restart(ctx context.Context) {
 		return
 	}
 	if r.target.Build != "" {
-		r.startBuild(nil)
+		r.restartBuild()
 		return
 	}
 	r.cancelBuild()

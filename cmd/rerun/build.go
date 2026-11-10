@@ -108,7 +108,12 @@ func (r *targetRunner) buildResult() <-chan buildResult {
 }
 
 func (r *targetRunner) startBuild(files map[string]struct{}) {
-	r.builds.start(r, files)
+	r.builds.start(r, files, false)
+}
+
+// restartBuild replaces the shared process, so the next run starts from scratch.
+func (r *targetRunner) restartBuild() {
+	r.builds.start(r, nil, true)
 }
 
 func describeBuildErr(code int, err error) error {

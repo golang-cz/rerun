@@ -112,6 +112,30 @@ func TestSharedBuildRunsOnceForEveryTriggeredTarget(t *testing.T) {
 	}
 }
 
+func TestSharedBuildStartupJoinsFreshRun(t *testing.T) {
+	share := newBuildShare()
+	dir := t.TempDir()
+	script, counter, gate := countedBuild(t, 0)
+	a, aLog, ctx := sharedRunner(t, share, "a", dir, script)
+	b, bLog, _ := sharedRunner(t, share, "b", dir, script)
+
+	a.startBuild(nil)
+	waitForRuns(t, counter, 1)
+	b.startBuild(nil)
+	releaseGate(t, gate)
+	a.finishBuild(ctx, nextBuild(t, a))
+	b.finishBuild(ctx, nextBuild(t, b))
+
+	if n := runCount(counter); n != 1 {
+		t.Fatalf("build ran %d times, want 1", n)
+	}
+	for name, log := range map[string]*eventLog{"a": aLog, "b": bLog} {
+		if got := len(log.kind(evBuildStarted)); got != 1 {
+			t.Errorf("%s: evBuildStarted = %d, want 1", name, got)
+		}
+	}
+}
+
 func TestSharedBuildRestartsOnlyTheTriggeredTargets(t *testing.T) {
 	share := newBuildShare()
 	dir := t.TempDir()
