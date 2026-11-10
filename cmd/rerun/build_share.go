@@ -206,9 +206,10 @@ func (s *buildShare) launchLocked(key buildKey, grace time.Duration, members []*
 	s.open[key] = run
 
 	sorted := sortedFiles(run.files)
+	names := memberNames(run.members)
 	var out []emission
 	for _, m := range run.members {
-		out = append(out, emission{m.sink, event{kind: evBuildStarted, target: m.name, owner: run.owner, files: sorted, at: run.started}})
+		out = append(out, emission{m.sink, event{kind: evBuildStarted, target: m.name, owner: run.owner, cmd: oneLine(key.cmd), names: names, files: sorted, at: run.started}})
 	}
 
 	devNull, err := os.Open(os.DevNull)
@@ -265,10 +266,12 @@ func (s *buildShare) finish(run *sharedBuild, res buildResult) {
 		delete(s.open, run.key)
 	}
 	res.files = copySet(run.files)
+	res.owner, res.cmd = run.owner, oneLine(run.key.cmd)
 	run.buf.mu.Lock()
 	members := run.members
 	run.members = nil
 	run.buf.mu.Unlock()
+	res.names = memberNames(members)
 	for _, m := range members {
 		deliver(m.done, res)
 	}
@@ -280,7 +283,7 @@ func (s *buildShare) failLocked(run *sharedBuild, err error) {
 	if s.open[run.key] == run {
 		delete(s.open, run.key)
 	}
-	res := buildResult{err: err, files: copySet(run.files), started: run.started, ended: time.Now()}
+	res := buildResult{err: err, files: copySet(run.files), started: run.started, ended: time.Now(), owner: run.owner, cmd: oneLine(run.key.cmd), names: memberNames(run.members)}
 	for _, m := range run.members {
 		deliver(m.done, res)
 	}
@@ -355,6 +358,14 @@ func drainResult(ch chan buildResult) {
 	case <-ch:
 	default:
 	}
+}
+
+func memberNames(members []*buildJob) []string {
+	names := make([]string, 0, len(members))
+	for _, m := range members {
+		names = append(names, m.name)
+	}
+	return names
 }
 
 func copySet(set map[string]struct{}) map[string]struct{} {

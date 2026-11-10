@@ -28,6 +28,10 @@ type buildResult struct {
 	files   map[string]struct{}
 	started time.Time
 	ended   time.Time
+	// owner, cmd and names describe a shared run: its owner, its command and the targets it names.
+	owner string
+	cmd   string
+	names []string
 }
 
 type tailBuffer struct {
@@ -149,10 +153,10 @@ func (r *targetRunner) finishBuild(ctx context.Context, res buildResult) {
 	r.lastBuildStart, r.lastBuildEnd = res.started, res.ended
 	files := sortedFiles(res.files)
 	if res.err != nil {
-		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, code: res.code, lines: res.lines, err: res.err})
+		r.sink.emit(event{kind: evBuildFailed, target: r.target.Name, files: files, dur: res.dur, code: res.code, lines: res.lines, err: res.err, owner: res.owner, cmd: res.cmd, names: res.names})
 		return
 	}
-	r.sink.emit(event{kind: evBuildOK, target: r.target.Name, dur: res.dur})
+	r.sink.emit(event{kind: evBuildOK, target: r.target.Name, dur: res.dur, owner: res.owner, cmd: res.cmd, names: res.names})
 	if r.userStopped() {
 		return
 	}

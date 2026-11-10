@@ -77,8 +77,11 @@ type event struct {
 	lines []string
 	// buildAt is the start of the build an evBuildOutput line came from.
 	buildAt time.Time
-	// owner is the target that launched the shared build behind evBuildStarted; with at, it names the run.
+	// owner is the member whose events a shared build's line is logged from; with at, it names the run.
 	owner string
+	// cmd and names are a shared build's command and the targets it names, for its one line.
+	cmd   string
+	names []string
 	// health is the new state behind evHealth.
 	health healthState
 	// runAt is the start time of the run an evHealth belongs to, matching that run's evStarted.at.
@@ -175,14 +178,33 @@ func (s *plainSink) render(ev event) string {
 		return fmt.Sprintf("rerun: loop suspected — %s paused after %d× re-triggered by %s; add it to except, or change another file to resume\n", ev.target, loopCycles, ev.line)
 
 	case evBuildStarted:
+		if joined(ev) {
+			return ""
+		}
+		if len(ev.names) > 1 {
+			return fmt.Sprintf("⚙ %s · %s\n", ev.cmd, strings.Join(ev.names, ", "))
+		}
 		return fmt.Sprintf("[%s] building (%s)\n", ev.target, fileCount(len(ev.files)))
 
 	case evBuildOK:
+		if joined(ev) {
+			return ""
+		}
+		if len(ev.names) > 1 {
+			return fmt.Sprintf("⚙ %s built %s · %s\n", ev.cmd, fmtDur(ev.dur), strings.Join(ev.names, ", "))
+		}
 		return fmt.Sprintf("[%s] build ok (%s)\n", ev.target, fmtDur(ev.dur))
 
 	case evBuildFailed:
+		if joined(ev) {
+			return ""
+		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, fmtDur(ev.dur), ev.err)
+		if len(ev.names) > 1 {
+			fmt.Fprintf(&b, "✗ %s build failed after %s: %v · %s\n", ev.cmd, fmtDur(ev.dur), ev.err, strings.Join(ev.names, ", "))
+		} else {
+			fmt.Fprintf(&b, "[%s] build failed after %s: %v\n", ev.target, fmtDur(ev.dur), ev.err)
+		}
 		for _, l := range ev.lines {
 			fmt.Fprintf(&b, "[%s] build: %s\n", ev.target, l)
 		}
@@ -222,6 +244,11 @@ func fileCount(n int) string {
 }
 
 // label is the target's identity in rerun's own messages.
+// joined reports whether ev is a joined target's copy of its owner's shared build, which the owner's line already logs.
+func joined(ev event) bool {
+	return ev.owner != "" && ev.owner != ev.target
+}
+
 func (s *plainSink) label(target string) string {
 	if target == "" {
 		return ""
