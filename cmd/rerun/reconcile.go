@@ -249,9 +249,14 @@ func (w *configWatch) syncAfter(root string, cfg *Config) (added bool) {
 		return w.sync(cfg.Files, cfg.Missing)
 	}
 	files := append(append([]string{root}, w.known...), importedPaths(root)...)
-	// The implicit Makefile is not a listed import, so a broken load still has to watch it.
-	if mk := implicitMakefile(filepath.Dir(root)); mk != "" {
+	// Implicit files are not listed imports, so a broken load still has to watch them.
+	dir := filepath.Dir(root)
+	if mk := implicitMakefile(dir); mk != "" {
 		files = append(files, mk)
+	}
+	// A compose file only matters while no rerun.yml takes over the dir.
+	if cf := implicitCompose(dir); cf != "" && !fileExists(root) {
+		files = append(files, cf)
 	}
 	return w.sync(slices.Compact(slices.Sorted(slices.Values(files))), w.absent)
 }
@@ -285,6 +290,10 @@ func (w *configWatch) interesting(name string) bool {
 		return true
 	}
 	if filepath.Dir(name) == w.rootDir && slices.Contains(makeNames, filepath.Base(name)) {
+		return true
+	}
+	// A compose file only changes the config while no rerun.yml takes over the dir.
+	if filepath.Dir(name) == w.rootDir && slices.Contains(composeNames, filepath.Base(name)) && !fileExists(filepath.Join(w.rootDir, ConfigFileName)) {
 		return true
 	}
 	for _, m := range w.absent {

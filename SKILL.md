@@ -212,7 +212,7 @@ imports:
 - Services start manually by default; an import's `start: auto` starts them at session start.
 - State comes from `docker events` and `docker compose ps`. Logs come from `docker logs -f`.
 - Quitting rerun leaves the containers running.
-- Compose files load only when listed under `imports:`. rerun never auto-imports one.
+- Compose files load only when listed under `imports:`, or when a dir has no `rerun.yml`. rerun never auto-imports one beside a `rerun.yml`.
 - Needs the `docker` CLI on PATH. `groups:` is an error on a compose import.
 
 ## Building rerun.yml

@@ -47,7 +47,7 @@ type importSpec struct {
 	servicesRef *yaml.Node
 	profilesRef *yaml.Node
 	targetsRef  *yaml.Node
-	// implicit marks the root Makefile that is imported without being listed.
+	// implicit marks the Makefile or compose file imported without being listed.
 	implicit bool
 }
 
@@ -66,7 +66,7 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			specs = append(specs, spec)
 		}
 	}
-	// Beside a rerun.yml only its imports: list load; a bare Makefile dir loads its Makefile.
+	// Beside a rerun.yml only its imports: list load; a bare dir loads its Makefile and compose file.
 	mk := implicitMakefile(filepath.Dir(rootFile))
 	rootExists := fileExists(rootFile)
 	// A rerun.yml that defines the make group itself never auto-imported its Makefile.
@@ -75,6 +75,10 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 	// Last, so an explicit import of the same file is seen first and wins the dedupe.
 	if mk != "" && !rootExists {
 		specs = append(specs, importSpec{path: filepath.Base(mk), group: makeKind, optional: true, implicit: true})
+	}
+	// No group: the compose project name is the default, as for an explicit compose import.
+	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && !rootExists {
+		specs = append(specs, importSpec{path: filepath.Base(cf), optional: true, implicit: true})
 	}
 
 	rootCanon := canonicalPath(rootFile)
@@ -128,7 +132,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 		data, err := os.ReadFile(abs)
 		if errors.Is(err, fs.ErrNotExist) {
 			if err := claim(spec, spec.group); err != nil {
-				return err
+				if !spec.implicit {
+					return err
+				}
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: group %q is already used", filepath.Base(abs), spec.group))
+				continue
 			}
 			if spec.optional {
 				cfg.Missing = append(cfg.Missing, missingImport{Group: spec.group, Path: abs})
@@ -178,17 +186,30 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				return src.at(spec.targetsRef, nodeSpan(spec.targetsRef), fmt.Sprintf("import %q: targets applies to Makefile imports; a rerun or compose file filters with groups: or services:", spec.path))
 			}
 			isrc, iroot, err := parseConfigBytes(abs, data)
+			if err != nil && spec.implicit {
+				cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: %v", filepath.Base(abs), err))
+				continue
+			}
 			if err != nil {
 				return err
 			}
 
-			if mappingValue(iroot, "services") != nil {
+			// An implicit compose file is compose by its name, so its contents do not decide.
+			isCompose := mappingValue(iroot, "services") != nil
+			if spec.implicit {
+				isCompose = slices.Contains(composeNames, filepath.Base(abs))
+			}
+			if isCompose {
 				if spec.groupsRef != nil {
 					return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
 				}
 				project, services, profilesOf, err := resolveComposeImport(spec, abs)
 				if errors.Is(err, errNoDocker) && spec.optional {
 					cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
+					continue
+				}
+				if err != nil && spec.implicit {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: %v", filepath.Base(abs), err))
 					continue
 				}
 				if err != nil {
@@ -198,7 +219,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 					spec.group = project
 				}
 				if err := claim(spec, spec.group); err != nil {
-					return err
+					if !spec.implicit {
+						return err
+					}
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: group %q is already used", filepath.Base(abs), spec.group))
+					continue
 				}
 				cfg.Files = append(cfg.Files, abs)
 				if len(services) == 0 {
@@ -296,6 +321,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			}
 			t.AutoFold = autoFoldOf(spec, rootSchemas[spec.group], t.Kind == makeKind || t.AutoFold)
 			cfg.Targets = append(cfg.Targets, t)
+		}
+	}
+	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && rootExists {
+		if _, listed := seenFiles[canonicalPath(cf)]; !listed {
+			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s not imported · add it under imports:", filepath.Base(cf)))
 		}
 	}
 	if mk != "" && rootExists && !ownsMake {

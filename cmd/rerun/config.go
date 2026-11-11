@@ -163,7 +163,7 @@ type Config struct {
 	Files []string
 	// Missing lists the optional imports whose file is absent.
 	Missing []missingImport
-	// MakeOnly is set when no rerun.yml exists and the Makefile in its dir is the whole config.
+	// MakeOnly is set when no rerun.yml exists and the implicit Makefile or compose file is the whole config.
 	MakeOnly bool
 	// Queries are the top-level saved queries, shared by every pane scope.
 	Queries map[string]string
@@ -198,8 +198,8 @@ func LoadConfig(startDir string) (*Config, error) {
 		if absErr != nil {
 			return nil, absErr
 		}
-		if mk := implicitMakefile(start); mk != "" {
-			return makeOnlyConfig(filepath.Join(start, ConfigFileName), mk)
+		if found := implicitFiles(start); len(found) > 0 {
+			return makeOnlyConfig(filepath.Join(start, ConfigFileName), found)
 		}
 		return nil, &configNotFoundError{dir: startDir}
 	}
@@ -349,9 +349,9 @@ func ParseConfig(path string) (*Config, error) {
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		// A reload after rerun.yml is deleted keeps the Makefile running, not an error.
-		if mk := implicitMakefile(filepath.Dir(abs)); mk != "" {
-			return makeOnlyConfig(abs, mk)
+		// A reload after rerun.yml is deleted keeps the implicit files running, not an error.
+		if found := implicitFiles(filepath.Dir(abs)); len(found) > 0 {
+			return makeOnlyConfig(abs, found)
 		}
 	}
 	if err != nil {
@@ -380,14 +380,29 @@ func ParseConfig(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// makeOnlyConfig is the config for a dir with a Makefile and no rerun.yml. path is where the rerun.yml would be, so a later one reloads.
-func makeOnlyConfig(path, mk string) (*Config, error) {
+// implicitFiles are the Makefile and compose file a dir with no rerun.yml loads, if any.
+func implicitFiles(dir string) []string {
+	var found []string
+	for _, f := range []string{implicitMakefile(dir), implicitCompose(dir)} {
+		if f != "" {
+			found = append(found, f)
+		}
+	}
+	return found
+}
+
+// makeOnlyConfig loads a dir with no rerun.yml; path is where one would be, so a later one reloads.
+func makeOnlyConfig(path string, found []string) (*Config, error) {
 	cfg := &Config{Path: path, Files: []string{path}, MakeOnly: true}
 	if err := cfg.parseImports(&configSource{path: path}, nil, path, nil); err != nil {
 		return nil, err
 	}
 	if len(cfg.Targets) == 0 {
-		return nil, fmt.Errorf("%s: no targets defined; add a rule or write rerun.yml", mk)
+		// A skipped implicit file explains an empty config better than "no targets".
+		if len(cfg.Notices) > 0 {
+			return nil, errors.New(strings.Join(cfg.Notices, "; "))
+		}
+		return nil, fmt.Errorf("%s: no targets defined; add a rule or write rerun.yml", strings.Join(found, ", "))
 	}
 	return cfg, nil
 }

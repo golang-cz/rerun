@@ -15,9 +15,21 @@ var makeNameRE = regexp.MustCompile(`^[A-Za-z0-9_./+][A-Za-z0-9_./+-]*$`)
 // makeNames is the order GNU make tries when run without -f.
 var makeNames = []string{"GNUmakefile", "makefile", "Makefile"}
 
+// composeNames is Docker's default compose file names, in the order docker compose reads them.
+var composeNames = []string{"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"}
+
 // implicitMakefile is the Makefile in dir that a bare `make` would read, or "".
-// It matches the file's exact spelling, so Makefile is never read as makefile on a case-blind disk.
 func implicitMakefile(dir string) string {
+	return implicitFile(dir, makeNames)
+}
+
+// implicitCompose is the compose file in dir that docker compose would read, or "".
+func implicitCompose(dir string) string {
+	return implicitFile(dir, composeNames)
+}
+
+// implicitFile returns the first of names that exists in dir, matching exact spelling so Makefile is never read as makefile on a case-blind disk.
+func implicitFile(dir string, names []string) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -28,7 +40,7 @@ func implicitMakefile(dir string) string {
 			files[e.Name()] = true
 		}
 	}
-	for _, name := range makeNames {
+	for _, name := range names {
 		if files[name] {
 			return filepath.Join(dir, name)
 		}

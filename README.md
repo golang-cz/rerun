@@ -341,6 +341,7 @@ targets:
 - With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it
   loads only when listed. Startup shows `Makefile not imported · add it under imports:`
   for an unlisted one.
+- With no `rerun.yml`, the Makefile and compose file beside it load by default.
 
 ### Docker Compose
 
@@ -366,7 +367,8 @@ imports:
 - If docker stops answering, the footer shows `docker unreachable, retrying`.
 - The `docker` CLI must be on PATH. A required import without it is an error.
   An optional one is skipped with a notice.
-- Compose files load only when listed under `imports:`. rerun never auto-imports one.
+- Compose files load only when listed under `imports:`, or when a dir has no `rerun.yml`
+  (see [Makefile](#makefile)). rerun never auto-imports one beside a `rerun.yml`.
 - `groups:` is an error on a compose import. `services:` and `profiles:` are errors on a rerun import.
 
 ### Makefile
@@ -390,6 +392,8 @@ groups:
 
 - A `Makefile` next to `rerun.yml` loads by default as a `make` group. It sits last and
   folds its idle targets. With a `rerun.yml`, it loads only when listed under `imports:`.
+- With no `rerun.yml`, a compose file loads too, as a group named for its compose project.
+  The first of `compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml` wins.
 - A repo with only a Makefile opens rerun with the finder open.
 - A subfolder's Makefile loads only when you import it. rerun never scans subfolders.
 - The default group for a subfolder import is `make/<dir>`, such as `make/api`.
