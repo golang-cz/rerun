@@ -38,8 +38,8 @@ func TestRightArrowFocusesThenPans(t *testing.T) {
 	if after == before {
 		t.Fatalf("pane line did not shift: %q", after)
 	}
-	if !strings.HasPrefix(after, before[1:]) {
-		t.Fatalf("pane line = %q, want %q shifted one cell", after, before[1:])
+	if !strings.HasPrefix(after, "web  ‹") {
+		t.Fatalf("pane line = %q, want the name column pinned and the message shifted one cell", after)
 	}
 }
 

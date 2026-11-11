@@ -1193,6 +1193,11 @@ func (m *tuiModel) copyHintActive() bool {
 // syncContent rebuilds the viewport only when its content changed, and keeps
 // it pinned to the tail while following.
 func (m *tuiModel) syncContent() {
+	// Another target's lines start at their left edge.
+	if scope := fmt.Sprint(m.solo, "|", m.schemaSel); scope != m.panedView {
+		m.panedView, m.paneCol = scope, 0
+		m.vpDirty = true
+	}
 	m.syncContentOnce()
 	// The (+) cell follows the cursor, which the sync itself may have moved.
 	if m.cursorMarkRaw() != m.markedRaw {
@@ -1295,13 +1300,25 @@ func (m *tuiModel) clampPaneCol(lines []string) int {
 }
 
 // panLines slices each pane line to the horizontal window paneCol opens.
+// The name column stays put, and a dim ‹ or › marks content cut on either side.
 func (m *tuiModel) panLines(lines []string) []string {
 	if m.paneCol <= 0 {
 		return lines
 	}
+	w := m.vp.Width()
+	pin := min(m.textCol(), w/2)
+	dim := m.styles.hint
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = sliceCells(line, m.paneCol, m.paneCol+m.vp.Width())
+		lw := displayWidth(line)
+		cut := sliceCells(line, 0, pin) + sliceCells(line, pin+m.paneCol, m.paneCol+w)
+		if lw > pin+m.paneCol && w > pin+1 {
+			cut = sliceCells(cut, 0, pin) + dim.Render("‹") + sliceCells(cut, pin+1, w)
+		}
+		if lw > m.paneCol+w && w > pin+2 {
+			cut = sliceCells(cut, 0, w-1) + dim.Render("›")
+		}
+		out[i] = cut
 	}
 	return out
 }

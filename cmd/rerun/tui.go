@@ -214,6 +214,8 @@ type tuiModel struct {
 	// showTimes is t's state: the list shows its times column.
 	showTimes bool
 	paneCol   int // horizontal column offset of the pane
+	// panedView is the target view paneCol belongs to.
+	panedView string
 
 	// feed is the change batches the fs events modal lists, oldest first.
 	feed    []feedBatch

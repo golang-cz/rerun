@@ -589,14 +589,19 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// The left column scrolls the target window and keeps the selection: clicks pick rows.
 		// The divider and the log pane keep scrolling the stream.
 		onList := e.X < m.layout.leftW
-		switch e.Button {
-		case tea.MouseWheelUp:
+		shift := e.Mod.Contains(tea.ModShift)
+		switch {
+		case e.Button == tea.MouseWheelLeft && !onList, e.Button == tea.MouseWheelUp && shift && !onList:
+			m.panBy(-wheelCols)
+		case e.Button == tea.MouseWheelRight && !onList, e.Button == tea.MouseWheelDown && shift && !onList:
+			m.panBy(wheelCols)
+		case e.Button == tea.MouseWheelUp:
 			if onList {
 				m.scrollList(-1)
 			} else {
 				m.scrollUp(3)
 			}
-		case tea.MouseWheelDown:
+		case e.Button == tea.MouseWheelDown:
 			if onList {
 				m.scrollList(1)
 			} else {
@@ -875,4 +880,13 @@ func (m *tuiModel) rowAt(x, y int) int {
 		return -1
 	}
 	return idx
+}
+
+// wheelCols is the columns one sideways wheel tick pans the log pane.
+const wheelCols = 4
+
+// panBy pans the log pane sideways; the next frame clamps it to the longest line.
+func (m *tuiModel) panBy(cols int) {
+	m.paneCol = max(0, m.paneCol+cols)
+	m.vpDirty = true
 }

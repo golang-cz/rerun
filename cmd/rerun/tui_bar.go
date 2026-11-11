@@ -137,6 +137,7 @@ func (m *tuiModel) removePill(idx int) {
 // pillsChanged refreshes everything a pill edit touches: the pane subset, the
 // hit list, and the bar's focus.
 func (m *tuiModel) pillsChanged() {
+	m.paneCol = 0
 	m.paneSelDirty = true
 	m.dispDirty = true
 	m.vpDirty = true
@@ -278,6 +279,7 @@ func (m *tuiModel) focusPill(idx int) {
 // draft, an invalid one only shows its error; the pane never blanks on it. A
 // draft's @refs resolve here too, and the hit list follows the changed rows.
 func (m *tuiModel) inputChanged() {
+	m.paneCol = 0
 	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
 	m.pickSel = 0
 	if m.input != "" {
