@@ -181,8 +181,8 @@ func (m *tuiModel) frame() string {
 	frame := b.String()
 	if m.inputMode != inputNone {
 		box := m.inputBoxView()
-		frame = overlayAt(frame, box, m.layout.leftW+1, 0, m.width, m.height)
-		m.layout.cursorX, m.layout.cursorY = m.inputCaret(m.layout.leftW+1, 0)
+		frame = overlayAt(frame, box, m.layout.leftW+1, m.barRows(), m.width, m.height)
+		m.layout.cursorX, m.layout.cursorY = m.inputCaret(m.layout.leftW+1, m.barRows())
 	}
 	if m.finder.open {
 		box := m.finderView()
@@ -333,6 +333,29 @@ func (m *tuiModel) modalBox(header, footer string, body []string, outerW, outerH
 
 	// v2's Width and Height are the whole block, border included.
 	return box.Width(outerW).Height(outerH).Render(strings.Join(lines, "\n"))
+}
+
+// inputRows is the rows the open input box takes under the pills row, 0 while it is closed.
+// The box docks there, and the viewport gives up exactly those rows.
+func (m *tuiModel) inputRows() int {
+	if m.inputMode == inputNone {
+		return 0
+	}
+	body := 0
+	if m.pickActive() {
+		body = min(max(1, len(m.pickMatches())), pickMaxRows)
+	}
+	return min(m.styles.box.GetVerticalFrameSize()+3+body, max(1, m.height-2))
+}
+
+// spanBelow is how many expansion rows follow display row row's line.
+func (m *tuiModel) spanBelow(row int) int {
+	line := m.lineRow(m.rowInfo(row).raw)
+	end := line
+	for end+1 < m.paneLen() && m.rowInfo(end+1).sub >= 0 {
+		end++
+	}
+	return max(0, end-row)
 }
 
 // inputMinWidth is the narrowest query bar, terminal permitting; the bar is not a modal.
@@ -1001,11 +1024,20 @@ func (m *tuiModel) rightLines(w int) []string {
 	gutter := m.stampGutter()
 	m.vp.SetWidth(w - gutter)
 	m.vp.SetHeight(max(1, m.height-headH))
+	// A header that grows over a paused pane must not push the cursor line or its expansion off the bottom.
+	if headH != m.lastHeadH && !m.follow && m.paneLen() > 0 {
+		m.revealCur, m.revealSpan = true, m.spanBelow(m.paneCursorRow())
+	}
+	m.lastHeadH = headH
 	m.syncContent()
 
 	var header []string
 	if m.barRows() == 1 {
 		header = append(header, m.barLine(w))
+	}
+	// The input box is drawn over these rows after the frame is laid out.
+	for range m.inputRows() {
+		header = append(header, strings.Repeat(" ", w))
 	}
 	if m.tableHeaderOn() {
 		header = append(header, m.columnHeader(w))

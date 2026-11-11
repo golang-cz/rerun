@@ -306,7 +306,7 @@ func writeColumns(path string, e colEdit) error {
 // headerRows is the pane's fixed header: the filter bar and the table's column
 // header. The viewport sits below it.
 func (m *tuiModel) headerRows() int {
-	n := m.barRows()
+	n := m.barRows() + m.inputRows()
 	if m.tableHeaderOn() {
 		n++
 	}

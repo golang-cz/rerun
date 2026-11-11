@@ -309,6 +309,8 @@ type tuiModel struct {
 	inBatch  bool
 	// cellBySeq keeps each line's table form across rebuilds, so a scope switch re-decodes nothing.
 	cellBySeq map[int]*cellEntry
+	// lastHeadH is the pane header height of the last frame.
+	lastHeadH int
 	// markedRaw is the shown line wearing the (+) cell, -1 for none.
 	markedRaw int
 	// frameRows is the list drawn by the frame in progress; nil between frames.
