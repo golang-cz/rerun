@@ -13,26 +13,26 @@ import (
 // openURL opens a url in the platform's browser. Tests replace it.
 var openURL = openInBrowser
 
-// runOpenCommand runs an open: command with sh -c in dir and reports its exit
+// runOpenCommand runs a link: command with sh -c in dir and reports its exit
 // code, or the error that stopped it from starting. Tests replace it.
 var runOpenCommand = runShellCommand
 
 // openSchemeRE matches a value that starts with a URL scheme, so it opens rather than runs.
 var openSchemeRE = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
-// isOpenLink reports whether an open: value is a URL for the system opener.
+// isOpenLink reports whether a link: value is a URL for the system opener.
 func isOpenLink(value string) bool {
 	return openSchemeRE.MatchString(value)
 }
 
-// openExitMsg reports how an open: command ended, so the TUI can say when it failed.
+// openExitMsg reports how a link: command ended, so the TUI can say when it failed.
 type openExitMsg struct {
 	first string
 	code  int
 	err   error
 }
 
-// runOpenCommandCmd runs an open: command off the UI loop and reports its exit.
+// runOpenCommandCmd runs a link: command off the UI loop and reports its exit.
 func runOpenCommandCmd(command, dir string) tea.Cmd {
 	return func() tea.Msg {
 		code, err := runOpenCommand(command, dir)

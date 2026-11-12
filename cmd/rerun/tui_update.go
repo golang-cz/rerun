@@ -123,9 +123,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openExitMsg:
 		switch {
 		case msg.err != nil:
-			m.showNotice(fmt.Sprintf("open: %s did not start: %v", msg.first, msg.err), true)
+			m.showNotice(fmt.Sprintf("link: %s did not start: %v", msg.first, msg.err), true)
 		case msg.code != 0:
-			m.showNotice(fmt.Sprintf("open: %s exited %d", msg.first, msg.code), true)
+			m.showNotice(fmt.Sprintf("link: %s exited %d", msg.first, msg.code), true)
 		}
 		return m, nil
 

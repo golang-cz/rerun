@@ -334,7 +334,7 @@ func (g *targetGroup) reload(path string) *Config {
 	g.mu.Lock()
 	g.missing = cfg.Missing
 	g.mu.Unlock()
-	g.applyConfig(cfg.Targets, cfg.Queries)
+	g.applyConfig(cfg.Targets, cfg.Queries, cfg.Links)
 	return cfg
 }
 
@@ -343,16 +343,17 @@ func (g *targetGroup) reload(path string) *Config {
 // and a changed watch set rebuilds that target's watcher alone. It reports the
 // delta as one banner line through the sink. A list identical to the running
 // one is a no-op.
-func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) []reconcileAction {
+func (g *targetGroup) applyConfig(targets []Target, queries map[string]string, links []Link) []reconcileAction {
 	old := g.snapshotTargets()
 	if reflect.DeepEqual(old, targets) {
-		// Only the saved queries changed: adopt them without touching a runner.
+		// Only the saved queries or links changed: adopt them without touching a runner.
 		g.mu.Lock()
-		if g.closing || reflect.DeepEqual(g.queries, queries) {
+		if g.closing || (reflect.DeepEqual(g.queries, queries) && reflect.DeepEqual(g.links, links)) {
 			g.mu.Unlock()
 			return nil
 		}
 		g.queries = maps.Clone(queries)
+		g.links = slices.Clone(links)
 		runners := append([]*targetRunner(nil), g.runners...)
 		missing := g.missing
 		g.mu.Unlock()
@@ -369,6 +370,7 @@ func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) [
 				stopped: stopped,
 				missing: missing,
 				queries: queries,
+				links:   links,
 			},
 		})
 		return nil
@@ -444,6 +446,7 @@ func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) [
 	g.targets = fresh
 	g.runners = runners
 	g.queries = maps.Clone(queries)
+	g.links = slices.Clone(links)
 	missing := g.missing
 	g.mu.Unlock()
 
@@ -458,6 +461,7 @@ func (g *targetGroup) applyConfig(targets []Target, queries map[string]string) [
 			stopped: stopped,
 			missing: missing,
 			queries: queries,
+			links:   links,
 		},
 	})
 

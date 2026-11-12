@@ -134,7 +134,7 @@ func TestParseConfigErrors(t *testing.T) {
 		{
 			name:    "unknown field",
 			content: "targets:\n  api:\n    run: echo hi\n    bogus: 1\n",
-			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, build, health, open, columns, queries, group, mute, keep, start, delay, cooldown, grace"},
+			wantSub: []string{`target "api"`, `"bogus"`, "fields: desc, on, except, run, build, health, link, columns, queries, group, mute, keep, start, delay, cooldown, grace"},
 		},
 		{
 			name:    "unknown group",
@@ -592,7 +592,7 @@ func TestParseConfigOpenLinkSelected(t *testing.T) {
 	writeFile(t, path, `targets:
   frontend:
     run: pnpm run dev
-    open: http://localhost:5173
+    link: http://localhost:5173
 
   api:
     run: go run ./cmd/api
@@ -604,16 +604,16 @@ func TestParseConfigOpenLinkSelected(t *testing.T) {
 	}
 
 	frontend := cfg.Targets[0]
-	if frontend.Open != "http://localhost:5173" {
-		t.Errorf("open = %q", frontend.Open)
+	if frontend.Link != "http://localhost:5173" {
+		t.Errorf("open = %q", frontend.Link)
 	}
 	if !frontend.Selected {
 		t.Error("selected = false by default, want true")
 	}
 
 	api := cfg.Targets[1]
-	if api.Open != "" {
-		t.Errorf("open = %q, want empty", api.Open)
+	if api.Link != "" {
+		t.Errorf("open = %q, want empty", api.Link)
 	}
 }
 
@@ -740,7 +740,7 @@ func TestTargetFieldsAllAccepted(t *testing.T) {
 		"group":    "backend",
 		"mute":     "true",
 		"keep":     "5000",
-		"open":     "http://localhost:1",
+		"link":     "http://localhost:1",
 		"start":    "onchange",
 		"delay":    "1s",
 		"cooldown": "1s",

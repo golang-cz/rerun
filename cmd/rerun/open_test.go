@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// stubOpenCommand records what an open: command is asked to run, and its exit.
+// stubOpenCommand records what a link: command is asked to run, and its exit.
 func stubOpenCommand(t *testing.T, code int, err error) *[]string {
 	t.Helper()
 	var ran []string
@@ -37,7 +37,7 @@ func TestOpenLinkUsesSystemOpener(t *testing.T) {
 	opened := stubOpen(t)
 	ran := stubOpenCommand(t, 0, nil)
 	web := target("web")
-	web.Open = "http://localhost:5173"
+	web.Link = "http://localhost:5173"
 	m := newTestModel(t, web)
 	m.cursor = 0
 	if cmd := press(m, "ctrl+o"); cmd != nil {
@@ -52,7 +52,7 @@ func TestOpenCommandRunsInTargetDirOffTheUILoop(t *testing.T) {
 	opened := stubOpen(t)
 	ran := stubOpenCommand(t, 0, nil)
 	web := target("web")
-	web.Open = "make dev"
+	web.Link = "make dev"
 	web.Dir = "/work/app"
 	m := newTestModel(t, web)
 	m.cursor = 0
@@ -79,12 +79,12 @@ func TestOpenCommandRunsInTargetDirOffTheUILoop(t *testing.T) {
 func TestOpenCommandNonZeroExitNamesTheFirstWord(t *testing.T) {
 	stubOpenCommand(t, 3, nil)
 	web := target("web")
-	web.Open = "make dev --watch"
+	web.Link = "make dev --watch"
 	m := newTestModel(t, web)
 	m.cursor = 0
 	msg := press(m, "ctrl+o")()
 	m.Update(msg)
-	if m.notice != "open: make exited 3" || !m.noticeErr {
+	if m.notice != "link: make exited 3" || !m.noticeErr {
 		t.Fatalf("notice = %q err=%v, want the exit as an error", m.notice, m.noticeErr)
 	}
 }
@@ -92,11 +92,11 @@ func TestOpenCommandNonZeroExitNamesTheFirstWord(t *testing.T) {
 func TestOpenCommandStartErrorShowsNotice(t *testing.T) {
 	stubOpenCommand(t, -1, errors.New("no such file"))
 	web := target("web")
-	web.Open = "./run.sh"
+	web.Link = "./run.sh"
 	m := newTestModel(t, web)
 	m.cursor = 0
 	m.Update(press(m, "ctrl+o")())
-	if !strings.Contains(m.notice, "open: ./run.sh did not start") || !m.noticeErr {
+	if !strings.Contains(m.notice, "link: ./run.sh did not start") || !m.noticeErr {
 		t.Fatalf("notice = %q, want a start error naming ./run.sh", m.notice)
 	}
 }
@@ -104,10 +104,10 @@ func TestOpenCommandStartErrorShowsNotice(t *testing.T) {
 func TestCapturedEndpointDoesNotReplaceCommand(t *testing.T) {
 	stubOpenCommand(t, 0, nil)
 	web := target("web")
-	web.Open = "make dev"
+	web.Link = "make dev"
 	m := newTestModel(t, web)
 	addLines(m, "web", `{"url":"http://localhost:9"}`)
-	if got := m.targets[0].spec.Open; got != "make dev" {
+	if got := m.targets[0].spec.Link; got != "make dev" {
 		t.Fatalf("open = %q, want the command kept", got)
 	}
 }
@@ -121,12 +121,12 @@ func writeOpenConfig(t *testing.T, body string) (*Config, error) {
 }
 
 func TestConfigOpenStringIsTheLinkOrCommand(t *testing.T) {
-	cfg, err := writeOpenConfig(t, "targets:\n  web:\n    run: x\n    open: make dev\n  app:\n    run: y\n    open: http://localhost:1\n")
+	cfg, err := writeOpenConfig(t, "targets:\n  web:\n    run: x\n    link: make dev\n  app:\n    run: y\n    link: http://localhost:1\n")
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if cfg.Targets[0].Open != "make dev" || cfg.Targets[1].Open != "http://localhost:1" {
-		t.Errorf("open = %q, %q", cfg.Targets[0].Open, cfg.Targets[1].Open)
+	if cfg.Targets[0].Link != "make dev" || cfg.Targets[1].Link != "http://localhost:1" {
+		t.Errorf("open = %q, %q", cfg.Targets[0].Link, cfg.Targets[1].Link)
 	}
 	if len(cfg.Notices) != 0 {
 		t.Errorf("notices = %q, want none for the new spelling", cfg.Notices)

@@ -73,8 +73,8 @@ type Target struct {
 	Build string
 	// Health is an http(s):// URL, a tcp://host:port, or a shell command.
 	Health string
-	// Open is the `open:` value: a URL the system opens, or a shell command `o` runs.
-	Open string
+	// Link is the `link:` value: a URL the system opens, or a shell command `o` runs.
+	Link string
 	// Columns are the effective columns: the target's own, else its schema's.
 	Columns []Column
 	// ownColumns is set when the target writes its own `columns:` instead of inheriting.
@@ -159,6 +159,8 @@ type missingImport struct {
 type Config struct {
 	Path    string
 	Targets []Target
+	// Links are the root file's top-level `links:` entries, in source order.
+	Links []Link
 	// Files is every rerun.yml read, the root first.
 	Files []string
 	// Missing lists the optional imports whose file is absent.
@@ -366,7 +368,11 @@ func ParseConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}, Queries: file.queries}
+	links, err := parseLinks(src, root, filepath.Dir(abs))
+	if err != nil {
+		return nil, err
+	}
+	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}, Queries: file.queries, Links: links}
 	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
 		return nil, err
 	}
@@ -495,11 +501,11 @@ func checkTopLevel(src *configSource, root *yaml.Node) error {
 			return src.at(key, 1, "top-level keys must be strings")
 		}
 		switch key.Value {
-		case targetsKey, importsKey, groupsKey, queriesKey:
+		case targetsKey, importsKey, groupsKey, queriesKey, linksKey:
 			continue
 		}
 		e := src.at(key, len(key.Value), fmt.Sprintf("unknown top-level key %q", key.Value))
-		e.note = "top-level keys: imports, groups, targets, queries"
+		e.note = "top-level keys: imports, groups, targets, queries, links"
 		return e
 	}
 	return nil
@@ -556,6 +562,48 @@ const groupsKey = "groups"
 
 // targetsKey is the reserved top-level key holding the targets.
 const targetsKey = "targets"
+
+// linksKey is the reserved top-level key of named links: a URL or command the `o` modal opens.
+const linksKey = "links"
+
+// Link is one top-level `links:` entry; dir is the root rerun.yml's directory, where a command runs.
+type Link struct {
+	Name  string
+	Value string
+	Dir   string
+}
+
+// parseLinks reads the root file's `links:` mapping in source order, so the `o` modal lists them as written.
+func parseLinks(src *configSource, root *yaml.Node, dir string) ([]Link, error) {
+	_, node := mappingEntry(root, linksKey)
+	if node == nil || (node.Kind == yaml.ScalarNode && node.Tag == "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, src.at(node, nodeSpan(node), "links: expected a mapping of link names")
+	}
+	var out []Link
+	seen := make(map[string]bool)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := deref(node.Content[i]), deref(node.Content[i+1])
+		if key.Kind != yaml.ScalarNode {
+			return nil, src.at(key, 1, "links: link names must be strings")
+		}
+		name := key.Value
+		if seen[name] {
+			return nil, src.at(key, len(name), fmt.Sprintf("links: duplicate link %q", name))
+		}
+		seen[name] = true
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("links: link %q: expected a string, got %s", name, yamlType(value)))
+		}
+		if strings.TrimSpace(value.Value) == "" {
+			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("links: link %q: value is empty", name))
+		}
+		out = append(out, Link{Name: name, Value: value.Value, Dir: dir})
+	}
+	return out, nil
+}
 
 // queriesKey is the reserved key holding saved query pills, at the top level,
 // in a group, and in a target.
@@ -803,7 +851,7 @@ func parseSchema(src *configSource, name string, node *yaml.Node) (groupDef, err
 // targetFields is the accepted rerun.yml target keys, in the order the docs
 // list them. It mirrors the switch in parseTarget; TestTargetFieldsAllAccepted
 // fails when the two drift apart.
-var targetFields = []string{"desc", "on", "except", "run", "build", "health", "open", "columns", "queries", "group", "mute", "keep", "start", "delay", "cooldown", "grace"}
+var targetFields = []string{"desc", "on", "except", "run", "build", "health", "link", "columns", "queries", "group", "mute", "keep", "start", "delay", "cooldown", "grace"}
 
 func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schemas map[string]groupDef) (Target, error) {
 	node = deref(node)
@@ -857,12 +905,15 @@ func parseTarget(src *configSource, name string, keyNode, node *yaml.Node, schem
 				target.Health = s
 			}
 
-		case "open":
+		case "link":
 			s, err := scalarField(src, name, field, value)
 			if err != nil {
 				return Target{}, err
 			}
-			target.Open = s
+			target.Link = s
+
+		case "open":
+			return Target{}, src.at(key, len(field), fmt.Sprintf("target %q: field %q was renamed to %q (run rerun -migrate)", name, "open", "link"))
 
 		case "columns":
 			cols, err := parseColumnList(src, owner, field, value)

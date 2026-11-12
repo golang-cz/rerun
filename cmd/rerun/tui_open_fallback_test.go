@@ -28,12 +28,12 @@ func TestOpenWithNothingToOpenSaysWhy(t *testing.T) {
 	if len(*opened) != 0 {
 		t.Fatalf("opened = %q, want nothing", *opened)
 	}
-	if want := "api has nothing to open · add open: in rerun.yml"; m.notice != want {
+	if want := "api has nothing to open · add link: in rerun.yml"; m.notice != want {
 		t.Fatalf("notice = %q, want %q", m.notice, want)
 	}
 }
 
-// o on a group header says what it opens instead of doing nothing.
+// o on a group header with no links says why, instead of doing nothing.
 func TestOpenOnAGroupHeaderSaysWhatItOpens(t *testing.T) {
 	stubOpen(t)
 	m := newTestModel(t, schemaTarget("api", "backend"), schemaTarget("web", "backend"))
@@ -41,7 +41,7 @@ func TestOpenOnAGroupHeaderSaysWhatItOpens(t *testing.T) {
 	m.cursor = 0 // the backend header
 	press(m, "o")
 
-	if want := "no links to open · add open: in rerun.yml"; m.notice != want {
+	if want := "no links to open · add links: or link: in rerun.yml"; m.notice != want {
 		t.Fatalf("notice = %q, want %q", m.notice, want)
 	}
 }

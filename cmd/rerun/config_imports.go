@@ -244,6 +244,9 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 				if mappingValue(iroot, importsKey) != nil {
 					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: imports are one level deep; the imports key here is ignored", abs))
 				}
+				if mappingValue(iroot, linksKey) != nil {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s: links are read from the root rerun.yml only; the links key here is ignored", abs))
+				}
 				cfg.Files = append(cfg.Files, abs)
 				if canon != abs && isSymlink(abs) {
 					cfg.Files = append(cfg.Files, canon)

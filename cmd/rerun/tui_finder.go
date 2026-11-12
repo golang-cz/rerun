@@ -40,7 +40,9 @@ type finderItem struct {
 	// make marks a Makefile target, whose enter runs it instead of jumping.
 	make   bool
 	target int // the index into m.targets; -1 for a group
-	enter  func(m *tuiModel)
+	// value and dir are a link row's URL or command, and the directory a command runs in.
+	value, dir string
+	enter      func(m *tuiModel)
 }
 
 // finderRuns is whether enter starts the row: a make target that is not up, or a manual, onchange, or stopped target.
@@ -82,12 +84,15 @@ func (m *tuiModel) finderCandidates() []finderItem {
 	return out
 }
 
-// finderLinkCandidates lists each target with an open: value, in target order, for the open modal.
+// finderLinkCandidates lists the top-level links in source order, then each target with a link: value, for the open modal.
 func (m *tuiModel) finderLinkCandidates() []finderItem {
 	var out []finderItem
+	for _, l := range m.links {
+		out = append(out, finderItem{kind: "link", name: l.Name, desc: finderDesc(l.Value), target: -1, value: l.Value, dir: l.Dir})
+	}
 	for i, tg := range m.targets {
-		open := strings.TrimSpace(tg.spec.Open)
-		if open == "" {
+		link := strings.TrimSpace(tg.spec.Link)
+		if link == "" {
 			continue
 		}
 		name := tg.spec.Name
@@ -95,15 +100,15 @@ func (m *tuiModel) finderLinkCandidates() []finderItem {
 		if make {
 			name = finderMakeLabel(name)
 		}
-		out = append(out, finderItem{kind: "link", name: name, desc: finderDesc(open), make: make, target: i})
+		out = append(out, finderItem{kind: "link", name: name, desc: finderDesc(link), make: make, target: i, value: link, dir: tg.spec.Dir})
 	}
 	return out
 }
 
-// openLinks is o on the list: the open modal over every target's open: value, or a notice when there are none.
+// openLinks is o on the list: the open modal over every link, or a notice when there are none.
 func (m *tuiModel) openLinks() {
 	if len(m.finderLinkCandidates()) == 0 {
-		m.showNotice("no links to open · add open: in rerun.yml", false)
+		m.showNotice("no links to open · add links: or link: in rerun.yml", false)
 		return
 	}
 	m.finder = finderState{open: true, links: true}
@@ -272,12 +277,17 @@ func (m *tuiModel) handleFinderKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		sel := res[m.finder.sel]
 		m.finder = finderState{}
 		if sel.kind == "link" {
-			// Opens the target's open: value without moving focus.
-			return m, m.openTarget(sel.target)
+			// Opens the link without moving focus.
+			return m, m.openValue(sel.value, sel.dir)
 		}
 		sel.enter(m)
 	case "ctrl+o":
-		// Quick open: the selected row's target link, without a jump.
+		// Quick open: the selected row's link, without a jump.
+		if m.finder.sel < len(res) && res[m.finder.sel].kind == "link" {
+			sel := res[m.finder.sel]
+			m.finder = finderState{}
+			return m, m.openValue(sel.value, sel.dir)
+		}
 		if m.finder.sel < len(res) && res[m.finder.sel].target >= 0 {
 			i := res[m.finder.sel].target
 			m.finder = finderState{}

@@ -102,6 +102,8 @@ type configChange struct {
 	missing []missingImport
 	// queries are the reloaded config's global saved queries.
 	queries map[string]string
+	// links are the reloaded config's top-level links, listed first by the o modal.
+	links []Link
 }
 
 // sink is the front-end a target runner writes its events to.

@@ -37,14 +37,17 @@ rerun.yml targets: a top-level targets: block holds them
 rerun.yml groups: a top-level groups: block shares columns, and a target names one
   with group:
 
-rerun.yml target keys: run, build, health, desc, on, except, open,
+rerun.yml target keys: run, build, health, desc, on, except, link,
   columns, group, mute, keep, start, delay, cooldown, grace
+
+rerun.yml links: a top-level links: block of named URLs or commands, listed first by o
 
 Flags:
   -delay <dur>      batch window before restarting a command (default 200ms)
   -cooldown <dur>   minimum time between restarts (default 0s)
   -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
   -no-gitignore     do not filter watched files through .gitignore
+  -migrate          rewrite target open: keys to link: in rerun.yml and its imports
   -h, -help         show this help
   -version          show version
 
@@ -83,6 +86,8 @@ func main() {
 	case args.Version:
 		fmt.Fprintf(os.Stdout, "rerun %s\n", version)
 		os.Exit(0)
+	case args.Migrate:
+		os.Exit(runMigrate())
 	}
 
 	if len(args.Cmd) == 0 {

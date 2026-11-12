@@ -222,7 +222,7 @@ func TestOriginalListFocusedOKeepsOpeningTheTarget(t *testing.T) {
 // o opens the link picker from the pane too; i is the key that shows original lines.
 func TestOWithPaneFocusedOpensLinkPicker(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	m := newTestModel(t, web)
 	addLines(m, "web", "one")
 	m.frame()

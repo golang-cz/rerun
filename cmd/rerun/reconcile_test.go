@@ -36,7 +36,7 @@ func TestDiffTargetsReconcileActions(t *testing.T) {
 	startChanged.Start = startManual
 	cosmetic := recTarget("api", "api")
 	cosmetic.Desc = "the api"
-	cosmetic.Open = "http://localhost:8080"
+	cosmetic.Link = "http://localhost:8080"
 	cosmetic.Grace = time.Second
 	cosmetic.Cooldown = 2 * time.Second
 	cosmetic.Selected = false
@@ -343,7 +343,7 @@ func TestReconcileHoldsANewTargetWhileSoloed(t *testing.T) {
 	g.setSoloGuard(true)
 	t.Cleanup(g.cancel)
 
-	g.applyConfig([]Target{recTarget("web", "web"), recTarget("api", "api")}, nil)
+	g.applyConfig([]Target{recTarget("web", "web"), recTarget("api", "api")}, nil, nil)
 
 	var cfg *configChange
 	for _, ev := range sink.all() {
@@ -368,14 +368,14 @@ func TestApplyConfigHandsTheRunnerItsNewSpec(t *testing.T) {
 	g := newTargetGroup([]Target{recTarget("web", "web"), recTarget("api", "api")}, &recordingSink{}, "")
 
 	cmdChanged := []Target{recTarget("web", "web-v2"), recTarget("api", "api")}
-	g.applyConfig(cmdChanged, nil)
+	g.applyConfig(cmdChanged, nil, nil)
 	if c := nextCtrl(t, g.runners[0]); c.kind != ctrlSpec || c.target == nil || c.target.Cmd != "web-v2" {
 		t.Fatalf("control = %+v, want a ctrlSpec carrying the new cmd", c)
 	}
 
 	watchChanged := []Target{recTarget("web", "web-v2"), recTarget("api", "api")}
 	watchChanged[0].On = []string{"pkg"}
-	g.applyConfig(watchChanged, nil)
+	g.applyConfig(watchChanged, nil, nil)
 	if c := nextCtrl(t, g.runners[0]); c.kind != ctrlRewatch || c.target == nil || c.target.On[0] != "pkg" {
 		t.Fatalf("control = %+v, want a ctrlRewatch carrying the new roots", c)
 	}
@@ -815,5 +815,45 @@ func TestReloadQueriesOnlyEmitsReconcile(t *testing.T) {
 	}
 	if reconciles != 1 {
 		t.Fatalf("reconciles = %d after a no-op reload, want still 1", reconciles)
+	}
+}
+
+// A links-only edit reconciles too: the o modal must list the new links, and the
+// runners stay untouched.
+func TestReloadLinksOnlyEmitsReconcile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	save := func(yml string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(yml), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("links:\n  docs: https://a.test\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")
+	sink := &recordingSink{}
+	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
+	t.Cleanup(group.cancel)
+	group.links = []Link{{Name: "docs", Value: "https://a.test", Dir: filepath.Dir(path)}} // the startup load's set
+
+	save("links:\n  docs: https://b.test\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")
+	group.reload(path)
+
+	reconciles := 0
+	var change *configChange
+	for i, ev := range sink.all() {
+		if ev.kind == evReconcile {
+			reconciles++
+			change = sink.all()[i].cfg
+		}
+	}
+	if reconciles != 1 || change == nil {
+		t.Fatalf("reconciles = %d, want the links-only reload to emit one", reconciles)
+	}
+	if len(change.links) != 1 || change.links[0].Value != "https://b.test" {
+		t.Fatalf("links = %+v, want the reloaded link", change.links)
+	}
+	select {
+	case c := <-group.runners[0].ctrlCh:
+		t.Fatalf("a links-only reload sent the runner %+v", c)
+	default:
 	}
 }

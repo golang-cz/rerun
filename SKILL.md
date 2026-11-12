@@ -65,7 +65,7 @@ Press `?` inside it for the short key list; `?` again (or `m`) shows every key.
 Keys: `j/k` move, `space` start/stop, `r` reboot, `m` mute a target's stream, `d` drop its older output and mute it,
 `enter` focuses the pane, and its cursor lands on the service's last line (or the newest line when that is off screen). The cursor target narrows the pane to its target or
 schema's targets (`esc` backs out), and that target is bold. On a schema header, `space`, `r`, and `m` act on its
-targets. `o` opens a picker over every `open:` link (a URL, or a command it runs). `ctrl+o` opens the target's `open:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor target
+targets. `o` opens a picker over every `links:` entry, then each target's `link:` (a URL, or a command it runs). `ctrl+o` opens the target's `link:`, and says so when it has none; on a group header it says what `ctrl+o` opens; with the pane focused, `i` opens the original or JSON lines (see below). `alt+z` / `alt+y` (⌘Z/⌘Y in Ghostty) undo and redo edits in the query bar, Go-to and the link picker. `esc` returns to the live output. The right pane is always the merged stream; the cursor target
 narrows it to one target, keeping the name prefixes; each line pads the name to
 the longest target so messages start in a fixed column. A `mute: true` field in rerun.yml starts a target's stream muted (a group or an import may set it too); `d` drops a target's older output and mutes it, and a second `d` restores it. A muted name is light gray and italic. `keep:` sets each target's scrollback, a line count (`keep: 5000`) or a time (`keep: 1h`, at most 200,000 lines), default 10,000 lines; target, then group, then import wins. Ungrouped targets list first with no header, groups follow in `groups:` order, then undeclared imports, Makefile imports last. A group's `fold: true` folds its idle members into a `(+) N more` row, and folding never mutes. The pane's top line is
 the cursor target's command, with its url linked. Mouse: click a target to show only its
@@ -229,7 +229,7 @@ targets:
     run: pnpm run dev              # run through sh -c; quotes, &&, pipes work
     build: pnpm run typecheck      # optional; runs first, old run stays up until it passes
     health: http://localhost:5173  # optional; http(s) url, tcp://host:port, or a command
-    open: http://localhost:5173    # ctrl+o opens it; the target links to it (or a shell command to run)
+    link: http://localhost:5173    # ctrl+o opens it; the target links to it (or a shell command to run)
     delay: 200ms                  # batch file events before restarting
     cooldown: 2s                  # min time between restarts (event storms)
     grace: 5s                     # SIGTERM → wait → SIGKILL

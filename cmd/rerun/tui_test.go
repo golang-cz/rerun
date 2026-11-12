@@ -439,7 +439,7 @@ func TestSoloPaneDropsPrefix(t *testing.T) {
 func TestRightPaneTitleTruncatesToWidth(t *testing.T) {
 	web := target("frontend")
 	web.Cmd = "a-very-long-command-that-will-not-fit"
-	web.Open = "http://localhost:5173/very/long/path"
+	web.Link = "http://localhost:5173/very/long/path"
 	m := newTestModel(t, web, target("api"))
 	m.width = 30
 	m.cursor = 0
@@ -1120,7 +1120,7 @@ func TestOpenKeyOpensOnlyOnCtrlO(t *testing.T) {
 	defer func() { openURL = old }()
 
 	web := target("web")
-	web.Open = "http://localhost:5173"
+	web.Link = "http://localhost:5173"
 	m := newTestModel(t, web, target("api"))
 
 	m.applyEvent(event{kind: evStarted, target: "web"})

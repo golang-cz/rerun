@@ -672,7 +672,7 @@ func TestFinderEnterStartsManualRowAndFocusesIt(t *testing.T) {
 // o on the list opens the link modal; enter opens the pick and leaves focus where it was.
 func TestOOpensLinkModalAndEnterOpensWithoutMovingFocus(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	m := newTestModel(t, web, target("api"))
 	opened := stubOpenURL(t)
 	before := m.paneFocus
@@ -689,31 +689,31 @@ func TestOOpensLinkModalAndEnterOpensWithoutMovingFocus(t *testing.T) {
 		t.Fatal("enter did not close the modal")
 	}
 	if !slices.Equal(*opened, []string{"http://localhost:8080"}) {
-		t.Fatalf("opened = %v, want the open: URL", *opened)
+		t.Fatalf("opened = %v, want the link: URL", *opened)
 	}
 	if m.paneFocus != before || m.solo != -1 {
 		t.Fatalf("paneFocus = %v solo = %d, want focus and scope unchanged", m.paneFocus, m.solo)
 	}
 }
 
-// o with no open: value anywhere says so instead of opening an empty modal.
+// o with no link: value anywhere says so instead of opening an empty modal.
 func TestOWithNoLinksSaysSoAndOpensNothing(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	press(m, "o")
 	if m.finder.open {
 		t.Fatal("o opened the modal with no links")
 	}
-	if want := "no links to open · add open: in rerun.yml"; m.notice != want {
+	if want := "no links to open · add links: or link: in rerun.yml"; m.notice != want {
 		t.Fatalf("notice = %q, want %q", m.notice, want)
 	}
 }
 
-// The modal lists each open: target in target order; the go-to bar lists none.
+// The modal lists each link: target in target order; the go-to bar lists none.
 func TestLinkModalListsOpenTargetsAndGoToHasNone(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	worker := target("worker")
-	worker.Open = "http://localhost:9090"
+	worker.Link = "http://localhost:9090"
 	m := newTestModel(t, web, target("api"), worker)
 	m.finder = finderState{open: true, links: true}
 	res := m.finderResults("")
@@ -736,7 +736,7 @@ func TestLinkModalDownScrollsToTailRows(t *testing.T) {
 	var targets []Target
 	for i := range 30 {
 		tg := target("t" + strconv.Itoa(i))
-		tg.Open = "http://localhost:" + strconv.Itoa(9000+i)
+		tg.Link = "http://localhost:" + strconv.Itoa(9000+i)
 		targets = append(targets, tg)
 	}
 	m := newTestModel(t, targets...)
@@ -756,7 +756,7 @@ func TestLinkModalDownScrollsToTailRows(t *testing.T) {
 // A query spanning the name and the open value finds the modal row.
 func TestLinkModalJointQueryMatchesNameAndOpenValue(t *testing.T) {
 	hooks := target("webhooks")
-	hooks.Open = "http://localhost:8080"
+	hooks.Link = "http://localhost:8080"
 	m := newTestModel(t, hooks, target("api"))
 	press(m, "o")
 	press(m, "w", "e", "b", " ", "8", "0", "8", "0")
@@ -766,16 +766,16 @@ func TestLinkModalJointQueryMatchesNameAndOpenValue(t *testing.T) {
 	}
 }
 
-// A make target's modal row keeps the make flag, and a blank open: gets no row.
+// A make target's modal row keeps the make flag, and a blank link: gets no row.
 func TestLinkModalCopiesMakeAndIgnoresBlankOpen(t *testing.T) {
 	m := newMakeTUI(t)
 	i := targetIndex(m, "make/test")
-	m.targets[i].spec.Open = "http://localhost:1"
-	m.targets[targetIndex(m, "web")].spec.Open = "   "
+	m.targets[i].spec.Link = "http://localhost:1"
+	m.targets[targetIndex(m, "web")].spec.Link = "   "
 	var link *finderItem
 	for _, c := range m.finderLinkCandidates() {
 		if c.target == targetIndex(m, "web") {
-			t.Fatalf("blank open: got a link row for web: %+v", c)
+			t.Fatalf("blank link: got a link row for web: %+v", c)
 		}
 		if c.target == i {
 			link = &c
@@ -786,10 +786,10 @@ func TestLinkModalCopiesMakeAndIgnoresBlankOpen(t *testing.T) {
 	}
 }
 
-// An open: command runs through the open path, so enter returns its command and closes the modal.
+// A link: command runs through the open path, so enter returns its command and closes the modal.
 func TestLinkModalEnterOnCommandReturnsCmd(t *testing.T) {
 	web := target("web")
-	web.Open = "echo hi"
+	web.Link = "echo hi"
 	m := newTestModel(t, web)
 	ran := stubOpenCommand(t, 0, nil)
 	opened := stubOpenURL(t)
@@ -809,14 +809,14 @@ func TestLinkModalEnterOnCommandReturnsCmd(t *testing.T) {
 		t.Fatal("command did not report an openExitMsg")
 	}
 	if len(*ran) != 1 {
-		t.Fatalf("ran = %v, want the open: command once", *ran)
+		t.Fatalf("ran = %v, want the link: command once", *ran)
 	}
 }
 
 // ctrl+o on the list opens the cursor target's link without a modal or a focus change.
 func TestCtrlOOpensCursorTargetLink(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	m := newTestModel(t, web)
 	opened := stubOpenURL(t)
 	m.cursor = 0
@@ -831,7 +831,7 @@ func TestCtrlOOpensCursorTargetLink(t *testing.T) {
 // ctrl+o in the go-to bar opens the selected target's link and closes the popup, without jumping.
 func TestCtrlOInGoToOpensSelectedTarget(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	m := newTestModel(t, web)
 	opened := stubOpenURL(t)
 	m.Update(ctrlK)

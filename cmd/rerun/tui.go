@@ -378,6 +378,8 @@ type tuiModel struct {
 	pills []pill
 	// queries are the config's global saved queries, picked with @ in the bar.
 	queries map[string]string
+	// links are the config's top-level links, listed first by the o modal.
+	links []Link
 	// draft is the open input's live-compiled pills; queryErr is its parse error.
 	draft    pillSet
 	draftOn  bool
@@ -641,7 +643,9 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 	m.group.configPath = cfg.Path
 	m.missing = cfg.Missing
 	m.queries = cfg.Queries
+	m.links = cfg.Links
 	m.group.queries = cfg.Queries
+	m.group.links = cfg.Links
 	if cfg.MakeOnly {
 		m.finder = finderState{open: true}
 	}
@@ -682,16 +686,20 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.runner.control(ctrlReboot)
 }
 
-// openTarget is ctrl+o: the target's open: value, a URL or a command. Log output never supplies a link.
+// openTarget is ctrl+o: the target's link: value, a URL or a command. Log output never supplies a link.
 func (m *tuiModel) openTarget(i int) tea.Cmd {
 	t := m.targets[i]
-	value := t.spec.Open
-	if value == "" {
-		m.showNotice(t.spec.Name+" has nothing to open · add open: in rerun.yml", false)
+	if t.spec.Link == "" {
+		m.showNotice(t.spec.Name+" has nothing to open · add link: in rerun.yml", false)
 		return nil
 	}
+	return m.openValue(t.spec.Link, t.spec.Dir)
+}
+
+// openValue opens a URL in the browser, or runs a command in dir; ctrl+o and the o modal both use it.
+func (m *tuiModel) openValue(value, dir string) tea.Cmd {
 	if !isOpenLink(value) {
-		return runOpenCommandCmd(value, t.spec.Dir)
+		return runOpenCommandCmd(value, dir)
 	}
 	if err := openURL(value); err != nil {
 		m.showNotice(fmt.Sprintf("rerun: open %s: %v", value, err), true)
@@ -1161,6 +1169,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 func (m *tuiModel) rebuildRows(c *configChange) {
 	m.missing = c.missing
 	m.queries = c.queries
+	m.links = c.links
 	old := m.targets
 	byName := make(map[string]*tuiTarget, len(old))
 	for _, t := range old {

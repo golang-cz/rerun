@@ -235,6 +235,8 @@ type targetGroup struct {
 	// queries is the config's global saved-query set as last emitted to the
 	// front-end, so a queries-only edit still fires a reconcile.
 	queries map[string]string
+	// links is the config's top-level links as last emitted, so a links-only edit fires one too.
+	links []Link
 	// missing is the optional imports whose file is absent at the last load.
 	missing []missingImport
 	closing bool

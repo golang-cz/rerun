@@ -12,7 +12,7 @@ them right on your machine: no containers, no image rebuilds.
 - **One log to rule them all.** Every service streams into one pane. Filter it with
   pills like `level=error` or `http.status>=400`, and turn JSON fields into columns.
 - **Everything one keypress away.** Makefile targets, compose services and your
-  `open:` links (dashboards, docs, localhost URLs) live in the same TUI.
+  `link:` and `links:` entries (dashboards, docs, localhost URLs) live in the same TUI.
 
 ```bash
 $ rerun -- go test ./...    # one command, re-run on every change
@@ -42,6 +42,7 @@ Codegen, migrations, an API with a health check, a frontend, and Postgres from c
 ```yaml
 imports:
   - path: docker-compose.yml
+    optional: true
     services: [postgres]
     start: auto                    # compose services start manually otherwise
 
@@ -59,7 +60,7 @@ targets:
     build: go build -o bin/api ./cmd/api
     run: ./bin/api
     health: http://localhost:8080/health
-    open: http://localhost:8080
+    link: http://localhost:8080
 
   web:
     on: web
@@ -75,7 +76,7 @@ If the generated code lands in `internal/`, `api` rebuilds right after it.
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Command line](#command-line)
-- [rerun.yml](#rerunyml): [targets](#target-fields), [groups](#groups), [imports](#imports), [Docker Compose](#docker-compose), [Makefile](#makefile)
+- [rerun.yml](#rerunyml): [targets](#target-fields), [links](#links), [groups](#groups), [imports](#imports), [Docker Compose](#docker-compose), [Makefile](#makefile)
 - [The TUI](#the-tui): [keys](#keys), [filtering the log](#filtering-the-log), [JSON lines](#json-lines-and-columns)
 
 # Installation
@@ -130,11 +131,16 @@ rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
 -cooldown <dur>   minimum time between restarts (default 0s)
 -grace <dur>      time between SIGTERM and SIGKILL (default 5s)
 -no-gitignore     do not filter watched files through .gitignore
+-migrate          rewrite target open: keys to link: in rerun.yml
 -h, -help         show this help
 -version          show version
 ```
 
 Flags override the matching fields of `rerun.yml` targets, e.g. `rerun api -delay 1s`.
+
+`-migrate` rewrites the nearest `rerun.yml` in place, renaming each target's `open:` to
+`link:`. Comments and the rest of the file keep their bytes. It prints one line per
+renamed target, or says there is nothing to rename. Imported files are not rewritten.
 
 **Deprecated:** `-watch`, `-ignore` and `-run` still work in this major version.
 Prefer `--on`, `--except` and `--`.
@@ -165,6 +171,7 @@ The top level holds only rerun's own keys:
 | `targets:` | the commands to run, one per key |
 | `groups:` | shared settings for related targets, see [Groups](#groups) |
 | `queries:` | saved log filters, see [Saved queries](#saved-queries) |
+| `links:` | named URLs and commands for the `o` picker, see [Links](#links) |
 | `imports:` | other `rerun.yml`, compose or Makefile files, see [Imports](#imports) |
 
 Any other top-level key is an error, so typos surface. A target may itself be called
@@ -181,7 +188,7 @@ Any other top-level key is an error, so typos surface. A target may itself be ca
 | `build` | shell command run before each (re)start; the old run keeps going until it passes, and a failed build leaves it untouched |
 | `health` | `http(s)://` url (200-399 is healthy), `tcp://host:port`, or a shell command (exit 0 is healthy), probed every second |
 | `start` | when the first run happens: `auto` (default), `onchange` (holds the run until a file changes), or `manual` (watches nothing, runs only on `r`) |
-| `open` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice |
+| `link` | what `ctrl+o` runs (`o` lists it in the link picker): a URL (a value starting with a scheme, such as `http:`) opens in the browser; anything else runs as a shell command in the target's dir, detached, and a failure shows a footer notice |
 | `columns` | table-mode columns, each `name {.yq.expr}`, e.g. `["method {.request.method}", "status {.response.status}"]` |
 | `queries` | saved query pills for the query bar, name → pill string; the target's own win a name clash with its `group`'s |
 | `group` | name of a `groups:` entry to take settings from; the target's own `columns` win |
@@ -293,6 +300,24 @@ targets:
   their groups, then the global ones. A name clash keeps the most specific.
 - Choosing one adds a `[@name]` pill that matches as its parsed pills.
 - A bad pill string is a config error naming the file, the key and the pill.
+
+## Links
+
+`links:` names URLs and commands that `o` opens from anywhere in the TUI. It sits at the
+top level of the root `rerun.yml`:
+
+```yaml
+links:
+  Docs: https://example.com/docs
+  Logs: http://localhost:9428
+  Reseed: ./scripts/reseed.sh
+```
+
+- A value that starts with a URL scheme opens in the browser. Anything else runs as a
+  shell command in the root file's directory.
+- `o` lists the `links:` in file order, then each target's `link:`. Type to filter.
+- Names must be unique, and each value must be a string.
+- Imported files do not contribute links. rerun notes it and ignores their `links:`.
 
 ## Imports
 
@@ -436,7 +461,7 @@ Each save prints one line naming what moved:
 
 - A target you stopped by hand stays stopped. A save swaps its spec but never starts it again.
 - A target added while the pane shows one target or group waits for `space`.
-- `desc` and `open` are cosmetic.
+- `desc` and `link` are cosmetic.
 - A config that does not parse changes nothing and only prints the error.
 
 # The TUI
@@ -575,13 +600,13 @@ Any key other than `shift+↑` / `shift+↓` clears a selection.
 | `b` | hide or show the left list; hidden shows a `b list` cue, and `esc` brings it back |
 | `t` | show times in the left list: durations, the fs hint age and the build age |
 | `e` | open the fs events list (last 10 min) |
-| `o` | open a picker over every `open:` link |
-| `ctrl+o` | open the target's `open:`; on a group header, say what it opens |
+| `o` | open a picker over every link: `links:` first, then each target's `link:` |
+| `ctrl+o` | open the target's `link:`; on a group header, say what it opens |
 | `ctrl+s` | save column picks to `rerun.yml` |
 | `alt+z` / `alt+y` | undo / redo in the query bar, go-to and the link picker (⌘Z/⌘Y in Ghostty) |
 | `q` or `ctrl+c` | ask to quit; `enter` or a second `ctrl+c` quits |
 
-`ctrl+o` says so when the target has no `open:`. `cmd+s` works only where the terminal
+`ctrl+o` says so when the target has no `link:`. `cmd+s` works only where the terminal
 forwards it. Copy uses the terminal's OSC 52 clipboard sequence, which Ghostty and
 herdr pass through.
 

@@ -31,7 +31,8 @@ func TestRetiredKeysFailAsUnknownFields(t *testing.T) {
 		{"cmd on a target", "targets:\n  api:\n    cmd: x\n", `unknown field "cmd"`},
 		{"url on a target", "targets:\n  web:\n    run: x\n    url: http://localhost:5173\n", `unknown field "url"`},
 		{"open-on-start on a target", "targets:\n  web:\n    run: x\n    open-on-start: true\n", `unknown field "open-on-start"`},
-		{"boolean open on a target", "targets:\n  web:\n    run: x\n    open: true\n", `target "web": field "open": expected a string, got bool`},
+		{"open on a target", "targets:\n  web:\n    run: x\n    open: http://localhost:5173\n", `target "web": field "open" was renamed to "link" (run rerun -migrate)`},
+		{"boolean open on a target", "targets:\n  web:\n    run: x\n    open: true\n", `target "web": field "open" was renamed to "link" (run rerun -migrate)`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

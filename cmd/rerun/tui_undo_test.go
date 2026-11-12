@@ -265,7 +265,7 @@ func TestFinderHistoryStartsFreshOnOpen(t *testing.T) {
 
 func TestLinkPickerAltZUndoes(t *testing.T) {
 	web := target("web")
-	web.Open = "http://localhost:8080"
+	web.Link = "http://localhost:8080"
 	m := newTestModel(t, web, target("api"))
 	press(m, "o")
 	typeString(m, "80")
