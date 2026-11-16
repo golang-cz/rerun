@@ -651,14 +651,20 @@ between hit lines.
 |---|---|
 | `timeout` | full text, case-insensitive substring of the raw line |
 | `"connection refused"` | full-text phrase (quotes allow spaces) |
-| `-healthz` | negated full text |
+| `-healthz` / `!= healthz` | negated full text |
+| `\|= timeout` / `\|=timeout` | full text, same as `timeout` |
+| `\|~ "time(out\|d out)"` / `!~ "healthz"` | whole-line regex, negated with `!~` |
 | `level=error` | field equals, case-insensitive for strings, numeric compare for numbers |
 | `level=error\|fatal` | field equals any of a `\|` list |
+| `level="error"` / `level="error\|fatal"` | quoted value is literal: same as `level=error`, no `\|` split |
 | `level!=debug` | field not equal (any of a `\|` list) |
 | `http.status>=400` | `>` `>=` `<` `<=` numeric |
 | `msg~refused` | field contains, case-insensitive |
-| `msg~/time(out\|d out)/` | field matches regex (Go RE2); `msg=~re` accepted as alias |
-| `trace_id=*` / `trace_id!=*` | field exists / missing |
+| `msg=~"time(out\|d out)"` | field matches regex (Go RE2); bare `msg=~re` also works |
+| `msg!~refused` | field does not match regex |
+| `msg~/re/` | alias of `msg=~re` |
+| `trace_id!=""` | field exists and is not empty (alias `trace_id=*`) |
+| `trace_id=""` | field is missing or empty (alias `trace_id!=*`) |
 | `.expr` | raw yq, a truthy result keeps the line |
 | `level=error OR msg~panic` | one pill: either term keeps the line; `OR` joins neighbors, chains work |
 | `OR` as `or` or `"OR"` | plain text, not the operator |
@@ -668,6 +674,11 @@ between hit lines.
 - A field pill never matches a non-JSON line. Full-text pills match any line.
 - A selection with `columns` always shows them as a table.
 - An `OR` cannot join a `.expr` term. `@name` can be one of the alternatives.
+- Regexes match anywhere in the value, like `grep`; anchor with `^` or `$`.
+- Quotes are optional: `level=error` and `level="error"` are the same pill.
+- A pill shows its shortest text, so `level="error"` shows as `level=error`.
+- `| json`, `| logfmt` and other Loki parser stages are ignored, since rerun parses each line itself.
+- Paste a Grafana Loki query: its line filters and label filters become pills. The `{...}` selector is ignored.
 
 **Editing pills.** With the bar open:
 

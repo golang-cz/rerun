@@ -35,9 +35,11 @@ const (
 	pillOpLe
 	pillOpContains
 	pillOpRegex
-	pillOpExists
-	pillOpMissing
 	pillOpYq
+	pillOpNotRegex  // !~: the field exists and does not match the regex
+	pillOpBlank     // ="": the field is missing or empty
+	pillOpFilled    // !="": the field exists and is not empty
+	pillOpLineRegex // |~ and !~ standalone: the whole raw line matches the regex
 )
 
 // pill is one compiled query term: full-text, field comparison, raw yq, or a
@@ -67,6 +69,9 @@ type pillToken struct {
 	text  string
 }
 
+// pipelineStages are the Loki parser stages rerun ignores; the value counts their quoted arguments.
+var pipelineStages = map[string]int{"json": 0, "logfmt": 0, "unpack": 0, "pattern": 1, "regexp": 1}
+
 // orKeyword joins its neighbor terms into one pill; only the bare token counts.
 const orKeyword = "OR"
 
@@ -74,6 +79,10 @@ const orKeyword = "OR"
 // A run of terms joined by OR is one pill that matches when any term does.
 func parsePills(input string, cols []Column) ([]pill, error) {
 	tokens, err := splitPills(input)
+	if err != nil {
+		return nil, err
+	}
+	tokens, err = joinLogQL(tokens)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +114,76 @@ func parsePills(input string, cols []Column) ([]pill, error) {
 		}
 	}
 	return pills, nil
+}
+
+// selectorStart matches the head of a Loki stream selector: {label op.
+var selectorStart = regexp.MustCompile(`^\{\s*[A-Za-z_]\w*\s*(=~|!~|!=|=)`)
+
+// fieldName matches a bare field path such as `level` or `http.status`.
+var fieldName = regexp.MustCompile(`^[A-Za-z_][\w.]*$`)
+
+// fieldOps are the comparisons a spaced field takes: `level != x`.
+var fieldOps = map[string]bool{"=": true, "!=": true, "=~": true, "!~": true, ">": true, ">=": true, "<": true, "<=": true, "~": true}
+
+// isSelector reports whether tok is one whole stream selector, its closing brace last outside quotes.
+func isSelector(tok string) bool {
+	if !selectorStart.MatchString(tok) {
+		return false
+	}
+	inQuote := false
+	for i := 0; i < len(tok); i++ {
+		switch {
+		case tok[i] == '\\' && inQuote && i+1 < len(tok):
+			i++
+		case tok[i] == '"':
+			inQuote = !inQuote
+		case tok[i] == '}' && !inQuote:
+			return i == len(tok)-1
+		}
+	}
+	return false
+}
+
+// Tokens are read in order, so a line filter's value never reads as a field name.
+func joinLogQL(tokens []pillToken) ([]pillToken, error) {
+	out := make([]pillToken, 0, len(tokens))
+	hasValue := func(i int) bool { return i+1 < len(tokens) && tokens[i+1].text != orKeyword }
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		switch {
+		case isSelector(tok.text):
+			continue
+		case tok.text == "|":
+			if i+1 >= len(tokens) || !isBareWord(tokens[i+1].text) {
+				continue // a label filter after the pipe is just a filter
+			}
+			args, ok := pipelineStages[tokens[i+1].text]
+			if !ok {
+				continue // an unknown stage word parses as a plain filter
+			}
+			i++
+			for i+1 < len(tokens) && strings.HasPrefix(tokens[i+1].text, "--") {
+				i++ // a stage flag such as --strict
+			}
+			for k := 0; k < args && i+1 < len(tokens) && strings.HasPrefix(tokens[i+1].text, `"`); k++ {
+				i++
+			}
+		case fieldOps[tok.text] && len(out) > 0 && fieldName.MatchString(out[len(out)-1].text) && hasValue(i):
+			out[len(out)-1].text += tok.text + tokens[i+1].text
+			i++
+		case (tok.text == "|=" || tok.text == "|~" || tok.text == "!=" || tok.text == "!~") && hasValue(i):
+			tok.text += " " + tokens[i+1].text
+			i++
+			out = append(out, tok)
+		default:
+			out = append(out, tok)
+		}
+	}
+	return out, nil
+}
+
+func isBareWord(s string) bool {
+	return s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_") == ""
 }
 
 // groupOR gathers each run of terms joined by OR; a lone term is a group of one.
@@ -156,7 +235,7 @@ func parseOR(group []pillToken, input string, cols []Column) (pill, error) {
 		}
 		alt.finalize()
 		out.alts = append(out.alts, alt)
-		raws = append(raws, tok.text)
+		raws = append(raws, alt.raw)
 	}
 	out.raw = strings.Join(raws, " "+orKeyword+" ")
 	return out, nil
@@ -176,7 +255,7 @@ func splitPills(input string) ([]pillToken, error) {
 	var tokens []pillToken
 	var cur strings.Builder
 	start := 0
-	inQuote, inSlash, started := false, false, false
+	inQuote, inSlash, inBrace, started := false, false, false, false
 	for i := 0; i < len(input); i++ {
 		c := input[i]
 		if !started && c != ' ' {
@@ -198,6 +277,15 @@ func splitPills(input string) ([]pillToken, error) {
 			inQuote = !inQuote
 			cur.WriteByte(c)
 			started = true
+		case c == '{' && !started && !inQuote:
+			// A Loki stream selector may hold spaces and commas; it stays one token to be dropped.
+			inBrace = true
+			cur.WriteByte(c)
+			started = true
+		case c == '}' && inBrace && !inQuote:
+			inBrace = false
+			cur.WriteByte(c)
+			started = true
 		case c == '~' && !inQuote && !inSlash && i+1 < len(input) && input[i+1] == '/':
 			// A /.../ regex value may hold spaces and pipes.
 			inSlash = true
@@ -209,7 +297,7 @@ func splitPills(input string) ([]pillToken, error) {
 			inSlash = false
 			cur.WriteByte(c)
 			started = true
-		case c == ' ' && !inQuote && !inSlash:
+		case c == ' ' && !inQuote && !inSlash && !inBrace:
 			if started {
 				tokens = append(tokens, pillToken{start, cur.String()})
 				cur.Reset()
@@ -226,20 +314,37 @@ func splitPills(input string) ([]pillToken, error) {
 	if inSlash {
 		return nil, fmt.Errorf("unterminated regex in %q", input)
 	}
+	if inBrace {
+		return nil, fmt.Errorf("unterminated selector in %q", input)
+	}
 	if started {
 		tokens = append(tokens, pillToken{start, cur.String()})
 	}
 	return tokens, nil
 }
 
-// parsePill compiles one token; rest reports that a raw yq pill consumed the
-// remaining input.
+// parsePill compiles one token; rest reports that a raw yq pill consumed the remaining input.
 func parsePill(tok pillToken, input string, cols []Column) (pill, bool, error) {
+	p, rest, err := parsePillToken(tok, input, cols)
+	if err == nil && p.op != pillOpYq {
+		p.raw = p.canonical()
+	}
+	return p, rest, err
+}
+
+// parsePillToken is parsePill before the canonical text is set.
+func parsePillToken(tok pillToken, input string, cols []Column) (pill, bool, error) {
 	p := pill{raw: tok.text}
 	s := tok.text
 	if strings.HasPrefix(s, "-") {
 		p.neg = true
 		s = s[1:]
+	}
+	if p.neg && strings.HasPrefix(s, "|~") {
+		return p, false, fmt.Errorf("%s: write !~ for a negated line regex", tok.text)
+	}
+	if p.neg && strings.HasPrefix(s, "|=") {
+		return p, false, fmt.Errorf("%s: write != for a negated line filter", tok.text)
 	}
 	if s == "" {
 		return p, false, fmt.Errorf("%s: missing value", tok.text)
@@ -251,6 +356,12 @@ func parsePill(tok pillToken, input string, cols []Column) (pill, bool, error) {
 		}
 		p.saved = name
 		return p, false, nil
+	}
+	for _, op := range []string{"|=", "|~", "!=", "!~"} {
+		if rest, ok := strings.CutPrefix(s, op); ok {
+			r, err := p.parseLineOp(op, rest, tok.text)
+			return r, false, err
+		}
 	}
 	// A fully quoted token is always full text, even one holding pill syntax.
 	if inner, ok := unquote(s); ok {
@@ -340,10 +451,19 @@ func (p *pill) parseField(field, opStr, valStr, raw string, cols []Column) (pill
 	p.yq = expr
 	switch opStr {
 	case "=", "!=":
-		if valStr == "*" {
-			p.op = pillOpExists
+		if valStr == `""` {
+			// Loki's empty-string forms: missing-or-empty and present-and-non-empty.
+			p.op = pillOpBlank
 			if opStr == "!=" {
-				p.op = pillOpMissing
+				p.op = pillOpFilled
+			}
+			return *p, nil
+		}
+		if valStr == "*" {
+			// The bare-star forms alias Loki's empty-string ones: =* is !="", != * is ="".
+			p.op = pillOpFilled
+			if opStr == "!=" {
+				p.op = pillOpBlank
 			}
 			return *p, nil
 		}
@@ -376,32 +496,66 @@ func (p *pill) parseField(field, opStr, valStr, raw string, cols []Column) (pill
 		case "<=":
 			p.op = pillOpLe
 		}
-	case "~", "=~":
+	case "~", "=~", "!~":
 		body := scanValue(valStr)
 		if body == "" {
 			return *p, fmt.Errorf("%s: missing value", raw)
 		}
-		isRegex := opStr == "=~"
-		if strings.HasPrefix(body, "/") {
-			if len(body) < 2 || !unescapedSuffix(body, '/') {
-				return *p, fmt.Errorf("%s: unterminated regex", raw)
-			}
-			body = body[1 : len(body)-1]
-			isRegex = true
+		body, isSlash, err := slashRegex(valStr, body)
+		if err != nil {
+			return *p, fmt.Errorf("%s: %v", raw, err)
 		}
-		if isRegex {
-			re, err := regexp.Compile(body)
-			if err != nil {
-				return *p, fmt.Errorf("%s: bad regex: %v", raw, err)
-			}
-			p.op = pillOpRegex
-			p.re = re
-		} else {
+		if opStr == "~" && !isSlash {
 			p.op = pillOpContains
 			p.values = []string{body}
+			break
+		}
+		re, err := regexp.Compile(body)
+		if err != nil {
+			return *p, fmt.Errorf("%s: bad regex: %v", raw, err)
+		}
+		p.op, p.re = pillOpRegex, re
+		if opStr == "!~" {
+			p.op = pillOpNotRegex
 		}
 	}
 	return *p, nil
+}
+
+// parseLineOp compiles a LogQL line filter; a bare value is taken as written.
+func (p pill) parseLineOp(op, rest, raw string) (pill, error) {
+	rest = strings.TrimLeft(rest, " ")
+	val, quoted := unquote(rest)
+	if !quoted {
+		val = rest
+	}
+	if val == "" {
+		return p, fmt.Errorf("%s: missing value", raw)
+	}
+	switch op {
+	case "|=":
+		p.op, p.values = pillOpText, []string{val}
+	case "!=":
+		p.op, p.values, p.neg = pillOpText, []string{val}, true
+	default:
+		re, err := regexp.Compile(val)
+		if err != nil {
+			return p, fmt.Errorf("%s: bad regex: %v", raw, err)
+		}
+		p.op, p.re, p.neg = pillOpLineRegex, re, op == "!~"
+	}
+	return p, nil
+}
+
+// slashRegex strips the /.../ delimiters from a bare regex value; a quoted value is literal.
+func slashRegex(valStr, body string) (string, bool, error) {
+	if _, quoted := unquote(valStr); quoted || !strings.HasPrefix(body, "/") {
+		return body, false, nil
+	}
+	if len(body) < 2 || !unescapedSuffix(body, '/') {
+		return "", false, fmt.Errorf("unterminated regex")
+	}
+	return body[1 : len(body)-1], true, nil
 }
 
 // findOp locates the first pill operator outside quotes; == is yq equality.
@@ -418,7 +572,7 @@ func findOp(s string) (int, string) {
 		}
 		if i+1 < len(s) {
 			switch s[i : i+2] {
-			case "!=", ">=", "<=", "=~":
+			case "!=", ">=", "<=", "=~", "!~":
 				return i, s[i : i+2]
 			case "==":
 				i++
@@ -544,7 +698,11 @@ func (p pill) needsJSON() bool {
 	if p.saved != "" {
 		return slices.ContainsFunc(p.sub, func(s pill) bool { return s.needsJSON() })
 	}
-	return p.op != pillOpText
+	switch p.op {
+	case pillOpText, pillOpLineRegex:
+		return false
+	}
+	return true
 }
 
 // match reports whether the pill keeps the line; a negated JSON pill still
@@ -578,13 +736,21 @@ func (p pill) matchRoot(root *yqlib.CandidateNode, line string) bool {
 		}
 		return ok != p.neg
 	}
-	if p.op == pillOpText {
+	switch p.op {
+	case pillOpText:
 		return strings.Contains(strings.ToLower(line), p.lowers[0]) != p.neg
+	case pillOpLineRegex:
+		return p.re.MatchString(line) != p.neg
 	}
 	if root == nil {
 		return false // a JSON pill never keeps a non-JSON line, negated or not
 	}
 	return p.matchDoc(root) != p.neg
+}
+
+// emptyScalar is a scalar "": a map or list is present, however it is written.
+func emptyScalar(n *yqlib.CandidateNode) bool {
+	return n.Kind == yqlib.ScalarNode && n.Tag == "!!str" && n.Value == ""
 }
 
 func (p pill) matchDoc(root *yqlib.CandidateNode) bool {
@@ -604,10 +770,6 @@ func (p pill) matchDoc(root *yqlib.CandidateNode) bool {
 	}
 	node := firstValue(p.yq, root)
 	switch p.op {
-	case pillOpExists:
-		return node != nil
-	case pillOpMissing:
-		return node == nil
 	case pillOpEq:
 		return node != nil && p.anyEqual(node)
 	case pillOpNe:
@@ -616,6 +778,12 @@ func (p pill) matchDoc(root *yqlib.CandidateNode) bool {
 		return node != nil && strings.Contains(strings.ToLower(node.Value), p.lowers[0])
 	case pillOpRegex:
 		return node != nil && p.re.MatchString(node.Value)
+	case pillOpNotRegex:
+		return node != nil && !p.re.MatchString(node.Value)
+	case pillOpBlank:
+		return node == nil || emptyScalar(node)
+	case pillOpFilled:
+		return node != nil && !emptyScalar(node)
 	case pillOpGt:
 		f, ok := numericValue(node)
 		return ok && f > p.num
@@ -683,10 +851,19 @@ func (p pill) spansRoot(root *yqlib.CandidateNode, line string) [][2]int {
 	if p.op == pillOpText {
 		return foldSpans(line, p.lowRunes)
 	}
+	if p.op == pillOpLineRegex {
+		var out [][2]int
+		for _, idx := range p.re.FindAllStringIndex(line, -1) {
+			if idx[0] < idx[1] {
+				out = append(out, [2]int{idx[0], idx[1]})
+			}
+		}
+		return out
+	}
 	switch p.op {
 	case pillOpContains, pillOpRegex:
 		return p.docSpans(root, line)
-	case pillOpEq, pillOpNe, pillOpGt, pillOpGe, pillOpLt, pillOpLe, pillOpExists:
+	case pillOpEq, pillOpNe, pillOpNotRegex, pillOpGt, pillOpGe, pillOpLt, pillOpLe, pillOpFilled:
 		return p.valueSpan(root, line)
 	}
 	return nil
@@ -928,4 +1105,83 @@ func foldMatchAt(line string, i int, low []rune) (int, bool) {
 		j += size
 	}
 	return j, true
+}
+
+// canonical is the pill's shortest text, which re-parses to the same pill.
+func (p pill) canonical() string {
+	neg := ""
+	if p.neg && p.op != pillOpLineRegex {
+		neg = "-"
+	}
+	switch {
+	case p.saved != "":
+		return neg + "@" + p.saved
+	case p.op == pillOpText:
+		return neg + textValue(p.values[0])
+	case p.op == pillOpLineRegex:
+		if p.neg {
+			return "!~ " + quoteRaw(p.re.String())
+		}
+		return "|~ " + quoteRaw(p.re.String())
+	}
+	op := map[pillOp]string{
+		pillOpEq: "=", pillOpNe: "!=", pillOpContains: "~", pillOpRegex: "=~", pillOpNotRegex: "!~",
+		pillOpBlank: "=", pillOpFilled: "!=", pillOpGt: ">", pillOpGe: ">=", pillOpLt: "<", pillOpLe: "<=",
+	}[p.op]
+	value := ""
+	switch p.op {
+	case pillOpBlank, pillOpFilled:
+		value = `""`
+	case pillOpEq, pillOpNe:
+		if p.null {
+			value = "null"
+			break
+		}
+		parts := make([]string, len(p.values))
+		for i, v := range p.values {
+			parts[i] = fieldValue(v)
+		}
+		value = strings.Join(parts, "|")
+	case pillOpContains:
+		value = fieldValue(p.values[0])
+	case pillOpRegex, pillOpNotRegex:
+		value = regexValue(p.re.String())
+	default:
+		value = strconv.FormatFloat(p.num, 'f', -1, 64)
+	}
+	return neg + p.field + op + value
+}
+
+// quoteRaw wraps v in double quotes, escaping only the \\ and \" that unquote resolves.
+func quoteRaw(v string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
+}
+
+// fieldValue is a comparison value as written: quoted when it would not read back whole.
+func fieldValue(v string) string {
+	if v == "" || v == "null" || strings.ContainsAny(v, " \t|*\"\\") || strings.HasPrefix(v, "/") {
+		return quoteRaw(v)
+	}
+	return v
+}
+
+// regexValue is a regex pattern as written: quoted only for spaces, quotes, backslashes or a leading slash.
+func regexValue(v string) string {
+	if v == "" || strings.ContainsAny(v, " \t\"\\") || strings.HasPrefix(v, "/") {
+		return quoteRaw(v)
+	}
+	return v
+}
+
+// textValue is a full-text term as written: quoted when it would parse as a pill operator or OR.
+func textValue(v string) string {
+	if v == orKeyword || strings.HasPrefix(v, ".") || strings.HasPrefix(v, "@") || strings.HasPrefix(v, "-") ||
+		strings.HasPrefix(v, "|") || strings.HasPrefix(v, "!") || strings.HasPrefix(v, "{") ||
+		strings.ContainsAny(v, "=<>~!{}") || v == "" {
+		return quoteRaw(v)
+	}
+	if strings.ContainsAny(v, " \t|*\"\\") {
+		return quoteRaw(v)
+	}
+	return v
 }

@@ -193,6 +193,9 @@ func (m *tuiModel) pickValue(f *jsonField) {
 			raw := path + "=" + pillQuote(v)
 			m.addValuePill(raw, path, func(p *pill) {
 				p.op, p.values = pillOpEq, []string{v}
+				if v == "" {
+					p.op, p.values = pillOpBlank, nil // `=""` reparses as missing-or-empty
+				}
 			})
 			return
 		case nil:

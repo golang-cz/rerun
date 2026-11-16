@@ -372,10 +372,10 @@ var placeholderExamples = []string{
 	"level=error",
 	"-healthz",
 	"status>=500 OR panic",
-	`msg~/time(out|d out)/`,
+	`msg=~"time(out|d out)"`,
 	`"two words"`,
 	"@saved",
-	".yq",
+	".tags|length>2",
 }
 
 // inputPlaceholder is the faint hint an empty query box shows: the leading examples that fit whole.
