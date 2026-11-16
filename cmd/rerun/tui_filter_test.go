@@ -268,7 +268,7 @@ func TestPlainFilterHidesNonMatchingLines(t *testing.T) {
 	if !m.filterOn() {
 		t.Fatal("esc in the list cleared the filter")
 	}
-	press(m, "/", "backspace", "esc")
+	press(m, "/", "up", "backspace", "esc")
 	if m.filterOn() || m.paneSelDirty {
 		t.Fatalf("backspace on the empty input left the filter: pills=%d dirty=%v", len(m.pills), m.paneSelDirty)
 	}
@@ -470,10 +470,7 @@ func TestFilterEditRefreshesRenderedPane(t *testing.T) {
 	press(m, "enter")
 
 	// Reopen, swap the query, and check the rendered body follows.
-	press(m, "/")
-	for range len("keep") {
-		press(m, "backspace")
-	}
+	press(m, "/", "up", "backspace")
 	typeString(m, "drop")
 	m.frame()
 	if body := renderedBody(m); strings.Contains(body, "keep-0") {

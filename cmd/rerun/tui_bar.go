@@ -162,7 +162,7 @@ func (m *tuiModel) openBar() {
 	m.inputSel = false
 	m.inputHist = undoStack{}
 	m.editKindOn = false
-	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
+	m.draft, m.draftOn, m.queryErr, m.refErr = pillSet{}, false, "", ""
 }
 
 // closeBar commits a valid typed input, then blurs the bar; the pills stay.
@@ -184,7 +184,7 @@ func (m *tuiModel) closeBar() {
 	m.inputSel = false
 	m.inputHist = undoStack{}
 	m.editKindOn = false
-	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
+	m.draft, m.draftOn, m.queryErr, m.refErr = pillSet{}, false, "", ""
 	m.barFocus = false
 	m.barSel = -1
 	m.pillsChanged()
@@ -280,7 +280,7 @@ func (m *tuiModel) focusPill(idx int) {
 // draft's @refs resolve here too, and the hit list follows the changed rows.
 func (m *tuiModel) inputChanged() {
 	m.paneCol = 0
-	m.draft, m.draftOn, m.queryErr = pillSet{}, false, ""
+	m.draft, m.draftOn, m.queryErr, m.refErr = pillSet{}, false, "", ""
 	m.pickSel = 0
 	if m.input != "" {
 		if set, err := compilePills(m.input, m.barCols()); err != nil {
@@ -288,9 +288,14 @@ func (m *tuiModel) inputChanged() {
 			if !m.pickActive() {
 				m.queryErr = err.Error()
 			}
-		} else if m.resolveSaved(set.pills) == nil {
-			// An unresolvable @name stays undrafted; enter or esc names the error.
-			m.draft, m.draftOn = set, true
+		} else if err := m.resolveSaved(set.pills); err != nil {
+			// An unresolvable @name stays undrafted; the picker's partial names never turn red.
+			if !m.pickActive() {
+				m.refErr = err.Error()
+			}
+		} else {
+			// The json flag must be recomputed: a field @name only reads JSON once resolved.
+			m.draft, m.draftOn = pillSetOf(set.pills), true
 		}
 	}
 	m.paneSelDirty = true
@@ -299,13 +304,20 @@ func (m *tuiModel) inputChanged() {
 	m.recomputeSearch(false)
 }
 
+// inputErr is the open input's error: a parse or save error, else a live unresolved @name.
+func (m *tuiModel) inputErr() string {
+	if m.queryErr != "" {
+		return m.queryErr
+	}
+	return m.refErr
+}
+
 // barCols is the columns the bar's field pills resolve their names against.
 func (m *tuiModel) barCols() []Column { return m.headerColumns() }
 
-// pickActive reports whether the bar input is picking a saved query: '@'
-// leads the input and no pill is selected.
+// pickActive reports whether the bar is picking a saved query: a lone '@name', not a typed '@a OR b'.
 func (m *tuiModel) pickActive() bool {
-	return m.inputMode != inputNone && m.barSel < 0 && strings.HasPrefix(m.input, "@")
+	return m.inputMode != inputNone && m.barSel < 0 && strings.HasPrefix(m.input, "@") && !strings.Contains(m.input, " ")
 }
 
 // pickMatches is the @ picker's candidate list, narrowed by the text after '@'.
@@ -397,6 +409,13 @@ func (m *tuiModel) resolveSavedDepth(pills []pill, depth int) error {
 	}
 	for i := range pills {
 		p := &pills[i]
+		if len(p.alts) > 0 {
+			// An OR's saved alternatives resolve at the same depth; a cycle still goes through a saved pill.
+			if err := m.resolveSavedDepth(p.alts, depth); err != nil {
+				return err
+			}
+			continue
+		}
 		if p.saved == "" {
 			continue
 		}
@@ -593,8 +612,6 @@ func (m *tuiModel) handleBarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.removePill(m.barSel)
 		case m.inputSel || m.input != "":
 			m.inputDeleteBefore()
-		case len(m.pills) > 0:
-			m.removePill(len(m.pills) - 1)
 		}
 	case "delete", "ctrl+d":
 		if m.barSel >= 0 {

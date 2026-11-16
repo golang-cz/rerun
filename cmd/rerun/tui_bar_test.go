@@ -87,9 +87,10 @@ func TestBackspaceOnEmptyInputRemovesLastChip(t *testing.T) {
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	press(m, "/", "backspace")
-	if len(m.pills) != 1 || m.pills[0].raw != "alpha" || m.inputMode != inputQuery {
-		t.Fatalf("pills = %+v mode = %d, want alpha kept and the input still open", m.pills, m.inputMode)
+	// An empty input with no pill picked leaves the pills alone.
+	press(m, "/", "backspace", "backspace")
+	if len(m.pills) != 2 || m.barSel != -1 || m.inputMode != inputQuery {
+		t.Fatalf("pills = %d sel = %d mode = %d, want no change and the input open", len(m.pills), m.barSel, m.inputMode)
 	}
 }
 

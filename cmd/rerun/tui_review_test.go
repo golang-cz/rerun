@@ -61,7 +61,8 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 		t.Fatal("a yq filter hid the run rule")
 	}
 
-	press(m, "/", "backspace", "backspace", "esc")
+	// Clearing both pills: up picks each in turn and backspace removes it.
+	press(m, "/", "up", "backspace", "backspace", "esc")
 	press(m, "f")
 	typeString(m, "started")
 	press(m, "enter")
@@ -69,7 +70,7 @@ func TestRunRuleSurvivesFiltersAndSearch(t *testing.T) {
 		t.Fatalf("search matched the run rule: %v", m.searchMatches)
 	}
 	// The bar reopens empty, so one backspace drops the "started" pill.
-	press(m, "f", "backspace")
+	press(m, "f", "up", "backspace")
 	typeString(m, "listen")
 	press(m, "enter")
 	if len(m.searchMatches) != 1 {

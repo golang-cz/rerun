@@ -154,14 +154,15 @@ func TestEscThatChangesNothingHintsAtChips(t *testing.T) {
 	}
 }
 
-func TestPaneBackspaceRemovesLastChipOfAnyKind(t *testing.T) {
+// Backspace with the pane focused leaves every pill alone, and ctrl+h too.
+func TestPaneBackspaceKeepsPills(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	commitText(m, "f", "delta")
 	press(m, "right")
-	press(m, "backspace")
-	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
-		t.Fatalf("pills=%v, want the last pill removed first", m.pills)
+	press(m, "backspace", "ctrl+h")
+	if len(m.pills) != 2 || m.barFocus || m.barSel != -1 {
+		t.Fatalf("pills=%d barFocus=%v sel=%d, want no change", len(m.pills), m.barFocus, m.barSel)
 	}
 }
 
@@ -208,7 +209,7 @@ func TestUnhealthyRunShowsStatusAndTriangle(t *testing.T) {
 func TestEmptyStateHints(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "nomatch")
-	if got := m.emptyHint(); got != "no lines match the filters · backspace removes the last" {
+	if got := m.emptyHint(); got != "no lines match the filters · ↑ to edit pills" {
 		t.Fatalf("filtered hint = %q", got)
 	}
 

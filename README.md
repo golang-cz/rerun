@@ -583,7 +583,6 @@ or on the newest line when that is off screen.
 | `i` | open the original lines, see [Raw view](#raw-view) |
 | `a` | on an expanded key: add it as a column |
 | `=` | on an expanded scalar: add a `path=value` pill |
-| `backspace` | remove a pill |
 | `n` / `N`, `ctrl+g` / `ctrl+shift+g` | next / previous pill hit |
 | `ctrl+l` | clear the log; older lines stay in scrollback |
 | `s` | stop every target the pane shows |
@@ -631,10 +630,9 @@ selects text and never toggles.
 `/` or `f` opens the query bar. Type a filter and press `enter` to add it as pills.
 
 - One input can hold several pills: `level=error -healthz` adds two.
-- Pills AND together.
+- Pills AND together; `OR` joins two terms into one pill.
 - A leading `.` runs a yq expression per JSON line.
 - `esc` leaves the bar but keeps the pills.
-- `backspace` on an empty input removes the last pill.
 - `@` lists the scope's [saved queries](#saved-queries).
 - The bar shows the scope, the pill count and the matching/total lines.
 - A pill that does not parse keeps the input red, with the error in the footer.
@@ -662,11 +660,14 @@ between hit lines.
 | `msg~/time(out\|d out)/` | field matches regex (Go RE2); `msg=~re` accepted as alias |
 | `trace_id=*` / `trace_id!=*` | field exists / missing |
 | `.expr` | raw yq, a truthy result keeps the line |
+| `level=error OR msg~panic` | one pill: either term keeps the line; `OR` joins neighbors, chains work |
+| `OR` as `or` or `"OR"` | plain text, not the operator |
 
 - A field name is a yq path without the leading dot: `http.status` ≡ `.http.status`.
 - A column name from the scope's `columns:` resolves to that column's expression first.
 - A field pill never matches a non-JSON line. Full-text pills match any line.
 - A selection with `columns` always shows them as a table.
+- An `OR` cannot join a `.expr` term. `@name` can be one of the alternatives.
 
 **Editing pills.** With the bar open:
 
@@ -682,7 +683,7 @@ between hit lines.
 | `esc` | return to the input |
 
 With the bar closed, a click on a pill opens the bar with that pill picked. Click a
-pill's `×`, or press `backspace` with the pane focused, to remove it.
+pill's `×` to remove it.
 
 ## JSON lines and columns
 

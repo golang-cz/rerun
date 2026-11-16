@@ -56,6 +56,7 @@ type pill struct {
 	yq       *yqlib.ExpressionNode
 	saved    string
 	sub      []pill // a saved query's parsed pills, resolved when the pill is added
+	alts     []pill // an OR pill's alternatives: it matches when any one does
 	// null marks a clicked null literal: it matches a JSON null, never the string "null".
 	null bool
 }
@@ -66,17 +67,36 @@ type pillToken struct {
 	text  string
 }
 
+// orKeyword joins its neighbor terms into one pill; only the bare token counts.
+const orKeyword = "OR"
+
 // parsePills compiles a query bar input into ANDed pills, split on unquoted spaces.
+// A run of terms joined by OR is one pill that matches when any term does.
 func parsePills(input string, cols []Column) ([]pill, error) {
 	tokens, err := splitPills(input)
 	if err != nil {
 		return nil, err
 	}
-	pills := make([]pill, 0, len(tokens))
-	for _, tok := range tokens {
-		p, rest, err := parsePill(tok, input, cols)
+	groups, err := groupOR(tokens)
+	if err != nil {
+		return nil, err
+	}
+	pills := make([]pill, 0, len(groups))
+	for _, g := range groups {
+		if len(g) > 1 {
+			p, err := parseOR(g, input, cols)
+			if err != nil {
+				return nil, err
+			}
+			pills = append(pills, p)
+			continue
+		}
+		p, rest, err := parsePill(g[0], input, cols)
 		if err != nil {
 			return nil, err
+		}
+		if rest && hasORToken(input[g[0].start:]) {
+			return nil, fmt.Errorf("%s: a .yq term cannot join an OR", g[0].text)
 		}
 		p.finalize()
 		pills = append(pills, p)
@@ -85,6 +105,69 @@ func parsePills(input string, cols []Column) ([]pill, error) {
 		}
 	}
 	return pills, nil
+}
+
+// groupOR gathers each run of terms joined by OR; a lone term is a group of one.
+func groupOR(tokens []pillToken) ([][]pillToken, error) {
+	var groups [][]pillToken
+	var cur []pillToken
+	pending := false // an OR still waits for its right term
+	for _, tok := range tokens {
+		if tok.text == orKeyword {
+			if len(cur) == 0 || pending {
+				return nil, fmt.Errorf("OR needs a term on each side")
+			}
+			pending = true
+			continue
+		}
+		if len(cur) > 0 && !pending {
+			groups = append(groups, cur)
+			cur = nil
+		}
+		cur = append(cur, tok)
+		pending = false
+	}
+	if pending {
+		return nil, fmt.Errorf("OR needs a term on each side")
+	}
+	if len(cur) > 0 {
+		groups = append(groups, cur)
+	}
+	return groups, nil
+}
+
+// hasORToken reports whether an OR keyword appears as its own token in s.
+func hasORToken(s string) bool {
+	toks, err := splitPills(s)
+	return err == nil && slices.ContainsFunc(toks, func(t pillToken) bool { return t.text == orKeyword })
+}
+
+// parseOR compiles a group of OR-joined terms into one pill; raw yq cannot be an alternative.
+func parseOR(group []pillToken, input string, cols []Column) (pill, error) {
+	var out pill
+	raws := make([]string, 0, len(group))
+	for _, tok := range group {
+		alt, _, err := parsePill(tok, input, cols)
+		if err != nil {
+			return pill{}, err
+		}
+		if alt.op == pillOpYq {
+			return pill{}, fmt.Errorf("%s: a .yq term cannot join an OR", tok.text)
+		}
+		alt.finalize()
+		out.alts = append(out.alts, alt)
+		raws = append(raws, tok.text)
+	}
+	out.raw = strings.Join(raws, " "+orKeyword+" ")
+	return out, nil
+}
+
+// terms lists the pill's own terms: its OR alternatives, else the pill itself.
+func (p pill) terms() []pill {
+	if len(p.alts) > 0 {
+		return p.alts
+	}
+	return []pill{p}
 }
 
 // splitPills splits on spaces outside double quotes and /regex/ regions. \"
@@ -455,6 +538,9 @@ func (p *pill) finalize() {
 
 // needsJSON reports whether the pill reads the decoded document.
 func (p pill) needsJSON() bool {
+	if len(p.alts) > 0 {
+		return slices.ContainsFunc(p.alts, func(s pill) bool { return s.needsJSON() })
+	}
 	if p.saved != "" {
 		return slices.ContainsFunc(p.sub, func(s pill) bool { return s.needsJSON() })
 	}
@@ -473,6 +559,14 @@ func (p pill) match(line string) bool {
 // matchRoot evaluates the pill against an already-decoded line; root is nil
 // for a non-JSON line.
 func (p pill) matchRoot(root *yqlib.CandidateNode, line string) bool {
+	if len(p.alts) > 0 {
+		for _, a := range p.alts {
+			if a.matchRoot(root, line) {
+				return true
+			}
+		}
+		return false
+	}
 	// A saved query ANDs its pills, negated as a whole; an unresolved one filters nothing.
 	if p.saved != "" {
 		ok := true
@@ -568,6 +662,16 @@ func (p pill) spans(line string) [][2]int {
 func (p pill) spansRoot(root *yqlib.CandidateNode, line string) [][2]int {
 	if p.neg {
 		return nil
+	}
+	if len(p.alts) > 0 {
+		// Each alternative that keeps the line marks its own hits.
+		var out [][2]int
+		for _, a := range p.alts {
+			if a.matchRoot(root, line) {
+				out = append(out, a.spansRoot(root, line)...)
+			}
+		}
+		return out
 	}
 	if p.saved != "" {
 		var out [][2]int

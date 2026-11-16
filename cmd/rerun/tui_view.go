@@ -367,12 +367,39 @@ func (m *tuiModel) inputBoxW() int {
 	return max(1, min(rightW, max(inputMinWidth, rightW-2)))
 }
 
-// inputPlaceholder is the faint hint an empty query box shows.
+// placeholderExamples are the empty query box's hints, most useful first.
+var placeholderExamples = []string{
+	"level=error",
+	"-healthz",
+	"status>=500 OR panic",
+	`msg~/time(out|d out)/`,
+	`"two words"`,
+	"@saved",
+	".yq",
+}
+
+// inputPlaceholder is the faint hint an empty query box shows: the leading examples that fit whole.
 func (m *tuiModel) inputPlaceholder() string {
 	if len(m.pills) > 0 {
 		return "↑ pills"
 	}
-	return `level=error  "two words"  @saved  .yq`
+	// The head row is the prompt, a space, the hint, then the count, with a cell to spare.
+	innerW := m.modalInnerW(m.inputBoxW())
+	avail := innerW - displayWidth(m.inputCount()) - 1 - displayWidth(m.styles.chip.Render(inputPrompt)) - 1
+	var out []string
+	w := 0
+	for _, ex := range placeholderExamples {
+		next := w + displayWidth(ex)
+		if len(out) > 0 {
+			next += 2
+		}
+		if next > avail && len(out) > 0 {
+			break
+		}
+		out = append(out, ex)
+		w = next
+	}
+	return strings.Join(out, "  ")
 }
 
 // inputCount is the box header's right-aligned count: the picker size while
@@ -421,7 +448,7 @@ func (m *tuiModel) inputBoxView() string {
 		switch {
 		case m.inputSel:
 			head += m.styles.sel.Render(text)
-		case m.queryErr != "":
+		case m.inputErr() != "":
 			head += m.styles.errText.Render(text)
 		default:
 			head += text
@@ -441,8 +468,8 @@ func (m *tuiModel) inputBoxView() string {
 		body = m.pickLines(innerW)
 		footer = "↑/↓ move · enter add · esc close"
 	}
-	if m.queryErr != "" {
-		footer = m.styles.errText.Render(m.queryErr + " · esc clears")
+	if e := m.inputErr(); e != "" {
+		footer = m.styles.errText.Render(e + " · esc clears")
 	}
 	return m.modalBox(head, footer, body, outerW, 0)
 }
@@ -1387,9 +1414,9 @@ func (m *tuiModel) makeEmptyHint() string {
 func (m *tuiModel) emptyHint() string {
 	if m.filterActive() {
 		if m.solo >= 0 {
-			return fmt.Sprintf("no lines in %s match the filters · backspace removes the last", m.targets[m.solo].spec.Name)
+			return fmt.Sprintf("no lines in %s match the filters · ↑ to edit pills", m.targets[m.solo].spec.Name)
 		}
-		return "no lines match the filters · backspace removes the last"
+		return "no lines match the filters · ↑ to edit pills"
 	}
 	// A solo target names its own state below; the make hint would hide it.
 	if hint := m.makeEmptyHint(); hint != "" && !m.anyTargetRan() && m.solo < 0 {
@@ -1474,7 +1501,7 @@ var helpKeys = [][2]string{
 	{"c", "copies the line or selection"},
 	{"pgup/pgdn", "scroll the pane (ctrl+u/ctrl+d); a full page in focus"},
 	{"enter → a =", "pane: expand/collapse the line · a add key, = filter value"},
-	{"backspace ×", "pane: last pill · bar: ↑ picks, x or del drops · click ×"},
+	{"backspace ×", "bar: ↑ picks a pill, backspace removes it · click ×"},
 	{"ctrl+s", "save unsaved columns to rerun.yml"},
 	{"q ^C", "q asks to quit · enter or ^C again quits · esc cancels"},
 }

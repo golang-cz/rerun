@@ -316,7 +316,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			before := m.scopeState()
 			m.escList()
 			if m.scopeState() == before && len(m.pills) > 0 {
-				m.showHint("pills stay · backspace removes the last · click × to remove")
+				m.showHint("pills stay · ↑ picks a pill · click × to remove")
 			}
 		}
 
@@ -396,11 +396,6 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "=":
 		if m.paneFocus {
 			m.pickCursorValue()
-		}
-
-	case "backspace":
-		if m.paneFocus && len(m.pills) > 0 {
-			m.removePill(len(m.pills) - 1)
 		}
 
 	case "ctrl+s":

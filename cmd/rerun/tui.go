@@ -384,6 +384,8 @@ type tuiModel struct {
 	draft    pillSet
 	draftOn  bool
 	queryErr string
+	// refErr is the live error for an @name that does not resolve; esc still keeps the bar open for it.
+	refErr string
 	// pickSel is the selected row of the bar's @ picker.
 	pickSel      int
 	paneSel      []int
@@ -1269,13 +1271,19 @@ func (m *tuiModel) reresolveSaved() {
 	var dropped []string
 	kept := m.pills[:0]
 	for _, p := range m.pills {
-		if p.saved == "" {
+		var names []string
+		for _, t := range p.terms() {
+			if t.saved != "" {
+				names = append(names, "@"+t.saved)
+			}
+		}
+		if len(names) == 0 {
 			kept = append(kept, p)
 			continue
 		}
 		one := []pill{p}
 		if err := m.resolveSaved(one); err != nil {
-			dropped = append(dropped, "@"+p.saved)
+			dropped = append(dropped, names...)
 			continue
 		}
 		kept = append(kept, one[0])
@@ -1451,6 +1459,10 @@ func (m *tuiModel) recomputeSearch(reset bool) {
 func pillHits(p pill, root *yqlib.CandidateNode, line string) bool {
 	if len(p.spansRoot(root, line)) > 0 {
 		return true
+	}
+	if len(p.alts) > 0 {
+		// A raw yq match inside an alternative paints no span, so it counts here.
+		return slices.ContainsFunc(p.alts, func(a pill) bool { return pillHits(a, root, line) })
 	}
 	if p.saved != "" {
 		return slices.ContainsFunc(p.sub, func(s pill) bool { return pillHits(s, root, line) })

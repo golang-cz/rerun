@@ -489,8 +489,8 @@ func TestInputPlaceholder(t *testing.T) {
 	m := queriesModel(t)
 	press(m, "/")
 	box := ansi.Strip(m.inputBoxView())
-	if !strings.Contains(box, `level=error  "two words"  @saved  .yq`) {
-		t.Fatalf("box = %q, want the placeholder", box)
+	if !strings.Contains(box, `level=error  -healthz  status>=500 OR panic`) {
+		t.Fatalf("box = %q, want the leading placeholder examples", box)
 	}
 }
 
@@ -503,6 +503,10 @@ func TestConfigQueryRefsValidate(t *testing.T) {
 	}{
 		"cycle": {
 			"queries:\n  a: \"@b\"\n  b: \"@a\"\ntargets:\n  web:\n    run: sleep 1\n",
+			"refers to itself",
+		},
+		"cycle through or": {
+			"queries:\n  a: \"@b OR x\"\n  b: \"@a\"\ntargets:\n  web:\n    run: sleep 1\n",
 			"refers to itself",
 		},
 		"unknown": {

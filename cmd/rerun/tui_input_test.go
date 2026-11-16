@@ -198,15 +198,15 @@ func TestCtrlHDeletesLikeBackspaceInInput(t *testing.T) {
 	}
 }
 
-// ctrl+h on an empty input removes the last chip, exactly as backspace does.
-func TestCtrlHOnEmptyInputRemovesLastChip(t *testing.T) {
+// ctrl+h on an empty input with no pill picked does nothing, exactly as backspace does.
+func TestCtrlHOnEmptyInputKeepsPills(t *testing.T) {
 	m := alphaModel(t)
 	commitText(m, "/", "alpha")
 	commitText(m, "/", "beta")
 
-	press(m, "/", "ctrl+h")
-	if len(m.pills) != 1 || m.pills[0].raw != "alpha" || m.inputMode != inputQuery {
-		t.Fatalf("pills = %+v mode = %d after ctrl+h, want alpha kept and the input open", m.pills, m.inputMode)
+	press(m, "/", "ctrl+h", "ctrl+h")
+	if len(m.pills) != 2 || m.barSel != -1 || m.inputMode != inputQuery {
+		t.Fatalf("pills = %d sel = %d mode = %d after ctrl+h, want no change and the input open", len(m.pills), m.barSel, m.inputMode)
 	}
 }
 

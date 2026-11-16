@@ -91,14 +91,14 @@ func TestParseErrorKeepsInputRed(t *testing.T) {
 	}
 }
 
-// backspace on an empty input removes the last pill and keeps the bar open.
-func TestEmptyBackspaceRemovesLastPill(t *testing.T) {
+// backspace on an empty input leaves the pills alone; the bar stays open.
+func TestEmptyBackspaceKeepsPills(t *testing.T) {
 	m := pillModel(t)
 	commitPill(m, "alpha")
 	commitPill(m, "beta")
 	press(m, "/", "backspace")
-	if len(m.pills) != 1 || m.pills[0].raw != "alpha" {
-		t.Fatalf("pills = %+v, want only alpha", m.pills)
+	if len(m.pills) != 2 || m.barSel != -1 {
+		t.Fatalf("pills = %d sel = %d, want both pills and nothing picked", len(m.pills), m.barSel)
 	}
 	if m.inputMode != inputQuery {
 		t.Fatalf("mode = %d, want the bar still open", m.inputMode)
@@ -169,7 +169,7 @@ func TestSelectedPillKeys(t *testing.T) {
 	}
 
 	// backspace removes the selected pill.
-	press(m, "/", "left", "backspace")
+	press(m, "/", "up", "backspace")
 	if len(m.pills) != 0 {
 		t.Fatalf("backspace: pills = %+v, want none", m.pills)
 	}
@@ -424,7 +424,7 @@ func TestNumericAndExistsPillsAreHits(t *testing.T) {
 	if got := len(m.searchMatches); got != 1 {
 		t.Fatalf("numeric pill matches = %d, want its one hit line", got)
 	}
-	press(m, "/", "backspace", "esc")
+	press(m, "/", "up", "backspace", "esc")
 	commitPill(m, "trace_id=*")
 	if got := len(m.searchMatches); got != 1 {
 		t.Fatalf("exists pill matches = %d, want its one hit line", got)

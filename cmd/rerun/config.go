@@ -715,11 +715,13 @@ func checkQueryRef(lookup func(string) (queryRef, bool), stack []string, name st
 		return err
 	}
 	for _, p := range pills {
-		if p.saved == "" {
-			continue
-		}
-		if err := checkQueryRef(lookup, append(stack, name), p.saved); err != nil {
-			return err
+		for _, t := range p.terms() {
+			if t.saved == "" {
+				continue
+			}
+			if err := checkQueryRef(lookup, append(stack, name), t.saved); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

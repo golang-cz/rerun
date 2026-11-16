@@ -399,7 +399,7 @@ func TestChipRemovalByCrossAndBackspace(t *testing.T) {
 
 	x, y = findInPane(t, m, `status: 403`)
 	m.handleMouse(mouse(x+len(`status: `)+1, y, false))
-	press(m, "right", "backspace")
+	press(m, "/", "up", "backspace")
 	if len(m.pills) != 0 {
 		t.Fatalf("pills = %+v after backspace, want none", m.pills)
 	}
