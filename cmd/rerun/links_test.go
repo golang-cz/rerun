@@ -27,6 +27,77 @@ func TestParseLinksKeepsSourceOrder(t *testing.T) {
 	}
 }
 
+// A links: entry is a string or a mapping with link: and an optional desc:, and both keep source order.
+func TestParseLinksMappingFormKeepsOrderAndDesc(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	writeFile(t, path, "links:\n  Docs:\n    link: https://example.com/docs\n    desc: Product docs\n  Logs: http://localhost:9428\n  Reseed:\n    link: ./reseed.sh\ntargets:\n  web:\n    run: x\n")
+	cfg, err := ParseConfig(path)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	want := []Link{
+		{Name: "Docs", Value: "https://example.com/docs", Desc: "Product docs", Dir: filepath.Dir(path)},
+		{Name: "Logs", Value: "http://localhost:9428", Dir: filepath.Dir(path)},
+		{Name: "Reseed", Value: "./reseed.sh", Dir: filepath.Dir(path)},
+	}
+	if !slices.Equal(cfg.Links, want) {
+		t.Fatalf("links = %+v, want %+v", cfg.Links, want)
+	}
+}
+
+// A null desc: means no desc, in each spelling YAML accepts for null.
+func TestParseLinksNullDescIsUnset(t *testing.T) {
+	for _, desc := range []string{"desc:", "desc: null", "desc: ~"} {
+		t.Run(desc, func(t *testing.T) {
+			cfg, err := writeOpenConfig(t, "links:\n  docs:\n    link: https://a.test\n    "+desc+"\ntargets:\n  web:\n    run: x\n")
+			if err != nil {
+				t.Fatalf("ParseConfig: %v", err)
+			}
+			if got := cfg.Links[0]; got.Value != "https://a.test" || got.Desc != "" {
+				t.Fatalf("link = %+v, want the URL and no desc", got)
+			}
+		})
+	}
+}
+
+// Aliases resolve to the anchored mapping or scalar, so both forms work through *name.
+func TestParseLinksAliases(t *testing.T) {
+	cfg, err := writeOpenConfig(t, "links:\n  base: &base\n    link: https://a.test\n    desc: Docs\n  copy: *base\n  logs:\n    link: &u https://b.test\n  feed:\n    link: *u\ntargets:\n  web:\n    run: x\n")
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.Links[1].Value != "https://a.test" || cfg.Links[1].Desc != "Docs" {
+		t.Errorf("copy = %+v, want the anchored mapping", cfg.Links[1])
+	}
+	if cfg.Links[3].Value != "https://b.test" {
+		t.Errorf("feed = %+v, want the aliased link value", cfg.Links[3])
+	}
+}
+
+// An empty link: points its caret at the value, so the mapping's own line is not blamed.
+func TestParseLinksEmptyLinkCaretWhenDescComesFirst(t *testing.T) {
+	_, err := writeOpenConfig(t, "links:\n  docs:\n    desc: Product docs\n    link: \"  \"\ntargets:\n  web:\n    run: x\n")
+	if err == nil || !strings.Contains(err.Error(), ":4:11: links: link \"docs\": link: is empty") {
+		t.Fatalf("err = %v, want a caret on line 4 col 11 at the empty link:", err)
+	}
+}
+
+// A missing link: points at the link name, not the mapping.
+func TestParseLinksMissingLinkCaretsAtName(t *testing.T) {
+	_, err := writeOpenConfig(t, "links:\n  docs:\n    desc: only a desc\ntargets:\n  web:\n    run: x\n")
+	if err == nil || !strings.Contains(err.Error(), ":2:3: links: link \"docs\": missing link:") {
+		t.Fatalf("err = %v, want a caret on line 2 col 3 at the name", err)
+	}
+}
+
+// A duplicate key is reported at the repeated key, before its value is type-checked.
+func TestParseLinksDuplicateKeyCaretsAtRepeat(t *testing.T) {
+	_, err := writeOpenConfig(t, "links:\n  docs:\n    link: https://a.test\n    link: 8080\ntargets:\n  web:\n    run: x\n")
+	if err == nil || !strings.Contains(err.Error(), ":4:5: links: link \"docs\": duplicate key \"link\"") {
+		t.Fatalf("err = %v, want a duplicate-key caret on line 4 col 5", err)
+	}
+}
+
 func TestParseLinksErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -37,6 +108,16 @@ func TestParseLinksErrors(t *testing.T) {
 		{"number value", "links:\n  docs: 8080\n", `links: link "docs": expected a string`},
 		{"list instead of mapping", "links:\n  - https://a.test\n", "links: expected a mapping of link names"},
 		{"blank value", "links:\n  docs: \"  \"\n", `links: link "docs": value is empty`},
+		{"mapping unknown key", "links:\n  docs:\n    link: https://a.test\n    descr: oops\n", `links: link "docs": unknown key "descr"`},
+		{"mapping without link", "links:\n  docs:\n    desc: only a desc\n", `links: link "docs": missing link:`},
+		{"mapping blank link", "links:\n  docs:\n    link: \"  \"\n", `links: link "docs": link: is empty`},
+		{"mapping number link", "links:\n  docs:\n    link: 8080\n", `links: link "docs": link: expected a string`},
+		{"mapping list desc", "links:\n  docs:\n    link: https://a.test\n    desc: [a]\n", `links: link "docs": desc: expected a string`},
+		{"list value", "links:\n  docs:\n    - https://a.test\n", `links: link "docs": expected a string or a mapping, got seq`},
+		{"duplicate link key", "links:\n  docs:\n    link: https://a.test\n    link: https://b.test\n", `links: link "docs": duplicate key "link"`},
+		{"duplicate desc key", "links:\n  docs:\n    link: https://a.test\n    desc: a\n    desc: b\n", `links: link "docs": duplicate key "desc"`},
+		{"empty mapping", "links:\n  docs: {}\n", `links: link "docs": missing link:`},
+		{"sequence key", "links:\n  docs:\n    ? [a]\n    : https://a.test\n", `links: link "docs": keys must be strings`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -313,10 +313,20 @@ links:
   Reseed: ./scripts/reseed.sh
 ```
 
+A link can also take the long form, with a `desc:` shown beside it:
+
+```yaml
+links:
+  Docs:
+    link: https://example.com/docs
+    desc: Product docs and the API reference
+```
+
 - A value that starts with a URL scheme opens in the browser. Anything else runs as a
   shell command in the root file's directory.
 - `o` lists the `links:` in file order, then each target's `link:`. Type to filter.
-- Names must be unique, and each value must be a string.
+- Names must be unique. A value is a string, or a mapping with `link:` and an optional `desc:`.
+- A link can also be a mapping with `link:` and an optional `desc:`. `o` shows the desc and searches it. A target's `link:` row shows its `desc:` too.
 - Imported files do not contribute links. rerun notes it and ignores their `links:`.
 
 ## Imports

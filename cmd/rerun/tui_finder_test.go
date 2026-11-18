@@ -766,6 +766,64 @@ func TestLinkModalJointQueryMatchesNameAndOpenValue(t *testing.T) {
 	}
 }
 
+// A top-level link row shows its desc: when set, and its value when not.
+func TestLinkModalRowShowsTopLevelDesc(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.links = []Link{{Name: "Docs", Value: "https://example.com/docs", Desc: "Product docs", Dir: "/root"}, {Name: "Logs", Value: "http://localhost:9428", Dir: "/root"}}
+	m.finder = finderState{open: true, links: true}
+	res := m.finderResults("")
+	if len(res) != 2 || res[0].desc != "Product docs" || res[1].desc != "http://localhost:9428" {
+		t.Fatalf("rows = %+v, want Docs shown by desc and Logs by value", res)
+	}
+}
+
+// A link row finds by its desc alone, by its value alone, and by name, and the desc names no value twice.
+func TestLinkModalSearchesDescAndValue(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.links = []Link{{Name: "Docs", Value: "https://example.com/docs", Desc: "Product docs", Dir: "/root"}}
+	m.finder = finderState{open: true, links: true}
+	if res := m.finderResults("product"); len(res) != 1 || res[0].name != "Docs" {
+		t.Fatalf("results for product = %+v, want Docs found by its desc", res)
+	}
+	if res := m.finderResults("example"); len(res) != 1 || res[0].name != "Docs" {
+		t.Fatalf("results for example = %+v, want Docs found by its value", res)
+	}
+	if res := m.finderResults("docs"); len(res) != 1 || len(res[0].matched) == 0 {
+		t.Fatalf("results for docs = %+v, want Docs matched on its name", res)
+	}
+	if got := finderSearchDesc(finderItem{kind: "link", name: "Docs", desc: "https://a.test", value: "https://a.test"}); got != "Docs https://a.test" {
+		t.Fatalf("search text = %q, want the value once", got)
+	}
+}
+
+// A whitespace-only desc is no desc, so the row shows and searches the value.
+func TestLinkModalBlankDescShowsValue(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.links = []Link{{Name: "Docs", Value: "https://example.com/docs", Desc: " \t ", Dir: "/root"}}
+	m.finder = finderState{open: true, links: true}
+	if res := m.finderResults(""); len(res) != 1 || res[0].desc != "https://example.com/docs" {
+		t.Fatalf("rows = %+v, want the value shown for a blank desc", res)
+	}
+	if res := m.finderResults("example"); len(res) != 1 || res[0].name != "Docs" {
+		t.Fatalf("results for example = %+v, want Docs found by its value", res)
+	}
+}
+
+// A target's link: row shows its desc: when set, and still finds by the link value.
+func TestLinkModalTargetRowShowsDesc(t *testing.T) {
+	web := describe(target("web"), "Web UI")
+	web.Link = "http://localhost:8080"
+	m := newTestModel(t, web, target("api"))
+	m.finder = finderState{open: true, links: true}
+	res := m.finderResults("")
+	if len(res) != 1 || res[0].desc != "Web UI" {
+		t.Fatalf("rows = %+v, want the web row shown by its target desc", res)
+	}
+	if res := m.finderResults("8080"); len(res) != 1 || res[0].name != "web" {
+		t.Fatalf("results for 8080 = %+v, want the web row found by its link value", res)
+	}
+}
+
 // A make target's modal row keeps the make flag, and a blank link: gets no row.
 func TestLinkModalCopiesMakeAndIgnoresBlankOpen(t *testing.T) {
 	m := newMakeTUI(t)

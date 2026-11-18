@@ -88,7 +88,11 @@ func (m *tuiModel) finderCandidates() []finderItem {
 func (m *tuiModel) finderLinkCandidates() []finderItem {
 	var out []finderItem
 	for _, l := range m.links {
-		out = append(out, finderItem{kind: "link", name: l.Name, desc: finderDesc(l.Value), target: -1, value: l.Value, dir: l.Dir})
+		desc := finderDesc(l.Desc)
+		if desc == "" {
+			desc = finderDesc(l.Value)
+		}
+		out = append(out, finderItem{kind: "link", name: l.Name, desc: desc, target: -1, value: l.Value, dir: l.Dir})
 	}
 	for i, tg := range m.targets {
 		link := strings.TrimSpace(tg.spec.Link)
@@ -100,7 +104,11 @@ func (m *tuiModel) finderLinkCandidates() []finderItem {
 		if make {
 			name = finderMakeLabel(name)
 		}
-		out = append(out, finderItem{kind: "link", name: name, desc: finderDesc(link), make: make, target: i, value: link, dir: tg.spec.Dir})
+		desc := finderDesc(tg.spec.Desc)
+		if desc == "" {
+			desc = finderDesc(link)
+		}
+		out = append(out, finderItem{kind: "link", name: name, desc: desc, make: make, target: i, value: link, dir: tg.spec.Dir})
 	}
 	return out
 }
@@ -214,12 +222,17 @@ func (m *tuiModel) finderResults(query string) []finderItem {
 	return out
 }
 
-// finderSearchDesc is the text the desc pass reads: a link row also reads its target name, so "web 8080" finds it.
+// finderSearchDesc is the text the desc pass reads: a link row also reads its name and value, so "web 8080" finds it.
 func finderSearchDesc(c finderItem) string {
-	if c.kind == "link" {
-		return finderMatchText(c.name) + " " + c.desc
+	if c.kind != "link" {
+		return c.desc
 	}
-	return c.desc
+	text := finderMatchText(c.name) + " " + c.desc
+	// The value is searched even when a desc is shown; it is skipped when it is the desc already.
+	if finderDesc(c.value) != c.desc {
+		text += " " + c.value
+	}
+	return text
 }
 
 // finderTop is the first visible match row: the stored window, moved just enough to keep sel on screen.

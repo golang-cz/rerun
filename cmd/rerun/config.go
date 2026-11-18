@@ -570,6 +570,7 @@ const linksKey = "links"
 type Link struct {
 	Name  string
 	Value string
+	Desc  string
 	Dir   string
 }
 
@@ -594,15 +595,73 @@ func parseLinks(src *configSource, root *yaml.Node, dir string) ([]Link, error) 
 			return nil, src.at(key, len(name), fmt.Sprintf("links: duplicate link %q", name))
 		}
 		seen[name] = true
-		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("links: link %q: expected a string, got %s", name, yamlType(value)))
+		link, desc, err := linkEntry(src, name, key, value)
+		if err != nil {
+			return nil, err
 		}
-		if strings.TrimSpace(value.Value) == "" {
-			return nil, src.at(value, nodeSpan(value), fmt.Sprintf("links: link %q: value is empty", name))
-		}
-		out = append(out, Link{Name: name, Value: value.Value, Dir: dir})
+		out = append(out, Link{Name: name, Value: link, Desc: desc, Dir: dir})
 	}
 	return out, nil
+}
+
+// linkEntry reads a links: value, a string or a mapping with link: and an optional desc:.
+func linkEntry(src *configSource, name string, nameNode, node *yaml.Node) (link, desc string, err error) {
+	switch {
+	case node.Kind == yaml.MappingNode:
+		return linkMapping(src, name, nameNode, node)
+	case node.Kind == yaml.ScalarNode && node.Tag == "!!str":
+		if strings.TrimSpace(node.Value) == "" {
+			return "", "", src.at(node, nodeSpan(node), fmt.Sprintf("links: link %q: value is empty", name))
+		}
+		return strings.TrimSpace(node.Value), "", nil
+	default:
+		return "", "", src.at(node, nodeSpan(node), fmt.Sprintf("links: link %q: expected a string or a mapping, got %s", name, yamlType(node)))
+	}
+}
+
+// linkMapping reads the long form: link: is required, desc: is optional, and a null value means unset.
+func linkMapping(src *configSource, name string, nameNode, node *yaml.Node) (link, desc string, err error) {
+	var linkNode *yaml.Node
+	seen := make(map[string]bool)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, value := deref(node.Content[i]), deref(node.Content[i+1])
+		if key.Kind != yaml.ScalarNode {
+			return "", "", src.at(key, nodeSpan(key), fmt.Sprintf("links: link %q: keys must be strings", name))
+		}
+		if key.Value != "link" && key.Value != "desc" {
+			return "", "", src.at(key, nodeSpan(key), fmt.Sprintf("links: link %q: unknown key %q, expected link: or desc:", name, key.Value))
+		}
+		if seen[key.Value] {
+			return "", "", src.at(key, nodeSpan(key), fmt.Sprintf("links: link %q: duplicate key %q", name, key.Value))
+		}
+		seen[key.Value] = true
+		if key.Value == "link" {
+			linkNode = value
+		}
+		if isNullNode(value) {
+			continue
+		}
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return "", "", src.at(value, nodeSpan(value), fmt.Sprintf("links: link %q: %s: expected a string, got %s", name, key.Value, yamlType(value)))
+		}
+		if key.Value == "desc" {
+			desc = value.Value
+		} else {
+			link = value.Value
+		}
+	}
+	if linkNode == nil {
+		return "", "", src.at(nameNode, nodeSpan(nameNode), fmt.Sprintf("links: link %q: missing link:", name))
+	}
+	link = strings.TrimSpace(link)
+	if link == "" {
+		return "", "", src.at(linkNode, nodeSpan(linkNode), fmt.Sprintf("links: link %q: link: is empty", name))
+	}
+	return link, desc, nil
+}
+
+func isNullNode(node *yaml.Node) bool {
+	return node.Kind == yaml.ScalarNode && node.Tag == "!!null"
 }
 
 // queriesKey is the reserved key holding saved query pills, at the top level,
