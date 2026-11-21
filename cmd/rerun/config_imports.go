@@ -52,7 +52,8 @@ type importSpec struct {
 }
 
 // parseImports merges the root file's imports into cfg; a root group named like an import gives its targets columns.
-func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string]groupDef) error {
+// A session config (the import picker's checked set) adds no implicit files and no notices.
+func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string]groupDef, session bool) error {
 	var specs []importSpec
 	if node != nil && !(node.Kind == yaml.ScalarNode && node.Tag == "!!null") {
 		if node.Kind != yaml.SequenceNode {
@@ -73,11 +74,11 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 	_, ownsMake := rootSchemas[makeKind]
 	ownsMake = ownsMake || slices.ContainsFunc(cfg.Targets, func(t Target) bool { return t.Schema == makeKind })
 	// Last, so an explicit import of the same file is seen first and wins the dedupe.
-	if mk != "" && !rootExists {
+	if mk != "" && !rootExists && !session {
 		specs = append(specs, importSpec{path: filepath.Base(mk), group: makeKind, optional: true, implicit: true})
 	}
 	// No group: the compose project name is the default, as for an explicit compose import.
-	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && !rootExists {
+	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && !rootExists && !session {
 		specs = append(specs, importSpec{path: filepath.Base(cf), optional: true, implicit: true})
 	}
 
@@ -326,12 +327,12 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 			cfg.Targets = append(cfg.Targets, t)
 		}
 	}
-	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && rootExists {
+	if cf := implicitCompose(filepath.Dir(rootFile)); cf != "" && rootExists && !session {
 		if _, listed := seenFiles[canonicalPath(cf)]; !listed {
 			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s not imported · add it under imports:", filepath.Base(cf)))
 		}
 	}
-	if mk != "" && rootExists && !ownsMake {
+	if mk != "" && rootExists && !ownsMake && !session {
 		if _, listed := seenFiles[canonicalPath(mk)]; !listed {
 			cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s not imported · add it under imports:", filepath.Base(mk)))
 		}

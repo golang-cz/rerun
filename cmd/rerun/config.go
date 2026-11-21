@@ -373,7 +373,7 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg := &Config{Path: path, Targets: file.targets, Files: []string{abs}, Queries: file.queries, Links: links}
-	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas); err != nil {
+	if err := cfg.parseImports(src, mappingValue(root, importsKey), abs, file.schemas, false); err != nil {
 		return nil, err
 	}
 	if err := cfg.validateQueries(); err != nil {
@@ -400,7 +400,7 @@ func implicitFiles(dir string) []string {
 // makeOnlyConfig loads a dir with no rerun.yml; path is where one would be, so a later one reloads.
 func makeOnlyConfig(path string, found []string) (*Config, error) {
 	cfg := &Config{Path: path, Files: []string{path}, MakeOnly: true}
-	if err := cfg.parseImports(&configSource{path: path}, nil, path, nil); err != nil {
+	if err := cfg.parseImports(&configSource{path: path}, nil, path, nil, false); err != nil {
 		return nil, err
 	}
 	if len(cfg.Targets) == 0 {
