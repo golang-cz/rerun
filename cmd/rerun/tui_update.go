@@ -174,12 +174,17 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ctrl+k and g open the finder from the list, not over the bar, help or quit confirm.
-	if (msg.String() == "ctrl+k" || msg.String() == "g") && !m.finder.open && !m.eventsModal.open && !m.original.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
+	if (msg.String() == "ctrl+k" || msg.String() == "g") && !m.finder.open && !m.imports.open && !m.eventsModal.open && !m.original.open && m.inputMode == inputNone && !m.help && !m.confirmQuit {
 		m.finder = finderState{open: true}
 		return m, nil
 	}
 	if m.finder.open {
 		return m.handleFinderKey(msg)
+	}
+
+	// The import picker owns every key while it is up, as the finder does.
+	if m.imports.open {
+		return m.handleImportKey(msg)
 	}
 
 	// The fs events modal owns every key while it is up, the way the finder does.
@@ -432,6 +437,9 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		m.openEvents()
 
+	case "I":
+		m.openImports()
+
 	case "o":
 		m.openLinks()
 
@@ -480,6 +488,8 @@ func (m *tuiModel) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.finder.open:
 		m.finderPaste(msg.Content)
+	case m.imports.open:
+		m.importPaste(msg.Content)
 	case m.inputMode != inputNone:
 		m.inputInsert(msg.Content)
 	}
@@ -574,7 +584,7 @@ func (m *tuiModel) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.clearSelection()
 		return m, nil
 	}
-	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.eventsModal.open || m.original.open {
+	if m.help || m.confirmQuit || m.cfgErr != "" || m.finder.open || m.imports.open || m.eventsModal.open || m.original.open {
 		return m, nil
 	}
 	e := msg.Mouse()
@@ -732,7 +742,7 @@ func (m *tuiModel) clearSelection() { m.selAnchor, m.selMoved, m.selKey = nil, f
 // keepsSelection reports whether key acts on the selection instead of ending it:
 // c copies it, i inspects it, and shift+arrows in the pane grow it.
 func (m *tuiModel) keepsSelection(key string) bool {
-	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.eventsModal.open || m.original.open || m.inputMode != inputNone {
+	if m.cfgErr != "" || m.confirmQuit || m.help || m.finder.open || m.imports.open || m.eventsModal.open || m.original.open || m.inputMode != inputNone {
 		return false
 	}
 	switch key {

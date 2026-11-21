@@ -104,6 +104,7 @@ func runConfigMode(args Args) int {
 			fmt.Fprintf(os.Stderr, "rerun: %v\n", noCmdHint)
 			return 1
 		}
+		applyRunArgs(cfg, args)
 		return startTargets(resolveTargets(cfg, args), cfg)
 	}
 
@@ -113,6 +114,7 @@ func runConfigMode(args Args) int {
 		fmt.Fprintf(os.Stderr, "\nrerun: hint: %s\n", configHint)
 		return 1
 	}
+	applyRunArgs(cfg, args)
 	// A Makefile-only config has no TUI to start its manual targets from, so without a terminal it would wait forever.
 	if cfg.MakeOnly && !(isTerminal(os.Stdout) && isTerminal(os.Stdin)) {
 		fmt.Fprintf(os.Stderr, "rerun: %v\n", &configNotFoundError{dir: filepath.Dir(cfg.Path)})
@@ -128,6 +130,18 @@ func runConfigMode(args Args) int {
 	}
 
 	return startTargets(resolveTargets(cfg, args), cfg)
+}
+
+// applyRunArgs sets the import picker by the run's targets: naming one skips the picker, as it did before the picker existed.
+func applyRunArgs(cfg *Config, args Args) {
+	cfg.importOpts = importScanOpts{NoGitignore: args.NoGitignore}
+	if len(args.Targets) > 0 || args.Target != "" {
+		cfg.ImportPicker = false
+		return
+	}
+	if cfg.ImportPicker && args.NoGitignore {
+		cfg.Importable, cfg.importTruncated = scanImportable(filepath.Dir(cfg.Path), cfg.importOpts)
+	}
 }
 
 // resolveTargets keeps every rerun.yml target in the list: named targets are

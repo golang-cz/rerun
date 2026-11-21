@@ -336,6 +336,10 @@ type tuiModel struct {
 	finder finderState
 	// eventsModal is the `e` fs events modal over the last 10 minutes' change batches.
 	eventsModal eventsState
+	// imports is the import picker, opened on the first frame or by I.
+	imports importPicker
+	// importOpts are the run's scan flags, which the picker's scans reuse.
+	importOpts importScanOpts
 	// original is the `o` modal over the pane's raw lines.
 	original originalState
 	// listTop is the list's first visible row; it moves only when the cursor leaves the window.
@@ -648,7 +652,11 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 	m.links = cfg.Links
 	m.group.queries = cfg.Queries
 	m.group.links = cfg.Links
-	if cfg.MakeOnly {
+	m.importOpts = cfg.importOpts
+	switch {
+	case cfg.ImportPicker:
+		m.imports = newImportPicker(cfg.Path, cfg.Importable, cfg.importTruncated, false, nil, nil)
+	case cfg.MakeOnly:
 		m.finder = finderState{open: true}
 	}
 	// Once at startup: a reload must keep the scope the user chose.

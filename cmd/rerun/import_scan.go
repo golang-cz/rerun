@@ -250,3 +250,8 @@ func repoTop(dir string) string {
 		d = parent
 	}
 }
+
+// anyBelowRoot reports whether a candidate sits in a subfolder of the scan root.
+func anyBelowRoot(cands []importCandidate) bool {
+	return slices.ContainsFunc(cands, func(c importCandidate) bool { return c.Group != "" })
+}

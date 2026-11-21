@@ -167,6 +167,14 @@ type Config struct {
 	Missing []missingImport
 	// MakeOnly is set when no rerun.yml exists and the implicit Makefile or compose file is the whole config.
 	MakeOnly bool
+	// ImportPicker opens the import picker on the first frame: no rerun.yml, and a file below the start folder.
+	ImportPicker bool
+	// Importable are the files the picker lists, in tree order, from the scan at load time.
+	Importable []importCandidate
+	// importTruncated is the scan's depth or file cap left files out.
+	importTruncated bool
+	// importOpts are the run's scan flags, so a later scan matches the startup one.
+	importOpts importScanOpts
 	// Queries are the top-level saved queries, shared by every pane scope.
 	Queries map[string]string
 	// Notices are warnings that do not stop the config from loading.
@@ -200,8 +208,23 @@ func LoadConfig(startDir string) (*Config, error) {
 		if absErr != nil {
 			return nil, absErr
 		}
-		if found := implicitFiles(start); len(found) > 0 {
-			return makeOnlyConfig(filepath.Join(start, ConfigFileName), found)
+		path := filepath.Join(start, ConfigFileName)
+		found := implicitFiles(start)
+		importable, truncated := scanImportable(start, importScanOpts{})
+		// A Makefile or compose file below the root is a choice, so the picker opens instead of loading the root alone.
+		picker := anyBelowRoot(importable)
+		if len(found) > 0 {
+			cfg, err := makeOnlyConfig(path, found)
+			if err != nil {
+				return nil, err
+			}
+			cfg.setImportPicker(picker, importable, truncated)
+			return cfg, nil
+		}
+		if picker {
+			cfg := &Config{Path: path, Files: []string{path}, MakeOnly: true}
+			cfg.setImportPicker(true, importable, truncated)
+			return cfg, nil
 		}
 		return nil, &configNotFoundError{dir: startDir}
 	}
@@ -1289,4 +1312,11 @@ func durationField(src *configSource, name, field string, node *yaml.Node) (time
 
 func cleanYAMLError(err error) string {
 	return strings.TrimPrefix(err.Error(), "yaml: ")
+}
+
+// setImportPicker records the picker decision and the scan it lists.
+func (cfg *Config) setImportPicker(on bool, importable []importCandidate, truncated bool) {
+	cfg.ImportPicker = on
+	cfg.Importable = importable
+	cfg.importTruncated = truncated
 }

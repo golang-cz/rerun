@@ -327,6 +327,12 @@ func (g *targetGroup) reload(path string) *Config {
 		g.sink.emit(event{kind: evConfigErr, line: configErrorLine(err), err: err})
 		return nil
 	}
+	g.adopt(cfg)
+	return cfg
+}
+
+// adopt applies a loaded config to the running targets. The watcher's reload and the import picker's session both come through here.
+func (g *targetGroup) adopt(cfg *Config) {
 	g.sink.emit(event{kind: evConfigOK})
 	for _, n := range cfg.Notices {
 		g.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
@@ -335,7 +341,6 @@ func (g *targetGroup) reload(path string) *Config {
 	g.missing = cfg.Missing
 	g.mu.Unlock()
 	g.applyConfig(cfg.Targets, cfg.Queries, cfg.Links)
-	return cfg
 }
 
 // applyConfig reconciles the running targets with a freshly parsed list: added

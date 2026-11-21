@@ -190,6 +190,9 @@ func (m *tuiModel) frame() string {
 		frame = overlayAt(frame, box, x, y, m.width, m.height)
 		m.layout.cursorX, m.layout.cursorY = m.inputCaret(x, y)
 	}
+	if m.imports.open {
+		frame = overlayCenter(frame, m.importView(), m.width, m.height)
+	}
 	if m.eventsModal.open {
 		frame = overlayCenter(frame, m.eventsView(), m.width, m.height)
 	}
@@ -1491,6 +1494,7 @@ var helpKeys = [][2]string{
 	{"s", "stop the target · pane: stop what the pane shows"},
 	{"m d r", "mute (group: its targets) · d drops output · r reboots"},
 	{"e", "fs events (last 10 min)"},
+	{"I", "pick the files to load: space, enter, ctrl+s"},
 	{"esc [ ] b t", "list: esc backs out · [ ] ⇧↑/⇧↓ groups · b hides · t list times"},
 	{"ctrl+k g", "go to a target, or run a make target"},
 	{"o i ctrl+o", "pick a link to open · ctrl+o: target's link · i: original lines"},
