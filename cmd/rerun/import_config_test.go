@@ -158,7 +158,7 @@ func TestSessionConfigBesideRerunYMLAddsNoImplicitFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessionConfig: %v", err)
 	}
-	if len(cfg.Targets) != 0 || len(cfg.Notices) != 0 {
-		t.Fatalf("targets = %v notices = %v, want none", cfg.Names(), cfg.Notices)
+	if got := cfg.Names(); len(got) != 1 || got[0] != "local" || len(cfg.Notices) != 0 {
+		t.Fatalf("targets = %v notices = %v, want only the root's local", got, cfg.Notices)
 	}
 }

@@ -233,6 +233,27 @@ func TestImportEnterRunsCheckedFilesWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestImportEnterKeepsRerunYMLRootTargets(t *testing.T) {
+	m, _ := impFixture(t, map[string]string{
+		ConfigFileName: "targets:\n  local:\n    run: echo\nimports:\n  - path: api/Makefile\n    group: api\n",
+		"Makefile":     impTree["Makefile"],
+		"api/Makefile": impTree["api/Makefile"],
+	})
+	impOpen(t, m)
+	press(m, "enter")
+
+	names := targetNames(&Config{Targets: m.group.snapshotTargets()})
+	if !slices.Contains(names, "local") {
+		t.Fatalf("session targets = %v, want the rerun.yml's own local target kept", names)
+	}
+	if !slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "serve") }) {
+		t.Fatalf("session targets = %v, want the checked api/Makefile", names)
+	}
+	if slices.ContainsFunc(names, func(n string) bool { return n == "build" || strings.HasSuffix(n, "/build") }) {
+		t.Fatalf("unchecked root Makefile runs: %v", names)
+	}
+}
+
 func TestImportCtrlSWritesImportsAndClosesPicker(t *testing.T) {
 	m, dir := impFixture(t, impTree)
 	impOpen(t, m)

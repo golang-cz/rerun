@@ -174,6 +174,13 @@ imported file is ignored. A compose file is imported as its services. See Docker
 
 With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it loads only when listed. Startup shows `Makefile not imported · add it under imports:` for an unlisted one.
 
+**Import picker.** With no `rerun.yml`, rerun opens a picker on startup when importable files sit in subfolders. A root-only Makefile or compose file loads directly, as before. `I` opens the picker at any time.
+- `space` toggles a file or a folder's subtree; `a` checks all or none; typing filters by path; `esc` closes.
+- Without a `rerun.yml`, every file starts checked. With one, only its imported files start checked.
+- `enter` runs the checked files for this session only. With a `rerun.yml`, its own targets, groups and links still load.
+- `ctrl+s` saves the checked files as `imports:`. Only that key is rewritten; comments and other keys stay.
+- Scan: honors `.gitignore` (unless `-no-gitignore`), always skips `.git`, `node_modules` and `vendor`. A folder's own `rerun.yml` stands in for the Makefile and compose file beside it; the start folder's is never listed. Stops at depth 4 or 200 files.
+
 ### Makefile: a make file's targets
 
 A Makefile is an import source too. Its targets become rows, read as text, never run through `make -p`.
@@ -187,7 +194,7 @@ imports:
 ```
 
 - A `Makefile` next to `rerun.yml` loads as a `make` group that folds its idle targets by default. With a `rerun.yml`, it loads only when listed under `imports:`.
-- Subfolder Makefiles load only when imported. rerun never scans subfolders.
+- Subfolder Makefiles load only when imported or checked in the import picker.
 - `groups: make: fold: false` lists every Makefile target.
 - Descriptions come from a trailing `## text` or the comment above the target.
 - Targets start manually and do not watch files. Enter in Ctrl+K runs one.

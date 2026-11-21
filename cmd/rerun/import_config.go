@@ -25,10 +25,37 @@ func importsNode(checked []importCandidate) *yaml.Node {
 	return seq
 }
 
-// sessionConfig loads the checked files for this session only; nothing is written.
+// sessionConfig loads the rerun.yml's own targets, groups and links plus the checked files; its imports: are replaced, nothing is written.
 func sessionConfig(rootFile string, checked []importCandidate, rootSchemas map[string]groupDef) (*Config, error) {
+	abs, err := filepath.Abs(rootFile)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{Path: rootFile, Files: []string{rootFile}}
+	if fileExists(rootFile) {
+		data, err := os.ReadFile(rootFile)
+		if err != nil {
+			return nil, err
+		}
+		src, root, err := parseConfigBytes(rootFile, data)
+		if err != nil {
+			return nil, err
+		}
+		file, err := parseFileBody(src, root, abs)
+		if err != nil {
+			return nil, err
+		}
+		links, err := parseLinks(src, root, filepath.Dir(abs))
+		if err != nil {
+			return nil, err
+		}
+		cfg.Targets, cfg.Queries, cfg.Links = file.targets, file.queries, links
+		rootSchemas = file.schemas
+	}
 	if err := cfg.parseImports(&configSource{path: rootFile}, importsNode(checked), rootFile, rootSchemas, true); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateQueries(); err != nil {
 		return nil, err
 	}
 	return cfg, nil

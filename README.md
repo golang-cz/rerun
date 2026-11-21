@@ -376,7 +376,28 @@ targets:
 - With a `rerun.yml`, only the files listed under `imports:` load. A Makefile beside it
   loads only when listed. Startup shows `Makefile not imported · add it under imports:`
   for an unlisted one.
-- With no `rerun.yml`, the Makefile and compose file beside it load by default.
+- With no `rerun.yml` and only root-level files, the Makefile and compose file beside it load by default.
+  With importable files in subfolders, the [import picker](#imports) opens instead.
+
+**Import picker.**
+
+With no `rerun.yml`, rerun opens a picker on startup when importable files sit in subfolders.
+A root-only Makefile or compose file loads directly, as before. `I` opens the picker at any time.
+
+- `space` toggles a file, or a folder's whole subtree. `a` checks all, or none when all are checked.
+- Typing filters the list by path. `esc` closes it.
+- Without a `rerun.yml`, every file starts checked. With one, only its imported files start checked.
+- `enter` runs the checked files for this session. Nothing is written.
+  With a `rerun.yml`, its own targets, groups and links still load.
+- `ctrl+s` saves the checked files as `imports:`. Without a `rerun.yml`, it creates one.
+  With one, only the `imports:` key changes. Comments and other keys stay.
+
+**Scan.**
+
+- Respects `.gitignore`, unless `-no-gitignore` is set. Always skips `.git`, `node_modules` and `vendor`.
+- A folder's own `rerun.yml` stands in for the Makefile and compose file beside it.
+- The start folder's `rerun.yml` is never listed.
+- Stops at depth 4 or 200 files, with a `scan truncated` row.
 
 ### Docker Compose
 
@@ -430,7 +451,7 @@ groups:
 - With no `rerun.yml`, a compose file loads too, as a group named for its compose project.
   The first of `compose.yaml`, `compose.yml`, `docker-compose.yaml`, `docker-compose.yml` wins.
 - A repo with only a Makefile opens rerun with the finder open.
-- A subfolder's Makefile loads only when you import it. rerun never scans subfolders.
+- A subfolder's Makefile loads only when you import it or check it in the [import picker](#imports).
 - The default group for a subfolder import is `make/<dir>`, such as `make/api`.
 - A `.mk` file runs as `make -f <file>`.
 
@@ -606,6 +627,7 @@ Any key other than `shift+↑` / `shift+↓` clears a selection.
 | `?` | list keys; again for all keys |
 | `/` or `f` | open the query bar |
 | `ctrl+k` or `g` | open the go-to finder |
+| `I` | open the import picker: choose which Makefile, compose and rerun files load |
 | `b` | hide or show the left list; hidden shows a `b list` cue, and `esc` brings it back |
 | `t` | show times in the left list: durations, the fs hint age and the build age |
 | `e` | open the fs events list (last 10 min) |
