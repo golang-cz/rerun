@@ -43,7 +43,7 @@ release:
 
     ## Golang (go.mod tool)
     ```
-    go get -tool github.com/golang-cz/rerun/cmd/rerun@v0.5.2
+    go get -tool github.com/golang-cz/rerun/cmd/rerun@v{{.Version}}
 
     # run with
     go run github.com/golang-cz/rerun/cmd/rerun
