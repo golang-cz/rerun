@@ -199,6 +199,11 @@ func (c *Config) Find(name string) (Target, bool) {
 }
 
 func LoadConfig(startDir string) (*Config, error) {
+	return LoadConfigOpts(startDir, importScanOpts{})
+}
+
+// LoadConfigOpts is LoadConfig with the run's scan flags, so the startup picker lists what the picker's later scans list.
+func LoadConfigOpts(startDir string, opts importScanOpts) (*Config, error) {
 	path, err := findConfig(startDir)
 	if err != nil {
 		if !errors.Is(err, ErrConfigNotFound) {
@@ -210,7 +215,7 @@ func LoadConfig(startDir string) (*Config, error) {
 		}
 		path := filepath.Join(start, ConfigFileName)
 		found := implicitFiles(start)
-		importable, truncated := scanImportable(start, importScanOpts{})
+		importable, truncated := scanImportable(start, opts)
 		// A Makefile or compose file below the root is a choice, so the picker opens instead of loading the root alone.
 		picker := anyBelowRoot(importable)
 		if len(found) > 0 {

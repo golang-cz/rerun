@@ -20,6 +20,8 @@ const rerunKind = "rerun"
 const (
 	importScanMaxDepth = 4
 	importScanMaxFiles = 200
+	// importProbeMaxDirs bounds the look past the depth cap for a candidate.
+	importProbeMaxDirs = 1000
 )
 
 // importScanSkipDirs are never descended into; they hold vendored or generated files, not the app's own.
@@ -95,8 +97,9 @@ func (s *importScanner) walk(dir, group string, depth int, ignores ignoreStack) 
 			continue
 		}
 		if depth+1 > importScanMaxDepth {
-			// A folder past the depth cap only counts as truncated if it holds a candidate.
-			if fileExists(filepath.Join(sub, ConfigFileName)) || len(implicitFiles(sub)) > 0 {
+			// A folder past the depth cap only counts as truncated if a candidate sits somewhere under it.
+			budget := importProbeMaxDirs
+			if s.holdsCandidate(sub, ignores, &budget) {
 				s.truncated = true
 			}
 			continue
@@ -106,6 +109,34 @@ func (s *importScanner) walk(dir, group string, depth int, ignores ignoreStack) 
 		}
 	}
 	return true
+}
+
+// holdsCandidate reports whether dir or a folder below it has a candidate, stopping at the first; budget caps the folders it opens.
+func (s *importScanner) holdsCandidate(dir string, ignores ignoreStack, budget *int) bool {
+	if *budget <= 0 {
+		return false
+	}
+	*budget--
+	if !s.noIgnore {
+		ignores = ignores.with(dir)
+	}
+	if len(s.dirFiles(dir, ignores)) > 0 {
+		return true
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() || importScanSkipDirs[e.Name()] {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		if !ignores.ignored(sub, true) && s.holdsCandidate(sub, ignores, budget) {
+			return true
+		}
+	}
+	return false
 }
 
 // dirFiles are the candidates directly in dir. A subfolder's rerun.yml covers its sibling Makefile and compose file; the root's rerun.yml is never listed.

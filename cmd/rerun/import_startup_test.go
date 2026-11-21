@@ -99,7 +99,7 @@ func TestImportStartupNamedTargetSkipsPicker(t *testing.T) {
 	}
 }
 
-func TestImportStartupNoGitignoreRescansTheSameFiles(t *testing.T) {
+func TestImportStartupNoGitignoreListsGitignoredFiles(t *testing.T) {
 	dir := makeDir(t, map[string]string{
 		".gitignore":   "gen/\n",
 		"gen/Makefile": "build:\n\tgo build\n",
@@ -112,7 +112,10 @@ func TestImportStartupNoGitignoreRescansTheSameFiles(t *testing.T) {
 	if n := len(cfg.Importable); n != 1 {
 		t.Fatalf("gitignored folder listed: %d files", n)
 	}
-	applyRunArgs(cfg, Args{NoGitignore: true})
+	cfg, err = LoadConfigOpts(dir, importScanOpts{NoGitignore: true})
+	if err != nil {
+		t.Fatalf("LoadConfigOpts: %v", err)
+	}
 	if n := len(cfg.Importable); n != 2 {
 		t.Fatalf("-no-gitignore lists %d files, want 2", n)
 	}
@@ -152,5 +155,22 @@ func TestImportStartupEscLeavesAnEmptySession(t *testing.T) {
 	}
 	if view := m.View().Content; view == "" {
 		t.Fatal("empty session drew nothing")
+	}
+}
+
+func TestImportStartupNoGitignoreOpensPickerForOnlyGitignoredSubfolders(t *testing.T) {
+	dir := makeDir(t, map[string]string{
+		".gitignore":   "gen/\n",
+		"gen/Makefile": "build:\n\tgo build\n",
+	})
+	if _, err := LoadConfig(dir); err == nil {
+		t.Fatal("gitignored-only tree loaded without -no-gitignore")
+	}
+	cfg, err := LoadConfigOpts(dir, importScanOpts{NoGitignore: true})
+	if err != nil {
+		t.Fatalf("LoadConfigOpts: %v", err)
+	}
+	if !cfg.ImportPicker || len(cfg.Importable) != 1 {
+		t.Fatalf("ImportPicker = %v, importable = %d; want the picker over the gitignored file", cfg.ImportPicker, len(cfg.Importable))
 	}
 }

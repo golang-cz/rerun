@@ -142,6 +142,14 @@ func (g *targetGroup) watchConfig(path string) {
 	cfg, _ := ParseConfig(clean)
 	w.syncAfter(clean, cfg)
 
+	// A failed parse still watches the imports: one that is half written reloads on its next write.
+	// Dirs added by this sync may hold a file written before its watch existed, so reload once more.
+	reloadNow := func() {
+		if w.syncAfter(clean, g.reload(clean)) {
+			w.syncAfter(clean, g.reload(clean))
+		}
+	}
+
 	var timer *time.Timer
 	var timeoutC <-chan time.Time
 	defer func() {
@@ -187,11 +195,10 @@ func (g *targetGroup) watchConfig(path string) {
 			g.sink.emit(event{kind: evNotice, line: configErrorLine(err), err: err})
 
 		case <-timeoutC:
-			// A failed parse still watches the imports: one that is half written reloads on its next write.
-			// Dirs added by this sync may hold a file written before its watch existed, so reload once more.
-			if w.syncAfter(clean, g.reload(clean)) {
-				w.syncAfter(clean, g.reload(clean))
-			}
+			reloadNow()
+
+		case <-g.nudge:
+			reloadNow()
 		}
 	}
 }
@@ -322,7 +329,13 @@ func nearestDir(dir string) string {
 // reload parses the config again and reconciles the running targets with it. A
 // reload returns the parsed config, or nil when it did not load.
 func (g *targetGroup) reload(path string) *Config {
-	cfg, err := ParseConfig(path)
+	var cfg *Config
+	var err error
+	if s := g.session.Load(); s != nil {
+		cfg, err = sessionConfig(s.rootFile, s.picked, s.schemas)
+	} else {
+		cfg, err = ParseConfig(path)
+	}
 	if err != nil {
 		g.sink.emit(event{kind: evConfigErr, line: configErrorLine(err), err: err})
 		return nil
@@ -331,7 +344,15 @@ func (g *targetGroup) reload(path string) *Config {
 	return cfg
 }
 
-// adopt applies a loaded config to the running targets. The watcher's reload and the import picker's session both come through here.
+// nudgeReload asks the config watcher to reload now; a nudge already pending covers this one.
+func (g *targetGroup) nudgeReload() {
+	select {
+	case g.nudge <- struct{}{}:
+	default:
+	}
+}
+
+// adopt applies a loaded config to the running targets; only the config watcher's goroutine calls it.
 func (g *targetGroup) adopt(cfg *Config) {
 	g.sink.emit(event{kind: evConfigOK})
 	for _, n := range cfg.Notices {
@@ -444,7 +465,7 @@ func (g *targetGroup) applyConfig(targets []Target, queries map[string]string, l
 			continue
 		}
 		if r, ok := runnerByName[t.Name]; ok {
-			close(r.retire)
+			r.retireOnce.Do(func() { close(r.retire) })
 		}
 	}
 

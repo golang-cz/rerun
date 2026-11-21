@@ -472,27 +472,39 @@ func (m *tuiModel) fitImports() {
 	}
 }
 
-// applyImports runs the checked files for this session through the same apply path a reload uses. Nothing is written.
+// applyImports runs the checked files for this session: the config watcher applies them, and its reloads keep applying them. Nothing is written.
 func (m *tuiModel) applyImports() {
 	p := &m.imports
 	picked := p.picked()
-	cfg, err := sessionConfig(p.rootFile, picked, p.schemas)
-	if err != nil {
+	if _, err := sessionConfig(p.rootFile, picked, p.schemas); err != nil {
 		p.msg = oneLine(err.Error())
 		return
 	}
+	m.group.session.Store(&importSession{rootFile: p.rootFile, picked: picked, schemas: p.schemas})
+	m.group.nudgeReload()
 	m.imports = importPicker{}
-	m.group.adopt(cfg)
+	m.keepNoticeUntil = m.now.Add(savedNoticeHold)
 	m.showNotice("session runs "+countOf(len(picked), "file")+" · nothing saved", false)
 }
 
-// saveImportPicks writes the checked files as rerun.yml's imports; the config watcher then reloads them.
+// saveImportPicks writes the checked files as rerun.yml's imports and has the watcher load the saved file.
 func (m *tuiModel) saveImportPicks() {
 	p := &m.imports
-	if err := saveImports(p.rootFile, p.picked()); err != nil {
+	picked := p.picked()
+	if len(picked) == 0 {
+		p.msg = "nothing checked"
+		return
+	}
+	if _, err := sessionConfig(p.rootFile, picked, p.schemas); err != nil {
 		p.msg = oneLine(err.Error())
 		return
 	}
+	if err := saveImports(p.rootFile, picked); err != nil {
+		p.msg = oneLine(err.Error())
+		return
+	}
+	m.group.session.Store(nil)
+	m.group.nudgeReload()
 	m.imports = importPicker{}
 	m.keepNoticeUntil = m.now.Add(savedNoticeHold)
 	m.showNotice("saved rerun.yml imports", false)

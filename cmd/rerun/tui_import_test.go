@@ -211,8 +211,36 @@ func TestImportFilterWithNoMatchSaysSo(t *testing.T) {
 	}
 }
 
+// impWatch runs the config watcher, which is what applies a picker session.
+func impWatch(t *testing.T, m *tuiModel) {
+	t.Helper()
+	go m.group.watchConfig(m.group.configPath)
+	t.Cleanup(m.group.cancel)
+}
+
+// impNames waits until the group's targets satisfy ok, then returns them.
+func impNames(t *testing.T, m *tuiModel, ok func([]string) bool) []string {
+	t.Helper()
+	var names []string
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		names = targetNames(&Config{Targets: m.group.snapshotTargets()})
+		if ok(names) {
+			return names
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("targets never settled, last = %v", names)
+	return nil
+}
+
+func hasSuffixName(names []string, suffix string) bool {
+	return slices.ContainsFunc(names, func(n string) bool { return n == suffix || strings.HasSuffix(n, "/"+suffix) })
+}
+
 func TestImportEnterRunsCheckedFilesWithoutWriting(t *testing.T) {
 	m, dir := impFixture(t, impTree)
+	impWatch(t, m)
 	impOpen(t, m)
 	impGo(t, m, "api/Makefile")
 	press(m, " ")
@@ -221,7 +249,7 @@ func TestImportEnterRunsCheckedFilesWithoutWriting(t *testing.T) {
 	if m.imports.open {
 		t.Fatal("enter left the picker open")
 	}
-	names := targetNames(&Config{Targets: m.group.snapshotTargets()})
+	names := impNames(t, m, func(n []string) bool { return hasSuffixName(n, "ui") })
 	if !slices.ContainsFunc(names, func(n string) bool { return strings.HasSuffix(n, "build") }) || !slices.ContainsFunc(names, func(n string) bool { return strings.HasSuffix(n, "ui") }) {
 		t.Fatalf("session targets = %v, want the checked files' targets", names)
 	}
@@ -239,10 +267,11 @@ func TestImportEnterKeepsRerunYMLRootTargets(t *testing.T) {
 		"Makefile":     impTree["Makefile"],
 		"api/Makefile": impTree["api/Makefile"],
 	})
+	impWatch(t, m)
 	impOpen(t, m)
 	press(m, "enter")
 
-	names := targetNames(&Config{Targets: m.group.snapshotTargets()})
+	names := impNames(t, m, func(n []string) bool { return slices.Contains(n, "local") && hasSuffixName(n, "serve") })
 	if !slices.Contains(names, "local") {
 		t.Fatalf("session targets = %v, want the rerun.yml's own local target kept", names)
 	}
@@ -409,5 +438,168 @@ func TestImportHelpListsTheKey(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("? help has no entry for I")
+	}
+}
+
+func TestImportSessionSurvivesAMakefileTouch(t *testing.T) {
+	m, dir := impFixture(t, impTree)
+	impWatch(t, m)
+	impOpen(t, m)
+	impGo(t, m, "api/Makefile")
+	press(m, " ")
+	press(m, "enter")
+	impNames(t, m, func(n []string) bool { return hasSuffixName(n, "ui") })
+
+	writeFile(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build\n\nextra:\n\tgo vet\n")
+	names := impNames(t, m, func(n []string) bool { return hasSuffixName(n, "extra") })
+	if !hasSuffixName(names, "ui") || !hasSuffixName(names, "build") {
+		t.Fatalf("targets = %v after a Makefile touch, want the session's files kept", names)
+	}
+	if hasSuffixName(names, "serve") {
+		t.Fatalf("unchecked api/Makefile came back after a touch: %v", names)
+	}
+}
+
+// Enter while the watcher reloads must not apply twice or race; run with -race.
+func TestImportEnterRacesAWatcherReload(t *testing.T) {
+	m, dir := impFixture(t, impTree)
+	impWatch(t, m)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.WriteFile(filepath.Join(dir, "Makefile"), []byte("build:\n\tgo build\n# "+strings.Repeat("x", i%5)+"\n"), 0o644)
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	for range 5 {
+		impOpen(t, m)
+		impGo(t, m, "api/Makefile")
+		press(m, " ")
+		press(m, "enter")
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(stop)
+	<-done
+	names := impNames(t, m, func(n []string) bool { return hasSuffixName(n, "ui") })
+	seen := map[string]bool{}
+	for _, n := range names {
+		if seen[n] {
+			t.Fatalf("duplicate target %q in %v", n, names)
+		}
+		seen[n] = true
+	}
+}
+
+func TestImportCtrlSOfEmptySetRefuses(t *testing.T) {
+	m, dir := impFixture(t, impTree)
+	impOpen(t, m)
+	press(m, "a")
+	impCtrl(m, 's')
+
+	if !m.imports.open {
+		t.Fatal("ctrl+s closed the picker on an empty set")
+	}
+	if !strings.Contains(m.imports.msg, "nothing checked") {
+		t.Fatalf("msg = %q, want nothing checked", m.imports.msg)
+	}
+	if fileExists(filepath.Join(dir, ConfigFileName)) {
+		t.Fatal("ctrl+s wrote rerun.yml for an empty set")
+	}
+}
+
+func TestImportCtrlSKeepsPickerOpenOnAGroupClash(t *testing.T) {
+	m, dir := impFixture(t, map[string]string{
+		"a/Makefile": "build:\n\tgo build\n",
+		"b/Makefile": "build:\n\tgo build\n",
+	})
+	impOpen(t, m)
+	for i := range m.imports.cands {
+		m.imports.cands[i].Group = "same"
+	}
+	impCtrl(m, 's')
+	if !m.imports.open || !strings.Contains(m.imports.msg, "duplicate import group") {
+		t.Fatalf("open = %v, msg = %q; want the picker kept open with the clash", m.imports.open, m.imports.msg)
+	}
+	if fileExists(filepath.Join(dir, ConfigFileName)) {
+		t.Fatal("ctrl+s wrote a rerun.yml that does not load")
+	}
+}
+
+func TestImportCtrlSThroughSymlinkInsideTreeEditsTheTarget(t *testing.T) {
+	m, dir := impFixture(t, map[string]string{
+		"real.yml":     "targets:\n  web:\n    run: sleep 30\n",
+		"api/Makefile": "serve:\n\tgo run .\n",
+	})
+	link := filepath.Join(dir, ConfigFileName)
+	if err := os.Symlink("real.yml", link); err != nil {
+		t.Fatal(err)
+	}
+	impOpen(t, m)
+	impGo(t, m, "api/Makefile")
+	press(m, " ")
+	impCtrl(m, 's')
+
+	if m.imports.open {
+		t.Fatalf("ctrl+s failed: %s", m.imports.msg)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("rerun.yml is no longer a symlink: %v", err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "real.yml"))
+	if !strings.Contains(string(raw), "api/Makefile") || !strings.Contains(string(raw), "sleep 30") {
+		t.Fatalf("real.yml = %q, want imports added and targets kept", raw)
+	}
+}
+
+func TestImportCtrlSThroughSymlinkOutsideTreeRefuses(t *testing.T) {
+	m, dir := impFixture(t, map[string]string{"api/Makefile": "serve:\n\tgo run .\n"})
+	outside := filepath.Join(t.TempDir(), "outside.yml")
+	const orig = "targets:\n  web:\n    run: sleep 30\n"
+	writeFile(t, outside, orig)
+	if err := os.Symlink(outside, filepath.Join(dir, ConfigFileName)); err != nil {
+		t.Fatal(err)
+	}
+	impOpen(t, m)
+	impGo(t, m, "api/Makefile")
+	press(m, " ")
+	impCtrl(m, 's')
+
+	if !m.imports.open || !strings.Contains(m.imports.msg, "outside") {
+		t.Fatalf("open = %v, msg = %q; want the picker kept open with an outside-tree message", m.imports.open, m.imports.msg)
+	}
+	if raw, _ := os.ReadFile(outside); string(raw) != orig {
+		t.Fatalf("outside file changed: %q", raw)
+	}
+}
+
+func TestImportCtrlSThroughDanglingSymlinkRefuses(t *testing.T) {
+	m, dir := impFixture(t, map[string]string{"api/Makefile": "serve:\n\tgo run .\n"})
+	target := filepath.Join(dir, "missing.yml")
+	if err := os.Symlink(target, filepath.Join(dir, ConfigFileName)); err != nil {
+		t.Fatal(err)
+	}
+	impOpen(t, m)
+	impCtrl(m, 's')
+	if m.imports.open && m.imports.msg == "" {
+		t.Fatal("picker stayed open with no message")
+	}
+	if fileExists(target) {
+		t.Fatal("a dangling symlink's target was created")
+	}
+}
+
+func TestImportEnterHoldsTheNothingSavedNotice(t *testing.T) {
+	m, _ := impFixture(t, impTree)
+	impOpen(t, m)
+	press(m, "enter")
+	if !m.now.Before(m.keepNoticeUntil) {
+		t.Fatal("enter did not hold its notice against the reload banner")
 	}
 }

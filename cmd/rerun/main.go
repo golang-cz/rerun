@@ -99,7 +99,7 @@ func main() {
 
 func runConfigMode(args Args) int {
 	if len(args.Targets) > 0 {
-		cfg, err := LoadConfig(".")
+		cfg, err := LoadConfigOpts(".", importScanOpts{NoGitignore: args.NoGitignore})
 		if err != nil || !allKnown(cfg, args.Targets) {
 			fmt.Fprintf(os.Stderr, "rerun: %v\n", noCmdHint)
 			return 1
@@ -108,7 +108,7 @@ func runConfigMode(args Args) int {
 		return startTargets(resolveTargets(cfg, args), cfg)
 	}
 
-	cfg, err := LoadConfig(".")
+	cfg, err := LoadConfigOpts(".", importScanOpts{NoGitignore: args.NoGitignore})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "rerun: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nrerun: hint: %s\n", configHint)
@@ -137,10 +137,6 @@ func applyRunArgs(cfg *Config, args Args) {
 	cfg.importOpts = importScanOpts{NoGitignore: args.NoGitignore}
 	if len(args.Targets) > 0 || args.Target != "" {
 		cfg.ImportPicker = false
-		return
-	}
-	if cfg.ImportPicker && args.NoGitignore {
-		cfg.Importable, cfg.importTruncated = scanImportable(filepath.Dir(cfg.Path), cfg.importOpts)
 	}
 }
 

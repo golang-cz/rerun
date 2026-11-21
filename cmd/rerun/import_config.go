@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,13 @@ func importsNode(checked []importCandidate) *yaml.Node {
 		seq.Content = append(seq.Content, entry)
 	}
 	return seq
+}
+
+// importSession is the picker's checked set for one run, kept so a reload re-applies it.
+type importSession struct {
+	rootFile string
+	picked   []importCandidate
+	schemas  map[string]groupDef
 }
 
 // sessionConfig loads the rerun.yml's own targets, groups and links plus the checked files; its imports: are replaced, nothing is written.
@@ -64,18 +72,18 @@ func sessionConfig(rootFile string, checked []importCandidate, rootSchemas map[s
 // saveImports rewrites only the imports: key of the rerun.yml at path, creating the file when it is missing.
 func saveImports(path string, checked []importCandidate) error {
 	block := importsNode(checked)
-	if !fileExists(path) {
+	real, err := saveTarget(path)
+	if err != nil {
+		return err
+	}
+	if !fileExists(real) {
 		lines, err := renderKey(importsKey, block, 2, 0)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+		return createFile(real, []byte(strings.Join(lines, "\n")+"\n"))
 	}
 
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return err
-	}
 	data, err := os.ReadFile(real)
 	if err != nil {
 		return err
@@ -98,6 +106,52 @@ func saveImports(path string, checked []importCandidate) error {
 		return fmt.Errorf("%s: %w", real, err)
 	}
 	return replaceFile(real, out)
+}
+
+// saveTarget is the file a save of path writes: path itself, or its symlink target when that stays inside path's folder.
+func saveTarget(path string) (string, error) {
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	fi, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return filepath.Join(dir, filepath.Base(path)), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		return filepath.Join(dir, filepath.Base(path)), nil
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("%s is a symlink to a missing file, edit it by hand", ConfigFileName)
+	}
+	if rel, err := filepath.Rel(dir, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s is a symlink to %s outside %s, edit it by hand", ConfigFileName, real, dir)
+	}
+	return real, nil
+}
+
+// createFile writes a new file through a temp file and a rename, so a watcher never reads it half written.
+func createFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // firstOrEmpty is the document's root node, or an empty node when the file has no content.
@@ -191,7 +245,8 @@ func renderKey(key string, value *yaml.Node, indent, col int) ([]string, error) 
 func checkImportsRoundTrip(data []byte, checked []importCandidate) error {
 	var got struct {
 		Imports []struct {
-			Path string `yaml:"path"`
+			Path  string `yaml:"path"`
+			Group string `yaml:"group"`
 		} `yaml:"imports"`
 	}
 	if err := yaml.Unmarshal(data, &got); err != nil {
@@ -201,7 +256,7 @@ func checkImportsRoundTrip(data []byte, checked []importCandidate) error {
 		return errors.New("edited imports do not match the checked files")
 	}
 	for i, c := range checked {
-		if got.Imports[i].Path != c.Path {
+		if got.Imports[i].Path != c.Path || got.Imports[i].Group != c.Group {
 			return errors.New("edited imports do not match the checked files")
 		}
 	}

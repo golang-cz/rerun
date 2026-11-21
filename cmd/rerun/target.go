@@ -251,6 +251,11 @@ type targetGroup struct {
 	// builds shares one build process among the targets that run the same command in the same directory.
 	builds *buildShare
 
+	// session is the import picker's checked set for this run; while set, a reload re-applies it instead of the disk's imports.
+	session atomic.Pointer[importSession]
+	// nudge asks the config watcher to reload now, so every apply runs on its one goroutine.
+	nudge chan struct{}
+
 	done   chan struct{}
 	failed int32
 	wg     sync.WaitGroup
@@ -266,6 +271,7 @@ func newTargetGroup(targets []Target, s sink, configPath string) *targetGroup {
 		targets:    append([]Target(nil), targets...),
 		configPath: configPath,
 		builds:     newBuildShare(),
+		nudge:      make(chan struct{}, 1),
 		done:       make(chan struct{}),
 	}
 	for i, target := range targets {
@@ -410,7 +416,8 @@ type targetRunner struct {
 	ctrlCh   chan ctrlMsg
 	finished chan struct{}
 	// retire asks a runner whose target left the config to stop for good.
-	retire chan struct{}
+	retire     chan struct{}
+	retireOnce sync.Once
 	// watchDone releases the watcher-closing goroutine when run returns.
 	watchDone chan struct{}
 	// stash is a control drainSpecs pulled out of the queue behind a spec swap,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -157,5 +158,25 @@ func TestScanImportableReportsParseErrors(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Err.Error(), "nope") {
 		t.Fatalf("error = %v, want it to name the bad key", got[0].Err)
+	}
+}
+
+func TestScanImportableTruncatesWhenACandidateIsPastTheDepthCap(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "Makefile"), scanMakefile)
+	writeFile(t, filepath.Join(dir, "a", "b", "c", "d", "e", "f", "Makefile"), scanMakefile)
+
+	got, truncated := scanImportable(dir, importScanOpts{})
+	if !truncated {
+		t.Fatalf("truncated = false with a Makefile two levels past the cap; found %v", candidateSummary(got))
+	}
+
+	other := t.TempDir()
+	writeFile(t, filepath.Join(other, "Makefile"), scanMakefile)
+	if err := os.MkdirAll(filepath.Join(other, "a", "b", "c", "d", "e", "f"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, truncated := scanImportable(other, importScanOpts{}); truncated {
+		t.Fatal("truncated = true for empty folders past the cap")
 	}
 }
