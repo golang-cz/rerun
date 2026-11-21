@@ -391,6 +391,7 @@ A root-only Makefile or compose file loads directly, as before. `I` opens the pi
   With a `rerun.yml`, its own targets, groups and links still load.
 - `ctrl+s` saves the checked files as `imports:`. Without a `rerun.yml`, it creates one.
   With one, only the `imports:` key changes. Comments and other keys stay.
+- Saved groups: a checked file in a subfolder gets the folder as its `group:`. Files sharing a folder get `<folder>/<file stem>`, such as `api/makefile` and `api/compose`.
 
 **Scan.**
 

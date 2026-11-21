@@ -52,7 +52,7 @@ type importSpec struct {
 }
 
 // parseImports merges the root file's imports into cfg; a root group named like an import gives its targets columns.
-// A session config (the import picker's checked set) adds no implicit files and no notices.
+// A session config (the import picker's checked set) adds no implicit files and loads compose imports as optional.
 func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile string, rootSchemas map[string]groupDef, session bool) error {
 	var specs []importSpec
 	if node != nil && !(node.Kind == yaml.ScalarNode && node.Tag == "!!null") {
@@ -205,12 +205,18 @@ func (cfg *Config) parseImports(src *configSource, node *yaml.Node, rootFile str
 					return src.at(spec.groupsRef, nodeSpan(spec.groupsRef), fmt.Sprintf("import %q: groups applies to rerun files; a compose import filters with services: and profiles:", spec.path))
 				}
 				project, services, profilesOf, err := resolveComposeImport(spec, abs)
-				if errors.Is(err, errNoDocker) && spec.optional {
+				// A picker session imports compose as optional, so docker or a bad file never stops the other files.
+				optional := spec.optional || session
+				if errors.Is(err, errNoDocker) && optional {
 					cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: docker not found on PATH; skipped", spec.path))
 					continue
 				}
 				if err != nil && spec.implicit {
 					cfg.Notices = append(cfg.Notices, fmt.Sprintf("%s is not imported: %v", filepath.Base(abs), err))
+					continue
+				}
+				if err != nil && session {
+					cfg.Notices = append(cfg.Notices, fmt.Sprintf("import %q: %v; skipped", spec.path, err))
 					continue
 				}
 				if err != nil {

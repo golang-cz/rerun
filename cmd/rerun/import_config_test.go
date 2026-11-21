@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -160,5 +161,34 @@ func TestSessionConfigBesideRerunYMLAddsNoImplicitFiles(t *testing.T) {
 	}
 	if got := cfg.Names(); len(got) != 1 || got[0] != "local" || len(cfg.Notices) != 0 {
 		t.Fatalf("targets = %v notices = %v, want only the root's local", got, cfg.Notices)
+	}
+}
+
+func TestSessionConfigComposeWithoutDockerLoadsRest(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no docker on PATH
+	dir := t.TempDir()
+	rootFile := filepath.Join(dir, ConfigFileName)
+	writeFile(t, filepath.Join(dir, "Makefile"), "build:\n\tgo build\n")
+	writeFile(t, filepath.Join(dir, "compose.yaml"), "services:\n  postgres:\n    image: postgres\n")
+	checked := []importCandidate{
+		{Path: "Makefile", Kind: makeKind},
+		{Path: "compose.yaml", Kind: composeKind},
+	}
+
+	cfg, err := sessionConfig(rootFile, checked, nil)
+	if err != nil {
+		t.Fatalf("sessionConfig: %v", err)
+	}
+	if got := cfg.Names(); !slices.Contains(got, "make/build") {
+		t.Fatalf("targets = %v, want make/build", got)
+	}
+	if !containsNotice(cfg, "docker not found") {
+		t.Fatalf("notices = %v, want docker not found", cfg.Notices)
+	}
+	if err := saveImports(rootFile, checked); err != nil {
+		t.Fatalf("saveImports without docker: %v", err)
+	}
+	if got := readFile(t, rootFile); strings.Contains(got, "optional") {
+		t.Fatalf("saved rerun.yml = %q, want no optional: key", got)
 	}
 }

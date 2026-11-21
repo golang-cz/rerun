@@ -73,7 +73,8 @@ imports:
     group: web
 ```
 
-- Root files: no `group`. Subfolder files: `group` = folder path relative to the start folder, `/` kept.
+- Root files: no `group`. Subfolder files: `group` = folder path relative to the start folder, `/` kept, unless the folder holds more than one checked file.
+- Subfolder files sharing a folder: `group` = `<folder>/<file stem>`, lowercased (`api/makefile`, `api/compose`).
 - Order: tree order.
 
 ## Steps
