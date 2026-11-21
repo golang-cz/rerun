@@ -180,7 +180,7 @@ With a `rerun.yml`, only the files listed under `imports:` load. A Makefile besi
 - `enter` runs the checked files for this session only. With a `rerun.yml`, its own targets, groups and links still load.
 - `ctrl+s` saves the checked files as `imports:`. Only that key is rewritten; comments and other keys stay.
 - Saved groups: a checked file in a subfolder gets the folder as its `group:`. Files sharing a folder get `<folder>/<file stem>`, such as `api/makefile` and `api/compose`.
-- Scan: honors `.gitignore` (unless `-no-gitignore`), always skips `.git`, `node_modules` and `vendor`. A folder's own `rerun.yml` stands in for the Makefile and compose file beside it; the start folder's is never listed. Stops at depth 4 or 200 files.
+- Scan: honors `.gitignore` (unless `-no-gitignore`), always skips `.git`, `node_modules` and `vendor`. A folder's own `rerun.yml` stands in for the Makefile and compose file beside it; the start folder's is never listed. Stops at depth 4 or 200 files. Lists one checkout per git repo: other worktrees of it are skipped with a dim `N other worktrees of <repo> skipped` row (the start folder's checkout wins, then the main one); submodules and separate repos stay. Stops after 2 seconds too.
 
 ### Makefile: a make file's targets
 

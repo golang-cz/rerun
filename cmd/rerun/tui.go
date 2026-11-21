@@ -658,6 +658,7 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 	switch {
 	case cfg.ImportPicker:
 		m.imports = newImportPicker(cfg.Path, cfg.Importable, cfg.importTruncated, false, nil, nil)
+		m.imports.skips = cfg.importSkips
 	case cfg.MakeOnly:
 		m.finder = finderState{open: true}
 	}

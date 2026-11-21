@@ -50,9 +50,11 @@ type importPicker struct {
 	checked   []bool
 	tree      *importNode
 	truncated bool
-	query     string
-	cursor    int
-	top       int
+	// skips are the dim rows naming worktrees the scan left out.
+	skips  []string
+	query  string
+	cursor int
+	top    int
 	// msg is the last failure, shown under the list until the next key that changes the picker.
 	msg string
 	// scanning is set while the filesystem scan runs; only esc acts then.
@@ -375,7 +377,9 @@ func (m *tuiModel) importScanned(msg importScanMsg) {
 // loadImportPicker scans below the rerun.yml's folder and builds the picker, or returns the notice to show instead.
 func loadImportPicker(rootFile string, opts importScanOpts) (p importPicker, notice string, isErr bool) {
 	dir := filepath.Dir(rootFile)
-	cands, truncated := scanImportable(dir, opts)
+	scan := scanImportableFull(dir, opts)
+	cands, truncated := scan.Found, scan.Truncated
+	defer func() { p.skips = scan.Skips }()
 	if len(cands) == 0 {
 		return p, "no Makefile, compose or rerun.yml files below " + shortDir(dir), false
 	}
@@ -509,6 +513,7 @@ func (m *tuiModel) importListRows(outerW, outerH int) int {
 	if m.imports.truncated {
 		n--
 	}
+	n -= len(m.imports.skips)
 	return max(1, n)
 }
 
@@ -600,6 +605,9 @@ func (m *tuiModel) importView() string {
 	}
 	if p.truncated {
 		body = append(body, m.styles.hint.Render(importScanRow))
+	}
+	for _, row := range p.skips {
+		body = append(body, m.styles.hint.Render(row))
 	}
 
 	files, commands := p.totals()

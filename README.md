@@ -399,6 +399,8 @@ A root-only Makefile or compose file loads directly, as before. `I` opens the pi
 - A folder's own `rerun.yml` stands in for the Makefile and compose file beside it.
 - The start folder's `rerun.yml` is never listed.
 - Stops at depth 4 or 200 files, with a `scan truncated` row.
+- Lists one checkout per git repository: other worktrees of the same repo are skipped, with a dim `N other worktrees of <repo> skipped` row. The checkout holding the start folder wins, then the main checkout, then the first found. Submodules and separate repos are always listed.
+- Stops after 2 seconds, with the same `scan truncated` row.
 
 ### Docker Compose
 

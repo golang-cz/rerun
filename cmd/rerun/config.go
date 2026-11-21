@@ -173,6 +173,8 @@ type Config struct {
 	Importable []importCandidate
 	// importTruncated is the scan's depth or file cap left files out.
 	importTruncated bool
+	// importSkips are the scan's worktree skip rows.
+	importSkips []string
 	// importOpts are the run's scan flags, so a later scan matches the startup one.
 	importOpts importScanOpts
 	// Queries are the top-level saved queries, shared by every pane scope.
@@ -215,7 +217,8 @@ func LoadConfigOpts(startDir string, opts importScanOpts) (*Config, error) {
 		}
 		path := filepath.Join(start, ConfigFileName)
 		found := implicitFiles(start)
-		importable, truncated := scanImportable(start, opts)
+		scan := scanImportableFull(start, opts)
+		importable, truncated := scan.Found, scan.Truncated
 		// A Makefile or compose file below the root is a choice, so the picker opens instead of loading the root alone.
 		picker := anyBelowRoot(importable)
 		if len(found) > 0 {
@@ -224,11 +227,13 @@ func LoadConfigOpts(startDir string, opts importScanOpts) (*Config, error) {
 				return nil, err
 			}
 			cfg.setImportPicker(picker, importable, truncated)
+			cfg.importSkips = scan.Skips
 			return cfg, nil
 		}
 		if picker {
 			cfg := &Config{Path: path, Files: []string{path}, MakeOnly: true}
 			cfg.setImportPicker(true, importable, truncated)
+			cfg.importSkips = scan.Skips
 			return cfg, nil
 		}
 		return nil, &configNotFoundError{dir: startDir}

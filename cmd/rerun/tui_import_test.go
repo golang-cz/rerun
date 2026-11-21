@@ -737,3 +737,13 @@ func TestImportEscKeepsThePickerWhenNothingIsLoaded(t *testing.T) {
 		t.Fatalf("esc with nothing loaded: open = %v, want it kept with the hint", m.imports.open)
 	}
 }
+
+func TestImportSkippedWorktreesShowRow(t *testing.T) {
+	m, dir := impFixture(t, impTree)
+	cands, _ := scanImportable(dir, importScanOpts{})
+	m.imports = newImportPicker(filepath.Join(dir, ConfigFileName), cands, false, false, nil, nil)
+	m.imports.skips = []string{"2 other worktrees of app skipped"}
+	if view := m.View().Content; !strings.Contains(view, "2 other worktrees of app skipped") {
+		t.Fatalf("skip row missing:\n%s", view)
+	}
+}

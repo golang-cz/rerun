@@ -34,6 +34,11 @@ func implicitFile(dir string, names []string) string {
 	if err != nil {
 		return ""
 	}
+	return firstNamed(dir, entries, names)
+}
+
+// firstNamed is the first of names that is a non-folder entry of dir, or "".
+func firstNamed(dir string, entries []os.DirEntry, names []string) string {
 	files := map[string]bool{}
 	for _, e := range entries {
 		if !e.IsDir() {
