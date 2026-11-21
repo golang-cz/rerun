@@ -53,8 +53,19 @@ type importPicker struct {
 	query     string
 	cursor    int
 	top       int
-	// msg is the last failure, shown in the status row until the next key that changes the picker.
+	// msg is the last failure, shown under the list until the next key that changes the picker.
 	msg string
+	// scanning is set while the filesystem scan runs; only esc acts then.
+	scanning bool
+}
+
+// importScanMsg is a finished scan; id ties it to the open that started it.
+type importScanMsg struct {
+	id     int
+	picker importPicker
+	// notice replaces the picker when it is not empty.
+	notice string
+	isErr  bool
 }
 
 // importNode is a folder in the picker's tree; kids keep the scan's order.
@@ -330,38 +341,60 @@ func shortDir(dir string) string {
 	return dir
 }
 
-// openImports is I: the picker over the files below the rerun.yml's folder, with the ones it imports checked.
-func (m *tuiModel) openImports() {
+// openImports is I: the picker opens at once on a spinner and the scan fills it in.
+func (m *tuiModel) openImports() tea.Cmd {
 	rootFile := m.group.configPath
 	if rootFile == "" {
 		m.showNotice("rerun: no config to import files into", true)
+		return nil
+	}
+	m.importScanID++
+	id, opts := m.importScanID, m.importOpts
+	m.imports = importPicker{open: true, scanning: true, dir: filepath.Dir(rootFile), rootFile: rootFile}
+	scan := func() tea.Msg {
+		p, notice, isErr := loadImportPicker(rootFile, opts)
+		return importScanMsg{id: id, picker: p, notice: notice, isErr: isErr}
+	}
+	return tea.Batch(scan, m.startSpin())
+}
+
+// importScanned fills the picker once its scan lands; a scan whose picker was closed is dropped.
+func (m *tuiModel) importScanned(msg importScanMsg) {
+	if msg.id != m.importScanID || !m.imports.open || !m.imports.scanning {
 		return
 	}
-	dir := filepath.Dir(rootFile)
-	cands, truncated := scanImportable(dir, m.importOpts)
-	if len(cands) == 0 {
-		m.showNotice("no Makefile, compose or rerun.yml files below "+shortDir(dir), false)
+	if msg.notice != "" {
+		m.imports = importPicker{}
+		m.showNotice(msg.notice, msg.isErr)
 		return
+	}
+	m.imports = msg.picker
+	m.fitImports()
+}
+
+// loadImportPicker scans below the rerun.yml's folder and builds the picker, or returns the notice to show instead.
+func loadImportPicker(rootFile string, opts importScanOpts) (p importPicker, notice string, isErr bool) {
+	dir := filepath.Dir(rootFile)
+	cands, truncated := scanImportable(dir, opts)
+	if len(cands) == 0 {
+		return p, "no Makefile, compose or rerun.yml files below " + shortDir(dir), false
 	}
 	if !fileExists(rootFile) {
-		m.imports = newImportPicker(rootFile, cands, truncated, false, nil, nil)
-		return
+		return newImportPicker(rootFile, cands, truncated, false, nil, nil), "", false
 	}
 	cfg, err := ParseConfig(rootFile)
 	if err != nil {
-		m.showNotice("rerun: "+oneLine(err.Error()), true)
-		return
+		return p, "rerun: " + oneLine(err.Error()), true
 	}
 	schemas, err := rootSchemasOf(rootFile)
 	if err != nil {
-		m.showNotice("rerun: "+oneLine(err.Error()), true)
-		return
+		return p, "rerun: " + oneLine(err.Error()), true
 	}
 	imported := make(map[string]bool, len(cfg.Files))
 	for _, f := range cfg.Files {
 		imported[f] = true
 	}
-	m.imports = newImportPicker(rootFile, cands, truncated, true, schemas, imported)
+	return newImportPicker(rootFile, cands, truncated, true, schemas, imported), "", false
 }
 
 // rootSchemasOf reads the schemas a rerun.yml defines, which its imports may refer to.
@@ -389,10 +422,18 @@ func rootSchemasOf(rootFile string) (map[string]groupDef, error) {
 func (m *tuiModel) handleImportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	p := &m.imports
 	p.msg = ""
-	switch barKeyName(msg) {
+	key := barKeyName(msg)
+	if p.scanning && key != "ctrl+c" && key != "esc" && key != "ctrl+[" {
+		return m, nil
+	}
+	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc", "ctrl+[":
+		if len(m.group.snapshotTargets()) == 0 {
+			p.msg = importNothingLoaded
+			return m, nil
+		}
 		m.imports = importPicker{}
 		return m, nil
 	case "up", "ctrl+p":
@@ -443,10 +484,28 @@ func (m *tuiModel) importPaste(s string) {
 	m.imports.cursor, m.imports.top = 0, 0
 }
 
-// importListRows is how many file rows fit between the filter and the status row.
-func (m *tuiModel) importListRows(outerH int) int {
+// importNothingLoaded is shown when esc is pressed with no targets to fall back to.
+const importNothingLoaded = "Nothing loaded yet · enter run · ctrl+c quit"
+
+// importMsgMaxRows caps how many lines an error takes from the list.
+const importMsgMaxRows = 5
+
+// importMsgLines wraps the picker's error to the modal width.
+func (m *tuiModel) importMsgLines(innerW int) []string {
+	if m.imports.msg == "" {
+		return nil
+	}
+	lines := strings.Split(ansi.Wrap(m.imports.msg, max(1, innerW), ""), "\n")
+	if len(lines) > importMsgMaxRows {
+		lines = append(lines[:importMsgMaxRows-1], ansi.Truncate(lines[importMsgMaxRows-1], max(1, innerW), "…"))
+	}
+	return lines
+}
+
+// importListRows is how many file rows fit between the filter and the status rows.
+func (m *tuiModel) importListRows(outerW, outerH int) int {
 	innerH := max(1, outerH-m.styles.box.GetVerticalFrameSize())
-	n := innerH - 3 - importFilterRows - importStatusRows
+	n := innerH - 3 - importFilterRows - importStatusRows - len(m.importMsgLines(m.modalInnerW(outerW)))
 	if m.imports.truncated {
 		n--
 	}
@@ -461,8 +520,8 @@ func (m *tuiModel) fitImports() {
 	p := &m.imports
 	n := len(p.rows())
 	p.cursor = min(max(p.cursor, 0), max(0, n-1))
-	_, outerH := m.modalSize()
-	capRows := m.importListRows(outerH)
+	outerW, outerH := m.modalSize()
+	capRows := m.importListRows(outerW, outerH)
 	p.top = min(p.top, max(0, n-capRows))
 	if p.cursor < p.top {
 		p.top = p.cursor
@@ -515,8 +574,12 @@ func (m *tuiModel) importView() string {
 	outerW, outerH := m.modalSize()
 	innerW := m.modalInnerW(outerW)
 	p := &m.imports
+	if p.scanning {
+		body := []string{m.styles.hint.Render(spinnerFrames[m.spin%len(spinnerFrames)] + " scanning…")}
+		return m.modalBox(m.styles.title.Render("Import files"), "esc close", body, outerW, outerH)
+	}
 	rows := p.rows()
-	capRows := m.importListRows(outerH)
+	capRows := m.importListRows(outerW, outerH)
 
 	title := fmt.Sprintf("No rerun.yml in %s ── found %s", shortDir(p.dir), countOf(len(p.cands), "file"))
 	footer := importFooterNew
@@ -541,10 +604,10 @@ func (m *tuiModel) importView() string {
 
 	files, commands := p.totals()
 	status := fmt.Sprintf("%d of %d files · %d commands", files, len(p.cands), commands)
-	if p.msg != "" {
-		status += " · " + p.msg
-	}
 	body = append(body, m.styles.hint.Render(status))
+	for _, l := range m.importMsgLines(innerW) {
+		body = append(body, m.styles.hint.Render(l))
+	}
 	return m.modalBox(m.styles.title.Render(title), footer, body, outerW, outerH)
 }
 

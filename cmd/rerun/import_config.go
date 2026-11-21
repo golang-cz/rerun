@@ -15,15 +15,33 @@ import (
 // importsNode is the `imports:` sequence for checked: paths relative to the rerun.yml, and a group for files in a subfolder.
 func importsNode(checked []importCandidate) *yaml.Node {
 	seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, c := range checked {
+	groups := importGroups(checked)
+	for i, c := range checked {
 		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		entry.Content = append(entry.Content, scalarNode("path"), scalarNode(c.Path))
-		if c.Group != "" {
-			entry.Content = append(entry.Content, scalarNode("group"), scalarNode(c.Group))
+		if groups[i] != "" {
+			entry.Content = append(entry.Content, scalarNode("group"), scalarNode(groups[i]))
 		}
 		seq.Content = append(seq.Content, entry)
 	}
 	return seq
+}
+
+// importGroups is each checked file's group. Files sharing a folder would clash on its name, so they get <folder>/<file stem>.
+func importGroups(checked []importCandidate) []string {
+	uses := map[string]int{}
+	for _, c := range checked {
+		uses[c.Group]++
+	}
+	out := make([]string, len(checked))
+	for i, c := range checked {
+		out[i] = c.Group
+		if c.Group != "" && uses[c.Group] > 1 {
+			base := filepath.Base(c.Path)
+			out[i] = c.Group + "/" + strings.ToLower(strings.TrimSuffix(base, filepath.Ext(base)))
+		}
+	}
+	return out
 }
 
 // importSession is the picker's checked set for one run, kept so a reload re-applies it.
@@ -255,8 +273,9 @@ func checkImportsRoundTrip(data []byte, checked []importCandidate) error {
 	if len(got.Imports) != len(checked) {
 		return errors.New("edited imports do not match the checked files")
 	}
+	groups := importGroups(checked)
 	for i, c := range checked {
-		if got.Imports[i].Path != c.Path || got.Imports[i].Group != c.Group {
+		if got.Imports[i].Path != c.Path || got.Imports[i].Group != groups[i] {
 			return errors.New("edited imports do not match the checked files")
 		}
 	}

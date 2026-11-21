@@ -46,7 +46,7 @@ func (m *tuiModel) anyBuilding() bool {
 
 // startSpin starts the fast tick when a build runs and none is ticking.
 func (m *tuiModel) startSpin() tea.Cmd {
-	if m.spinning || !m.anyBuilding() {
+	if m.spinning || !m.anyBuilding() && !m.imports.scanning {
 		return nil
 	}
 	m.spinning = true
@@ -103,8 +103,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.styles = newTUIStyles(m.isDark)
 		return m, nil
 
+	case importScanMsg:
+		m.importScanned(msg)
+		return m, nil
+
 	case spinTickMsg:
-		if !m.anyBuilding() {
+		if !m.anyBuilding() && !m.imports.scanning {
 			m.spinning = false
 			return m, nil
 		}
@@ -438,7 +442,7 @@ func (m *tuiModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.openEvents()
 
 	case "I":
-		m.openImports()
+		return m, m.openImports()
 
 	case "o":
 		m.openLinks()

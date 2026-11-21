@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,6 +29,13 @@ func impFixture(t *testing.T, files map[string]string) (*tuiModel, string) {
 	return m, dir
 }
 
+// impLoaded gives the session a target, so esc may close the picker.
+func impLoaded(m *tuiModel) {
+	m.group.mu.Lock()
+	m.group.targets = []Target{{Name: "loaded"}}
+	m.group.mu.Unlock()
+}
+
 // impKey sends a printable key the way the decoder does: its text, no modifier.
 func impKey(m *tuiModel, s string) {
 	m.Update(tea.KeyPressMsg{Code: []rune(s)[0], Text: s})
@@ -38,12 +46,42 @@ func impCtrl(m *tuiModel, letter rune) {
 	m.Update(tea.KeyPressMsg{Code: letter, Mod: tea.ModCtrl})
 }
 
-// impOpen presses I and fails the test when the picker does not open.
+// impPressI presses I and returns the scan's message without delivering it.
+func impPressI(m *tuiModel) *importScanMsg {
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
+	return findScan(cmd)
+}
+
+// findScan runs a command, or a batch of them, and returns the scan result it holds.
+func findScan(cmd tea.Cmd) *importScanMsg {
+	if cmd == nil {
+		return nil
+	}
+	switch v := cmd().(type) {
+	case importScanMsg:
+		return &v
+	case tea.BatchMsg:
+		for _, c := range v {
+			if got := findScan(c); got != nil {
+				return got
+			}
+		}
+	}
+	return nil
+}
+
+// impOpen presses I, delivers the scan, and fails the test when the picker does not open.
 func impOpen(t *testing.T, m *tuiModel) {
 	t.Helper()
-	impKey(m, "I")
+	scan := impPressI(m)
 	if !m.imports.open {
 		t.Fatal("I did not open the import picker")
+	}
+	if scan != nil {
+		m.Update(*scan)
+	}
+	if !m.imports.open {
+		t.Fatal("the scan closed the import picker")
 	}
 }
 
@@ -352,6 +390,7 @@ func TestImportExistingRerunYMLFooterAndTitleNameIt(t *testing.T) {
 
 func TestImportEscClosesWithoutWriting(t *testing.T) {
 	m, dir := impFixture(t, impTree)
+	impLoaded(m)
 	impOpen(t, m)
 	impKey(m, "a")
 	press(m, "esc")
@@ -404,7 +443,9 @@ func TestImportTruncatedScanShowsRow(t *testing.T) {
 
 func TestImportKeyWithNoFilesOpensNothing(t *testing.T) {
 	m, _ := impFixture(t, map[string]string{"README.md": "hi\n"})
-	impKey(m, "I")
+	if scan := impPressI(m); scan != nil {
+		m.Update(*scan)
+	}
 	if m.imports.open {
 		t.Fatal("I opened a picker with nothing to list")
 	}
@@ -601,5 +642,98 @@ func TestImportEnterHoldsTheNothingSavedNotice(t *testing.T) {
 	press(m, "enter")
 	if !m.now.Before(m.keepNoticeUntil) {
 		t.Fatal("enter did not hold its notice against the reload banner")
+	}
+}
+
+// A folder holding both a Makefile and a compose file must not clash on its group name.
+func TestImportEnterLoadsMonorepoWithMakeAndComposeInOneFolder(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not on PATH")
+	}
+	for _, withRoot := range []bool{false, true} {
+		files := map[string]string{
+			"Makefile":           "build:\n\tgo build\n",
+			"docker-compose.yml": "services:\n  db:\n    image: postgres\n",
+			"api/Makefile":       "serve:\n\tgo run .\n",
+			"api/compose.yaml":   "services:\n  cache:\n    image: redis\n",
+			"web/rerun.yml":      "targets:\n  ui:\n    run: npm start\n",
+			"tools/Makefile":     "gen:\n\techo gen\n",
+		}
+		if withRoot {
+			files[ConfigFileName] = "targets:\n  top:\n    run: echo hi\n"
+		}
+		m, _ := impFixture(t, files)
+		impWatch(t, m)
+		impOpen(t, m)
+		if withRoot {
+			press(m, "a")
+		}
+		press(m, "enter")
+		if m.imports.open || m.imports.msg != "" {
+			t.Fatalf("withRoot=%v: enter left the picker open, msg %q", withRoot, m.imports.msg)
+		}
+		names := impNames(t, m, func(n []string) bool {
+			return hasSuffixName(n, "serve") && hasSuffixName(n, "cache") && hasSuffixName(n, "gen")
+		})
+		for _, want := range []string{"build", "serve", "gen", "ui", "db", "cache"} {
+			if !hasSuffixName(names, want) {
+				t.Errorf("withRoot=%v: targets = %v, want %s", withRoot, names, want)
+			}
+		}
+	}
+}
+
+func TestImportOpensOnASpinnerBeforeTheScanLands(t *testing.T) {
+	m, _ := impFixture(t, impTree)
+	scan := impPressI(m)
+	if !m.imports.open || !m.imports.scanning || scan == nil {
+		t.Fatalf("open = %v, scanning = %v, scan = %v, want an open picker waiting on its scan", m.imports.open, m.imports.scanning, scan)
+	}
+	if view := m.View().Content; !strings.Contains(view, "scanning") {
+		t.Fatalf("no scanning row:\n%s", view)
+	}
+	impKey(m, "x")
+	impCtrl(m, 's')
+	press(m, "enter")
+	if !m.imports.open || m.imports.query != "" {
+		t.Fatalf("keys acted while scanning: open = %v, query = %q", m.imports.open, m.imports.query)
+	}
+	m.Update(*scan)
+	if m.imports.scanning || len(m.imports.cands) != 3 {
+		t.Fatalf("scanning = %v, cands = %d, want the tree filled in", m.imports.scanning, len(m.imports.cands))
+	}
+}
+
+func TestImportEscWhileScanningDropsTheLateResult(t *testing.T) {
+	m, _ := impFixture(t, impTree)
+	impLoaded(m)
+	scan := impPressI(m)
+	press(m, "esc")
+	if m.imports.open {
+		t.Fatal("esc left the scanning picker open")
+	}
+	m.Update(*scan)
+	if m.imports.open {
+		t.Fatal("a late scan reopened the picker")
+	}
+}
+
+func TestImportErrorWrapsInsideTheModal(t *testing.T) {
+	m, _ := impFixture(t, impTree)
+	m.width, m.height = 100, 30
+	impOpen(t, m)
+	m.imports.msg = "rerun.yml: " + strings.Repeat("duplicate import group please fix it ", 6) + "END"
+	m.fitImports()
+	if view := m.View().Content; !strings.Contains(view, "END") {
+		t.Fatalf("error cut off:\n%s", view)
+	}
+}
+
+func TestImportEscKeepsThePickerWhenNothingIsLoaded(t *testing.T) {
+	m, _ := impFixture(t, impTree)
+	impOpen(t, m)
+	press(m, "esc")
+	if !m.imports.open || !strings.Contains(m.View().Content, importNothingLoaded) {
+		t.Fatalf("esc with nothing loaded: open = %v, want it kept with the hint", m.imports.open)
 	}
 }

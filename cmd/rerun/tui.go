@@ -340,6 +340,8 @@ type tuiModel struct {
 	imports importPicker
 	// importOpts are the run's scan flags, which the picker's scans reuse.
 	importOpts importScanOpts
+	// importScanID numbers the picker opens, so a scan that finishes after esc is ignored.
+	importScanID int
 	// original is the `o` modal over the pane's raw lines.
 	original originalState
 	// listTop is the list's first visible row; it moves only when the cursor leaves the window.

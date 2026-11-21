@@ -138,7 +138,7 @@ func TestImportStartupNonTTYKeepsTheConfigNotFoundExit(t *testing.T) {
 	}
 }
 
-func TestImportStartupEscLeavesAnEmptySession(t *testing.T) {
+func TestImportStartupEscKeepsThePickerWhileNothingIsLoaded(t *testing.T) {
 	dir := makeDir(t, map[string]string{"api/Makefile": "build:\n\tgo build\n"})
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -147,14 +147,14 @@ func TestImportStartupEscLeavesAnEmptySession(t *testing.T) {
 	m := newConfigTUI(cfg.Targets, cfg)
 	m.width, m.height = 100, 24
 	press(m, "esc")
-	if m.imports.open {
-		t.Fatal("esc left the startup picker open")
+	if !m.imports.open {
+		t.Fatal("esc closed the picker with nothing loaded")
 	}
 	if len(m.group.snapshotTargets()) != 0 {
 		t.Fatal("esc on an empty startup picker loaded targets")
 	}
-	if view := m.View().Content; view == "" {
-		t.Fatal("empty session drew nothing")
+	if view := m.View().Content; !strings.Contains(view, importNothingLoaded) {
+		t.Fatalf("no nothing-loaded hint:\n%s", view)
 	}
 }
 
