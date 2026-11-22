@@ -24,7 +24,8 @@ checksum:
   name_template: "checksums.txt"
 
 changelog:
-  use: github-native
+  # github-native lists merged PRs only; master gets direct commits.
+  use: github
   sort: asc
 
 release:
