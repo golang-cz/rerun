@@ -95,6 +95,16 @@ func TestParseGrammar(t *testing.T) {
 			want: Args{Version: true},
 		},
 		{
+			name: "version short",
+			argv: []string{"-v"},
+			want: Args{Version: true},
+		},
+		{
+			name: "version double dash",
+			argv: []string{"--version"},
+			want: Args{Version: true},
+		},
+		{
 			name: "target with delay override",
 			argv: []string{"test", "-delay", "1s"},
 			want: Args{Target: "test", Delay: time.Second},

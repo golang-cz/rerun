@@ -133,7 +133,7 @@ rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
 -no-gitignore     do not filter watched files through .gitignore
 -migrate          rewrite target open: keys to link: in rerun.yml
 -h, -help         show this help
--version          show version
+-v, -version, --version show version
 ```
 
 Flags override the matching fields of `rerun.yml` targets, e.g. `rerun api -delay 1s`.

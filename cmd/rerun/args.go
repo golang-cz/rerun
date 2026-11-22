@@ -128,7 +128,7 @@ parse:
 			args.Help = true
 			break parse
 
-		case "-version":
+		case "-version", "--version", "-v":
 			args.Version = true
 			break parse
 

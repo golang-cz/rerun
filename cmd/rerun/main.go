@@ -49,7 +49,7 @@ Flags:
   -no-gitignore     do not filter watched files through .gitignore
   -migrate          rewrite target open: keys to link: in rerun.yml and its imports
   -h, -help         show this help
-  -version          show version
+  -v, -version, --version show version
 
 Deprecated: -watch, -ignore and -run (use --on, --except and --).
 `
