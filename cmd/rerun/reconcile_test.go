@@ -341,7 +341,7 @@ func TestReconcileHoldsANewTargetWhileSoloed(t *testing.T) {
 	sink := &recordingSink{}
 	g := newTargetGroup([]Target{recTarget("web", "web")}, sink, "")
 	g.setSoloGuard(true)
-	t.Cleanup(g.cancel)
+	cleanupGroup(t, g)
 
 	g.applyConfig([]Target{recTarget("web", "web"), recTarget("api", "api")}, nil, nil)
 
@@ -529,7 +529,7 @@ func TestReloadAppliesTheConfigOrReportsTheError(t *testing.T) {
 		t.Helper()
 		sink := &recordingSink{}
 		group := newTargetGroup(running, sink, path)
-		t.Cleanup(group.cancel)
+		cleanupGroup(t, group)
 		return group, sink
 	}
 	save := func(t *testing.T, path, yml string) {
@@ -744,7 +744,7 @@ func TestRestoredConfigClearsTheErrorModal(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
-	t.Cleanup(group.cancel)
+	cleanupGroup(t, group)
 
 	if err := os.WriteFile(path, []byte("targets:\n  web:\n    run: [\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -779,7 +779,7 @@ func TestReloadQueriesOnlyEmitsReconcile(t *testing.T) {
 	save("queries:\n  errors: err\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")
 	sink := &recordingSink{}
 	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
-	t.Cleanup(group.cancel)
+	cleanupGroup(t, group)
 	group.queries = map[string]string{"errors": "err"} // the startup load's set
 
 	save("queries:\n  errors: timeout\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")
@@ -831,7 +831,7 @@ func TestReloadLinksOnlyEmitsReconcile(t *testing.T) {
 	save("links:\n  docs: https://a.test\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")
 	sink := &recordingSink{}
 	group := newTargetGroup([]Target{recTarget("web", "sleep 30")}, sink, path)
-	t.Cleanup(group.cancel)
+	cleanupGroup(t, group)
 	group.links = []Link{{Name: "docs", Value: "https://a.test", Dir: filepath.Dir(path)}} // the startup load's set
 
 	save("links:\n  docs: https://b.test\ntargets:\n  web:\n    on: src\n    run: sleep 30\n")

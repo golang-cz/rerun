@@ -355,12 +355,35 @@ func startConfigWatch(t *testing.T, path string) (*targetGroup, *recordingSink) 
 	}
 	sink := &recordingSink{}
 	group := newTargetGroup(cfg.Targets, sink, path)
-	t.Cleanup(group.cancel)
 	group.mu.Lock()
 	group.missing = cfg.Missing
 	group.mu.Unlock()
-	go group.watchConfig(path)
+	watchGroup(t, group, path)
 	return group, sink
+}
+
+// cleanupGroup stops the group's runners before the test returns; they read os.Stderr, which later tests swap.
+func cleanupGroup(t *testing.T, g *targetGroup) {
+	t.Helper()
+	t.Cleanup(func() {
+		g.cancel()
+		g.wg.Wait()
+	})
+}
+
+// watchGroup runs the config watch and cleans the group up; wg.Wait must follow the watch's return, as it can still wg.Add.
+func watchGroup(t *testing.T, g *targetGroup, path string) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		g.watchConfig(path)
+	}()
+	t.Cleanup(func() {
+		g.cancel()
+		<-done
+		g.wg.Wait()
+	})
 }
 
 func findSnapshot(g *targetGroup, name string) (Target, bool) {
@@ -454,8 +477,7 @@ func TestConfigWatchRecoversFromABrokenImport(t *testing.T) {
 
 	sink := &recordingSink{}
 	group := newTargetGroup(nil, sink, f.root)
-	t.Cleanup(group.cancel)
-	go group.watchConfig(f.root)
+	watchGroup(t, group, f.root)
 
 	fix := func() {
 		writeFile(t, filepath.Join(f.dir, "bpn", ConfigFileName), "targets:\n  api:\n    run: sleep 30\n")

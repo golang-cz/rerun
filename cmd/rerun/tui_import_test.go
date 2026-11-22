@@ -252,8 +252,7 @@ func TestImportFilterWithNoMatchSaysSo(t *testing.T) {
 // impWatch runs the config watcher, which is what applies a picker session.
 func impWatch(t *testing.T, m *tuiModel) {
 	t.Helper()
-	go m.group.watchConfig(m.group.configPath)
-	t.Cleanup(m.group.cancel)
+	watchGroup(t, m.group, m.group.configPath)
 }
 
 // impNames waits until the group's targets satisfy ok, then returns them.
