@@ -84,7 +84,10 @@ func writeUntilChange(t *testing.T, changes <-chan ChangeSet, file string, deadl
 func renameSwap(t *testing.T, target string) {
 	t.Helper()
 	tmp := target + ".tmp"
-	writeFiles(t, tmp)
+	// Fresh bytes each time: inotify has no remove event for the replaced inode, so same-content saves are rightly dropped.
+	if err := os.WriteFile(tmp, []byte(time.Now().String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Rename(tmp, target); err != nil {
 		t.Fatal(err)
 	}

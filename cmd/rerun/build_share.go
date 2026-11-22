@@ -145,11 +145,14 @@ func emitAll(out []emission) {
 	}
 }
 
+// mtimeSlack covers Linux stamping mtimes from a coarse clock that lags time.Now by up to a few ms.
+const mtimeSlack = 20 * time.Millisecond
+
 // lateAt reports whether a trigger on files came after the process started. Caller holds no lock.
 func lateAt(started time.Time, files map[string]struct{}) bool {
 	for f := range files {
 		info, err := os.Stat(f)
-		if err != nil || !info.ModTime().Before(started) {
+		if err != nil || !info.ModTime().Before(started.Add(-mtimeSlack)) {
 			return true
 		}
 	}
