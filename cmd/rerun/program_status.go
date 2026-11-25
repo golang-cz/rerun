@@ -84,7 +84,7 @@ func (s *programStatus) observe(t *tuiTarget, ev event) {
 		}
 	case evStarted, evExited, evRunnerErr:
 		s.set(name, "health", "", "")
-	case evStopped:
+	case evStopAck:
 		s.clearTarget(name)
 	}
 }

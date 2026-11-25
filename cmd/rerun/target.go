@@ -741,7 +741,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		r.cancelBuild()
 		r.killCurrent(ctx)
 		if r.target.Kind != composeKind {
-			r.sink.emit(event{kind: evStopped, target: r.target.Name})
+			r.sink.emit(event{kind: evStopAck, target: r.target.Name})
 		}
 
 	case ctrlStart:

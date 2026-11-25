@@ -99,6 +99,28 @@ func TestProgramStatusCleanup(t *testing.T) {
 	}
 }
 
+func TestProgramStatusDelayedStopDoesNotStopNextBuild(t *testing.T) {
+	var out bytes.Buffer
+	m := newTestModel(t, target("api"))
+	m.programStatus = &programStatus{out: &out}
+	r := m.targets[0].runner
+	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	press(m, "s")
+	stop := nextCtrl(t, r)
+	press(m, " ")
+	if got := queuedCtrl(t, r); got != ctrlStart {
+		t.Fatalf("control = %v, want start", got)
+	}
+	r.handleControl(t.Context(), stop)
+	m.applyEvent(<-m.events)
+	m.applyEvent(event{kind: evBuildStarted, target: "api"})
+	takeStatus(t, &out, "build", "working")
+	press(m, "s")
+	if got := queuedCtrl(t, r); got != ctrlStop {
+		t.Fatalf("control = %v, want stop during replacement build", got)
+	}
+}
+
 func TestProgramStatusReloadDuringReplacementBuild(t *testing.T) {
 	var out bytes.Buffer
 	spec := Target{Name: "api", Build: "old", Start: startManual}
