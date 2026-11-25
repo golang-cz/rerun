@@ -729,6 +729,7 @@ func (r *targetRunner) rewatch() (*rerun.Watcher, <-chan rerun.ChangeSet, error)
 func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 	// A spec-changing control is written here, where the run goroutine is the
 	// only reader of r.target.
+	hadBuild := r.target.Build != ""
 	if c.target != nil {
 		r.target = *c.target
 	}
@@ -739,6 +740,9 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		r.forgetCrashLoop()
 		r.cancelBuild()
 		r.killCurrent(ctx)
+		if r.target.Kind != composeKind {
+			r.sink.emit(event{kind: evStopped, target: r.target.Name})
+		}
 
 	case ctrlStart:
 		atomic.StoreInt32(&r.stopped, 0)
@@ -762,6 +766,10 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		// A burst of queued reloads collapses into one bounce: only the newest
 		// spec needs its own restart.
 		r.drainSpecs()
+		if hadBuild && r.target.Build == "" {
+			r.abortBuild()
+			r.sink.emit(event{kind: evBuildCancelled, target: r.target.Name})
+		}
 		r.clearLoop()
 		// A target the user stopped only takes the new spec: a config edit
 		// never surprises a stopped target into running, and a manual target

@@ -32,6 +32,10 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	defer tty.restore()
 
 	model := newConfigTUI(targets, cfg)
+	if os.Getenv("RERUN_PROGRAM_STATUS") != "0" {
+		model.programStatus = &programStatus{out: os.Stdout}
+		defer model.programStatus.close()
+	}
 	for _, n := range cfg.Notices {
 		model.group.sink.emit(event{kind: evNotice, line: "── " + oneLine(n) + " ──"})
 	}
@@ -184,7 +188,8 @@ type tuiTarget struct {
 // tuiModel is the whole screen: the target list on the left, the stream on
 // the right.
 type tuiModel struct {
-	group *targetGroup
+	group         *targetGroup
+	programStatus *programStatus
 	// missing is the optional imports whose file is absent, drawn after the list.
 	missing []missingImport
 	events  <-chan event
@@ -685,7 +690,9 @@ func (m *tuiModel) startTarget(i int) {
 	t.restartBatch = 0
 	m.cancelBuild(i)
 	t.state = stateRunning
-	t.lastStart = m.now
+	if !t.runStarted {
+		t.lastStart = m.now
+	}
 	t.runner.control(ctrlStart)
 }
 
@@ -694,7 +701,9 @@ func (m *tuiModel) rebootTarget(i int) {
 	t.restartBatch = 0
 	m.cancelBuild(i)
 	t.state = stateRunning
-	t.lastStart = m.now
+	if !t.runStarted {
+		t.lastStart = m.now
+	}
 	t.exitLabel = ""
 	t.runner.control(ctrlReboot)
 }
@@ -982,6 +991,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		return nil
 	}
 	t := m.targets[i]
+	m.programStatus.observe(t, ev)
 
 	switch ev.kind {
 	case evOutput:
@@ -1228,6 +1238,7 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		if _, ok := index[t.spec.Name]; ok {
 			continue
 		}
+		m.programStatus.clearTarget(t.spec.Name)
 		for k := range t.lines {
 			t.lines[k].target = -1
 		}

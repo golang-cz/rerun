@@ -124,6 +124,15 @@ rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
 - On a terminal, target mode opens the TUI. Piped or non-TTY output stays plain
   prefixed lines.
 
+The target TUI also reports build and health changes to terminals that support
+[OSC 7501 program status](https://www.superlogical.com/rex/docs/build/program-status),
+including Rex and Herdr Core. A building target reports `working`; a failed build
+or a `health:` probe that transitions to unhealthy reports `error`. Imported Docker
+Compose container events are not reported. Build and health have separate records:
+passing a build clears its failure but doesn't mean the new service is healthy.
+Recovery, stopping or removing the target, and quitting clear the relevant records.
+Set `RERUN_PROGRAM_STATUS=0` to disable reporting. Piped and ad-hoc runs don't emit it.
+
 ### Flags
 
 ```
