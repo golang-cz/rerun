@@ -123,6 +123,9 @@ rerun --on a b --except c d -- <cmd> --on is an explicit watchlist keyword
   press `space` on them.
 - On a terminal, target mode opens the TUI. Piped or non-TTY output stays plain
   prefixed lines.
+- In terminals that support [OSC 7501](https://www.superlogical.com/rex/docs/build/program-status),
+  the target TUI reports builds in progress, build failures, and failing health checks.
+  Set `RERUN_PROGRAM_STATUS=0` to turn off these reports.
 
 ### Flags
 

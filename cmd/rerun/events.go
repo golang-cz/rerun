@@ -35,6 +35,7 @@ const (
 	evBuildCancelled                  // a build was dropped and no new build follows
 	evBuildOutput                     // one line of a build's own output, streamed as it arrives
 	evStopped                         // a compose service went down because someone stopped it
+	evStopAck                         // a process runner finished handling ctrlStop
 )
 
 // event is everything a target runner reports. The front-ends render it: the
