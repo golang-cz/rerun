@@ -142,6 +142,9 @@ func TestBuildFailedStatusHoldsUntilNextSuccessOrStart(t *testing.T) {
 	if got := m.status(tg); got != "✗ build" {
 		t.Fatalf("status after a stop = %q, want ✗ build until the next build", got)
 	}
+	tg.runner.handleControl(t.Context(), nextCtrl(t, tg.runner))
+	m.applyEvent(<-m.events) // the stopped run's events have drained
+	m.startTarget(0)
 	m.applyEvents([]event{buildStart("api", buildAt)})
 	if got := m.status(tg); strings.Contains(got, "⚙") || strings.Contains(got, "build") {
 		t.Fatalf("status on the next build start = %q, want the duration only", got)

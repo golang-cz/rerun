@@ -766,6 +766,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		// A burst of queued reloads collapses into one bounce: only the newest
 		// spec needs its own restart.
 		r.drainSpecs()
+		// Dropping the build step retires its last result, even if the job already failed.
 		if hadBuild && r.target.Build == "" {
 			r.abortBuild()
 			r.sink.emit(event{kind: evBuildCancelled, target: r.target.Name})

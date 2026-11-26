@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -37,61 +38,73 @@ func takeStatus(t *testing.T, out *bytes.Buffer, topic, state string) map[string
 	return fields
 }
 
+// statusModel is a TUI that reports program status to out. apply feeds an
+// event the way Update does, syncing the report after it.
+func statusModel(t *testing.T, targets ...Target) (m *tuiModel, out *bytes.Buffer, apply func(event)) {
+	t.Helper()
+	out = &bytes.Buffer{}
+	m = newTestModel(t, targets...)
+	m.programStatus = &programStatus{out: out}
+	apply = func(ev event) {
+		m.applyEvent(ev)
+		m.programStatus.sync(m.targets)
+	}
+	return m, out, apply
+}
+
 func TestProgramStatusBuildAndHealth(t *testing.T) {
-	var out bytes.Buffer
-	m := newTUI([]Target{{Name: "api", Build: "build", Health: "ping", Selected: true}})
-	m.programStatus = &programStatus{out: &out}
+	m, out, apply := statusModel(t, Target{Name: "api", Build: "build", Health: "ping", Selected: true})
 	now := m.now
-	emit := func(ev event) { ev.target = "api"; m.applyEvent(ev) }
+	emit := func(ev event) { ev.target = "api"; apply(ev) }
 	emit(event{kind: evStarted, at: now})
 	emit(event{kind: evHealth, health: healthUnhealthy, runAt: now.Add(-time.Second)})
 	emit(event{kind: evOutput, line: "build failed"})
 	m.now = now.Add(time.Second)
 	m.rebootTarget(0)
 	emit(event{kind: evBuildStarted})
-	build := takeStatus(t, &out, "build", "working")["id"]
+	build := takeStatus(t, out, "build", "working")["id"]
 	emit(event{kind: evBuildFailed})
-	takeStatus(t, &out, "build", "error")
+	takeStatus(t, out, "build", "error")
+	// The failed rebuild left the old run up, so its probes still count.
 	emit(event{kind: evHealth, health: healthUnhealthy, runAt: now})
-	health := takeStatus(t, &out, "health", "error")["id"]
+	health := takeStatus(t, out, "health", "error")["id"]
 	emit(event{kind: evHealth, health: healthUnhealthy, runAt: now})
 	emit(event{kind: evBuildStarted})
-	takeStatus(t, &out, "build", "working")
+	takeStatus(t, out, "build", "working")
 	emit(event{kind: evBuildOK})
-	if got := takeStatus(t, &out, "build", "clear")["id"]; got != build {
+	if got := takeStatus(t, out, "build", "clear")["id"]; got != build {
 		t.Fatalf("cleared %q instead of %q", got, build)
 	}
 	emit(event{kind: evHealth, health: healthHealthy, runAt: now})
-	if got := takeStatus(t, &out, "health", "clear")["id"]; got != health {
+	if got := takeStatus(t, out, "health", "clear")["id"]; got != health {
 		t.Fatalf("cleared %q instead of %q", got, health)
 	}
 }
 
 func TestProgramStatusCleanup(t *testing.T) {
-	var out bytes.Buffer
-	m := newTUI([]Target{{Name: "a"}, {Name: "b"}})
-	m.programStatus = &programStatus{out: &out}
-	emit := func(kind eventKind, target string) { m.applyEvent(event{kind: kind, target: target}) }
+	m, out, apply := statusModel(t, Target{Name: "a"}, Target{Name: "b"})
+	emit := func(kind eventKind, target string) { apply(event{kind: kind, target: target}) }
 	emit(evBuildStarted, "a")
 	emit(evBuildStarted, "b")
 	out.Reset()
 	emit(evBuildCancelled, "a")
-	a := takeStatus(t, &out, "build", "clear")["id"]
+	a := takeStatus(t, out, "build", "clear")["id"]
 	i := m.targetIndex("b")
 	m.stopTarget(i)
-	emit(evBuildFailed, "b") // queued before the runner processes the stop
-	takeStatus(t, &out, "build", "error")
-	r := m.targets[i].runner
-	r.handleControl(t.Context(), nextCtrl(t, r))
-	m.applyEvent(<-m.events)
-	b := takeStatus(t, &out, "build", "clear")["id"]
+	m.programStatus.sync(m.targets)
+	b := takeStatus(t, out, "build", "clear")["id"]
 	if a == b {
 		t.Fatal("targets share a record")
+	}
+	emit(evBuildFailed, "b") // queued before the runner processes the stop
+	if out.Len() != 0 || m.targets[i].state != stateStopped || m.targets[i].buildFailed {
+		t.Fatalf("a cancelled build's result reached a stopped row: %q, state %v", out.String(), m.targets[i].state)
 	}
 	emit(evBuildFailed, "a")
 	out.Reset()
 	m.rebuildRows(&configChange{})
-	takeStatus(t, &out, "build", "clear")
+	m.programStatus.sync(m.targets)
+	takeStatus(t, out, "build", "clear")
 	emit(evBuildFailed, "a") // retired target
 	m.programStatus.close()
 	if out.Len() != 0 {
@@ -99,54 +112,100 @@ func TestProgramStatusCleanup(t *testing.T) {
 	}
 }
 
-func TestProgramStatusDelayedStopDoesNotStopNextBuild(t *testing.T) {
-	var out bytes.Buffer
-	m := newTestModel(t, target("api"))
-	m.programStatus = &programStatus{out: &out}
+func TestProgramStatusStartBeforeStopAck(t *testing.T) {
+	m, out, apply := statusModel(t, target("api"))
 	r := m.targets[0].runner
-	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	apply(event{kind: evStarted, target: "api", at: m.now})
 	press(m, "s")
 	stop := nextCtrl(t, r)
+	m.now = m.now.Add(time.Minute)
 	press(m, " ")
 	if got := queuedCtrl(t, r); got != ctrlStart {
 		t.Fatalf("control = %v, want start", got)
 	}
+	if !m.targets[0].lastStart.Equal(m.now) {
+		t.Fatal("the stopped run's uptime carried into the next one")
+	}
+	apply(event{kind: evBuildFailed, target: "api"}) // queued before the stop was processed
+	apply(event{kind: evRunnerErr, target: "api", err: fmt.Errorf("old spawn failed")})
 	r.handleControl(t.Context(), stop)
-	m.applyEvent(<-m.events)
-	m.applyEvent(event{kind: evBuildStarted, target: "api"})
-	takeStatus(t, &out, "build", "working")
+	apply(<-m.events)
+	apply(event{kind: evBuildStarted, target: "api"})
+	takeStatus(t, out, "build", "working")
 	press(m, "s")
 	if got := queuedCtrl(t, r); got != ctrlStop {
 		t.Fatalf("control = %v, want stop during replacement build", got)
 	}
+	takeStatus(t, out, "build", "clear")
 }
 
-func TestProgramStatusReloadDuringReplacementBuild(t *testing.T) {
-	var out bytes.Buffer
+func TestProgramStatusRejectedStopKeepsBuild(t *testing.T) {
+	m, out, apply := statusModel(t, target("api"))
+	apply(event{kind: evBuildStarted, target: "api"})
+	takeStatus(t, out, "build", "working")
+	for m.targets[0].runner.control(ctrlReboot) {
+	}
+	m.stopTarget(0)
+	m.programStatus.sync(m.targets)
+	if out.Len() != 0 || !m.targets[0].building {
+		t.Fatal("a rejected stop cleared the build")
+	}
+}
+
+func TestProgramStatusRetryAfterSpawnFailure(t *testing.T) {
+	m, out, apply := statusModel(t, target("api"))
+	apply(event{kind: evStarted, target: "api", at: m.now})
+	apply(event{kind: evHealth, target: "api", runAt: m.now, health: healthUnhealthy})
+	takeStatus(t, out, "health", "error")
+	apply(event{kind: evRunnerErr, target: "api", err: fmt.Errorf("spawn failed")})
+	takeStatus(t, out, "health", "clear")
+	m.rebootTarget(0)
+	m.programStatus.sync(m.targets)
+	if out.Len() != 0 {
+		t.Fatal("retry reported the previous process's health")
+	}
+}
+
+func TestProgramStatusReloadDropsBuild(t *testing.T) {
 	spec := Target{Name: "api", Build: "old", Start: startManual}
-	m := newTUI([]Target{spec})
-	m.programStatus = &programStatus{out: &out}
+	m, out, apply := statusModel(t, spec)
 	spec.Build = "replacement"
-	m.applyEvent(event{kind: evBuildStarted, target: "api"})
-	takeStatus(t, &out, "build", "working")
+	apply(event{kind: evBuildStarted, target: "api"})
+	takeStatus(t, out, "build", "working")
 	m.rebuildRows(&configChange{targets: []Target{spec}, runners: m.group.runners})
+	m.programStatus.sync(m.targets)
 	if out.Len() != 0 {
 		t.Fatalf("reconciliation cleared an ongoing build: %q", out.String())
 	}
 
 	spec.Build = ""
 	r := m.targets[0].runner
+	r.build = &buildJob{} // the replacement build still in flight
 	r.handleControl(t.Context(), ctrlMsg{kind: ctrlSpec, target: &spec})
-	m.applyEvent(<-m.events)
-	takeStatus(t, &out, "build", "clear")
+	apply(<-m.events)
+	takeStatus(t, out, "build", "clear")
+}
+
+func TestProgramStatusReloadDropsFailedBuild(t *testing.T) {
+	spec := Target{Name: "api", Build: "old", Start: startManual}
+	m, out, apply := statusModel(t, spec)
+	apply(event{kind: evBuildFailed, target: "api"})
+	takeStatus(t, out, "build", "error")
+	spec.Build = ""
+	m.targets[0].runner.handleControl(t.Context(), ctrlMsg{kind: ctrlSpec, target: &spec})
+	select {
+	case ev := <-m.events:
+		apply(ev)
+	default:
+		t.Fatal("removing the build step did not retire its failed result")
+	}
+	takeStatus(t, out, "build", "clear")
 }
 
 func TestProgramStatusDoesNotInferComposeServiceHealth(t *testing.T) {
-	var out bytes.Buffer
-	m := newTUI([]Target{{Name: "db", Kind: composeKind}})
-	m.programStatus = &programStatus{out: &out}
-	m.applyEvent(event{kind: evStarted, target: "db", at: m.now})
-	m.applyEvent(event{kind: evHealth, target: "db", runAt: m.now, health: healthUnhealthy})
+	m, out, apply := statusModel(t, Target{Name: "db", Kind: composeKind})
+	apply(event{kind: evStarted, target: "db", at: m.now})
+	apply(event{kind: evHealth, target: "db", runAt: m.now, health: healthUnhealthy})
 	if out.Len() != 0 {
 		t.Fatalf("reported container health as service health: %q", out.String())
 	}
@@ -155,8 +214,9 @@ func TestProgramStatusDoesNotInferComposeServiceHealth(t *testing.T) {
 func TestProgramStatusWireLimitsAndShutdown(t *testing.T) {
 	var out bytes.Buffer
 	s := &programStatus{out: &out}
-	target := "a/\x1b:\x07\x80" + strings.Repeat("界", 100)
-	s.set(target, "build", "error", "Build failed")
+	name := "a/\x1b:\x07\x80" + strings.Repeat("界", 100)
+	row := &tuiTarget{spec: Target{Name: name}, state: stateExited, buildFailed: true}
+	s.sync([]*tuiTarget{row})
 	fields := takeStatus(t, &out, "build", "error")
 	title, err := base64.StdEncoding.DecodeString(fields["title"])
 	if err != nil || len(title) > 192 || !utf8.Valid(title) || !strings.HasPrefix(string(title), "a/:") || printable(string(title), false) != string(title) {

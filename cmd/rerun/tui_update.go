@@ -86,6 +86,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(mm)
 	}
 	defer m.keepCursor(m.cursor, m.cursorKey())
+	defer func() { m.programStatus.sync(m.targets) }()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height

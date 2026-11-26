@@ -1,58 +1,91 @@
 package main
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
 
-type statusKey struct{ target, topic string }
-
+// programStatus mirrors each row's build and health cells to the terminal as
+// OSC 7501 program status. It holds no state of its own beyond what it last
+// reported: sync derives every record from the rows.
 type programStatus struct {
 	out    io.Writer
-	active map[statusKey]string
+	active map[statusKey]statusReport
 }
 
-func (s *programStatus) set(target, topic, state, message string) {
+type statusKey struct{ target, topic string }
+
+type statusReport struct{ state, msg string }
+
+var (
+	reportBuilding    = statusReport{"working", "Building"}
+	reportBuildFailed = statusReport{"error", "Build failed"}
+	reportUnhealthy   = statusReport{"error", "Health check failed"}
+)
+
+// rowReports is what a row's cells say. A compose row's health is its
+// container's, not the service's, and a stopped row reports nothing.
+// The zero report means none.
+func rowReports(t *tuiTarget) (build, health statusReport) {
+	if t.spec.Kind == composeKind || t.state == stateStopped {
+		return
+	}
+	switch {
+	case t.building:
+		build = reportBuilding
+	case t.buildFailed:
+		build = reportBuildFailed
+	}
+	if t.runStarted && t.state.up() && t.health == healthUnhealthy {
+		health = reportUnhealthy
+	}
+	return
+}
+
+// sync reports every record that changed since the last call and clears the
+// ones no row holds any more, removed rows included. It runs on the model's
+// event loop, not in a tea.Cmd: asynchronous writes could put an old error after its clear.
+func (s *programStatus) sync(targets []*tuiTarget) {
 	if s == nil {
 		return
 	}
-	key := statusKey{target, topic}
-	if s.active[key] == state {
-		return
-	}
-	// Imported targets can contain slashes; protocol ID segments are limited to 32 ASCII bytes.
-	hash := sha256.Sum256([]byte(target))
-	id := fmt.Sprintf("rerun/%x/%s", hash[:12], topic)
-	if state == "" {
-		delete(s.active, key)
-		fmt.Fprintf(s.out, "\x1b]7501;id=%s:state=clear\x1b\\", id)
-		return
-	}
-	if s.active == nil {
-		s.active = make(map[statusKey]string)
-	}
-	s.active[key] = state
-	title := strings.ToValidUTF8(printable(target, false), "�")
-	if len(title) > 192 {
-		n := 192
-		for !utf8.RuneStart(title[n]) {
-			n--
+	want := map[statusKey]statusReport{}
+	for _, t := range targets {
+		add := func(topic string, r statusReport) {
+			if r != (statusReport{}) {
+				want[statusKey{t.spec.Name, topic}] = r
+			}
 		}
-		title = title[:n]
+		build, health := rowReports(t)
+		add("build", build)
+		add("health", health)
+	}
+	byKey := func(a, b statusKey) int {
+		return cmp.Or(cmp.Compare(a.target, b.target), cmp.Compare(a.topic, b.topic))
+	}
+	for _, k := range slices.SortedFunc(maps.Keys(s.active), byKey) {
+		if _, ok := want[k]; !ok {
+			fmt.Fprintf(s.out, "\x1b]7501;id=%s:state=clear\x1b\\", statusID(k))
+		}
 	}
 	enc := base64.StdEncoding.EncodeToString
-	fmt.Fprintf(s.out, "\x1b]7501;id=%s:app=rerun:state=%s:title=%s:msg=%s\x1b\\", id, state, enc([]byte(title)), enc([]byte(message)))
+	for _, k := range slices.SortedFunc(maps.Keys(want), byKey) {
+		if r := want[k]; s.active[k] != r {
+			fmt.Fprintf(s.out, "\x1b]7501;id=%s:app=rerun:state=%s:title=%s:msg=%s\x1b\\",
+				statusID(k), r.state, enc([]byte(statusTitle(k.target))), enc([]byte(r.msg)))
+		}
+	}
+	s.active = want
 }
 
-func (s *programStatus) clearTarget(name string) {
-	s.set(name, "build", "", "")
-	s.set(name, "health", "", "")
-}
-
+// close clears every record rerun still holds, on quit.
 func (s *programStatus) close() {
 	if s != nil && len(s.active) > 0 {
 		io.WriteString(s.out, "\x1b]7501;id=rerun:state=clear\x1b\\")
@@ -60,31 +93,22 @@ func (s *programStatus) close() {
 	}
 }
 
-// Called on the model's event loop, not in a tea.Cmd: asynchronous writes could put an old error after its clear.
-func (s *programStatus) observe(t *tuiTarget, ev event) {
-	if s == nil || t.spec.Kind == composeKind {
-		return
+// statusID hashes the target name: imported names can contain slashes, and an
+// ID segment is limited to 32 ASCII bytes.
+func statusID(k statusKey) string {
+	hash := sha256.Sum256([]byte(k.target))
+	return fmt.Sprintf("rerun/%x/%s", hash[:12], k.topic)
+}
+
+// statusTitle is the target name as printable UTF-8 of at most 192 bytes.
+func statusTitle(name string) string {
+	title := strings.ToValidUTF8(printable(name, false), "�")
+	if len(title) <= 192 {
+		return title
 	}
-	name := t.spec.Name
-	switch ev.kind {
-	case evBuildStarted:
-		s.set(name, "build", "working", "Building")
-	case evBuildFailed:
-		s.set(name, "build", "error", "Build failed")
-	case evBuildOK, evBuildCancelled:
-		s.set(name, "build", "", "")
-	case evHealth:
-		if t.state != stateRunning || ev.runAt.Before(t.lastStart) {
-			return
-		}
-		if ev.health == healthUnhealthy {
-			s.set(name, "health", "error", "Health check failed")
-		} else {
-			s.set(name, "health", "", "")
-		}
-	case evStarted, evExited, evRunnerErr:
-		s.set(name, "health", "", "")
-	case evStopAck:
-		s.clearTarget(name)
+	n := 192
+	for !utf8.RuneStart(title[n]) {
+		n--
 	}
+	return title[:n]
 }

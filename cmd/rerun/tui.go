@@ -138,7 +138,10 @@ type tuiTarget struct {
 	exitCode  int
 	exitLabel string
 	// exitedAt is when the last run exited, which the fold window counts from.
-	exitedAt  time.Time
+	exitedAt time.Time
+	// pendingStops counts accepted process stops whose pre-stop events are still draining.
+	pendingStops int
+	// lastStart is when the live run started, or when one was requested while none was live.
 	lastStart time.Time
 	// runStarted is set by a real start, so an exit without one shows no duration.
 	runStarted bool
@@ -678,34 +681,48 @@ func newConfigTUI(targets []Target, cfg *Config) *tuiModel {
 
 func (m *tuiModel) stopTarget(i int) {
 	t := m.targets[i]
+	if !t.runner.control(ctrlStop) {
+		return
+	}
+	if t.spec.Kind != composeKind {
+		t.pendingStops++
+	}
 	t.restartBatch = 0
 	m.cancelBuild(i)
 	t.state = stateStopped
 	t.exitLabel = ""
-	t.runner.control(ctrlStop)
+	// The run ends here, not at the runner's ack: a start pressed before the ack belongs to the next run.
+	t.runStarted = false
 }
 
 func (m *tuiModel) startTarget(i int) {
 	t := m.targets[i]
+	if !t.runner.control(ctrlStart) {
+		return
+	}
 	t.restartBatch = 0
 	m.cancelBuild(i)
-	t.state = stateRunning
-	if !t.runStarted {
-		t.lastStart = m.now
-	}
-	t.runner.control(ctrlStart)
+	m.awaitRun(t)
 }
 
 func (m *tuiModel) rebootTarget(i int) {
 	t := m.targets[i]
+	if !t.runner.control(ctrlReboot) {
+		return
+	}
 	t.restartBatch = 0
 	m.cancelBuild(i)
+	m.awaitRun(t)
+	t.exitLabel = ""
+}
+
+// awaitRun shows a requested run as running. A live run keeps its start, so
+// its uptime and probes still count while a rebuild decides whether it is replaced.
+func (m *tuiModel) awaitRun(t *tuiTarget) {
 	t.state = stateRunning
 	if !t.runStarted {
 		t.lastStart = m.now
 	}
-	t.exitLabel = ""
-	t.runner.control(ctrlReboot)
 }
 
 // openTarget is ctrl+o: the target's link: value, a URL or a command. Log output never supplies a link.
@@ -991,7 +1008,15 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		return nil
 	}
 	t := m.targets[i]
-	m.programStatus.observe(t, ev)
+	if t.pendingStops > 0 {
+		// A start may already have been requested, but these events still belong to the stopped run.
+		switch ev.kind {
+		case evStopAck:
+			t.pendingStops--
+		case evStarting, evStarted, evExited, evBackoff, evBuildStarted, evBuildFailed, evBuildOK, evHealth:
+			return nil
+		}
+	}
 
 	switch ev.kind {
 	case evOutput:
@@ -1069,8 +1094,14 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evBuildCancelled:
 		m.cancelBuild(i)
+		t.buildFailed = false
 
 	case evBuildFailed:
+		// A result queued before a stop belongs to a build the stop cancelled.
+		if t.state == stateStopped {
+			m.cancelBuild(i)
+			break
+		}
 		// The failure opens its rule, so the reason and the output show without a click.
 		up := t.runStarted && t.state.up()
 		m.setBuildState(i, false, true)
@@ -1168,10 +1199,13 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 	case evRunnerErr:
 		// Nothing is running after a spawn failure, so the row leaves the
 		// running state the way an exit does.
-		t.state = stateExited
-		t.restartBatch = 0
-		t.exitCode = -1
-		t.exitLabel = "exit error"
+		if t.pendingStops == 0 {
+			t.state = stateExited
+			t.restartBatch = 0
+			t.exitCode = -1
+			t.exitLabel = "exit error"
+			t.runStarted = false
+		}
 		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
@@ -1238,7 +1272,6 @@ func (m *tuiModel) rebuildRows(c *configChange) {
 		if _, ok := index[t.spec.Name]; ok {
 			continue
 		}
-		m.programStatus.clearTarget(t.spec.Name)
 		for k := range t.lines {
 			t.lines[k].target = -1
 		}
