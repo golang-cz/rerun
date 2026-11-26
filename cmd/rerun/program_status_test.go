@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/golang-cz/rerun"
 )
 
 // Consume exactly one complete OSC frame, with no other bytes in the stream.
@@ -29,7 +34,7 @@ func takeStatus(t *testing.T, out *bytes.Buffer, topic, state string) map[string
 		}
 		fields[key] = value
 	}
-	if !regexp.MustCompile(`^rerun/[A-Za-z0-9_.+-]{1,32}/`+topic+`$`).MatchString(fields["id"]) || fields["state"] != state {
+	if !regexp.MustCompile(`^rerun/[A-Za-z0-9_.+-]{1,32}/[A-Za-z0-9_.+-]{1,32}/`+topic+`$`).MatchString(fields["id"]) || fields["state"] != state {
 		t.Fatalf("unexpected report: %q", fields)
 	}
 	if state != "clear" && fields["app"] != "rerun" {
@@ -44,7 +49,7 @@ func statusModel(t *testing.T, targets ...Target) (m *tuiModel, out *bytes.Buffe
 	t.Helper()
 	out = &bytes.Buffer{}
 	m = newTestModel(t, targets...)
-	m.programStatus = &programStatus{out: out}
+	m.programStatus = newProgramStatus(out)
 	apply = func(ev event) {
 		m.applyEvent(ev)
 		m.programStatus.sync(m.targets)
@@ -213,7 +218,7 @@ func TestProgramStatusDoesNotInferComposeServiceHealth(t *testing.T) {
 
 func TestProgramStatusWireLimitsAndShutdown(t *testing.T) {
 	var out bytes.Buffer
-	s := &programStatus{out: &out}
+	s := newProgramStatus(&out)
 	name := "a/\x1b:\x07\x80" + strings.Repeat("界", 100)
 	row := &tuiTarget{spec: Target{Name: name}, state: stateExited, buildFailed: true}
 	s.sync([]*tuiTarget{row})
@@ -227,7 +232,128 @@ func TestProgramStatusWireLimitsAndShutdown(t *testing.T) {
 	}
 	s.close()
 	s.close()
-	if got := out.String(); got != "\x1b]7501;id=rerun:state=clear\x1b\\" {
-		t.Fatalf("unexpected shutdown output: %q", got)
+	if got, want := out.String(), "\x1b]7501;id=rerun/"+s.run+":state=clear\x1b\\"; got != want {
+		t.Fatalf("shutdown output %q, want %q", got, want)
+	}
+}
+
+func TestPendingStopDrainDropsTargetEvents(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	row := m.targets[0]
+	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	press(m, "s")
+	if row.pendingStops != 1 {
+		t.Fatalf("pendingStops = %d, want 1", row.pendingStops)
+	}
+	lines := len(row.lines)
+	m.applyEvent(event{kind: evChanged, target: "api", change: rerun.ChangeSet{FirstFile: "a.go", Files: map[string]struct{}{"a.go": {}}}, restarts: true})
+	m.applyEvent(event{kind: evLoop, target: "api", line: "a.go", files: []string{"a.go"}})
+	m.applyEvent(event{kind: evRunnerErr, target: "api", err: errors.New("old spawn failed")})
+	m.applyEvent(event{kind: evOutput, target: "api", line: "late line"})
+	if got := row.lastChange; got.FirstFile != "" || len(got.Files) != 0 {
+		t.Fatalf("a change landed on the stopped row: %+v", got)
+	}
+	if row.restartBatch != 0 || row.loopFile != "" || len(row.lines) != lines {
+		t.Fatalf("a stopped run's event landed: restart %d, loop %q, lines %d", row.restartBatch, row.loopFile, len(row.lines)-lines)
+	}
+	if row.state != stateStopped || row.exitLabel != "" {
+		t.Fatalf("state = %v %q, want stopped", row.state, row.exitLabel)
+	}
+}
+
+func TestStopAckNeverGoesNegative(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	row := m.targets[0]
+	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	press(m, "s")
+	if row.pendingStops != 1 {
+		t.Fatalf("pendingStops = %d, want 1", row.pendingStops)
+	}
+	m.applyEvent(event{kind: evStopAck, target: "api"})
+	m.applyEvent(event{kind: evStopAck, target: "api"}) // duplicate, or a late one
+	if row.pendingStops != 0 {
+		t.Fatalf("pendingStops = %d, want 0", row.pendingStops)
+	}
+}
+
+func TestProgramStatusRunNamespace(t *testing.T) {
+	var first, second bytes.Buffer
+	one, two := newProgramStatus(&first), newProgramStatus(&second)
+	if one.run == two.run {
+		t.Fatalf("both runs use the namespace %q", one.run)
+	}
+	rows := []*tuiTarget{{spec: Target{Name: "api"}, state: stateExited, buildFailed: true}}
+	one.sync(rows)
+	two.sync(rows)
+	if id := takeStatus(t, &first, "build", "error")["id"]; !strings.HasPrefix(id, "rerun/"+one.run+"/") {
+		t.Fatalf("id %q is outside this run's subtree", id)
+	}
+	twoID := takeStatus(t, &second, "build", "error")["id"]
+	one.close()
+	if got, want := first.String(), "\x1b]7501;id=rerun/"+one.run+":state=clear\x1b\\"; got != want {
+		t.Fatalf("quit wrote %q, want %q", got, want)
+	}
+	if strings.Contains(first.String(), two.run) {
+		t.Fatalf("quit cleared another run's records: %q", first.String())
+	}
+	if second.String() != "" {
+		t.Fatalf("another run's quit touched these records: %q", second.String())
+	}
+	two.close()
+	if second.String() != "\x1b]7501;id=rerun/"+two.run+":state=clear\x1b\\" {
+		t.Fatalf("unexpected shutdown output: %q", second.String())
+	}
+	if !strings.Contains(twoID, "/"+two.run+"/") {
+		t.Fatalf("id %q does not name its run", twoID)
+	}
+}
+
+func TestLockedStdoutKeepsWritesWhole(t *testing.T) {
+	var buf bytes.Buffer
+	w := &lockedStdout{out: &buf}
+	const writers, chunks, size = 8, 25, 512
+	var group sync.WaitGroup
+	for i := range writers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			line := strings.Repeat(strconv.Itoa(i), size) + "\n"
+			for range chunks {
+				_, _ = w.Write([]byte(line))
+			}
+		}()
+	}
+	group.Wait()
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	if len(lines) != writers*chunks {
+		t.Fatalf("got %d lines, want %d", len(lines), writers*chunks)
+	}
+	for _, line := range lines {
+		if len(line) != size || strings.Count(line, line[:1]) != size {
+			t.Fatalf("a write was split: %q", line)
+		}
+	}
+}
+
+func TestProgramStatusOptOut(t *testing.T) {
+	t.Setenv("RERUN_PROGRAM_STATUS", "0")
+	if programStatusEnabled() {
+		t.Fatal(`RERUN_PROGRAM_STATUS=0 still reports`)
+	}
+	for _, value := range []string{"", "1", "false"} {
+		t.Setenv("RERUN_PROGRAM_STATUS", value)
+		if !programStatusEnabled() {
+			t.Fatalf("%q disabled the reports", value)
+		}
+	}
+}
+
+func TestStopTargetClearsHealth(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	row := m.targets[0]
+	row.state, row.runStarted, row.health = stateRunning, true, healthUnhealthy
+	m.stopTarget(0)
+	if row.health != "" {
+		t.Fatalf("a stopped row kept health %q", row.health)
 	}
 }

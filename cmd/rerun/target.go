@@ -769,7 +769,7 @@ func (r *targetRunner) handleControl(ctx context.Context, c ctrlMsg) {
 		// Dropping the build step retires its last result, even if the job already failed.
 		if hadBuild && r.target.Build == "" {
 			r.abortBuild()
-			r.sink.emit(event{kind: evBuildCancelled, target: r.target.Name})
+			r.sink.emit(event{kind: evBuildCancelled, target: r.target.Name, at: time.Now()})
 		}
 		r.clearLoop()
 		// A target the user stopped only takes the new spec: a config edit
