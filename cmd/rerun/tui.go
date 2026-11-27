@@ -32,8 +32,10 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 	defer tty.restore()
 
 	model := newConfigTUI(targets, cfg)
-	if os.Getenv("RERUN_PROGRAM_STATUS") != "0" {
-		model.programStatus = &programStatus{out: os.Stdout}
+	// One writer for both, so a frame and a status record never interleave.
+	out := &lockedStdout{out: os.Stdout, file: os.Stdout}
+	if programStatusEnabled() {
+		model.programStatus = newProgramStatus(out)
 		defer model.programStatus.close()
 	}
 	for _, n := range cfg.Notices {
@@ -43,6 +45,7 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 
 	program := tea.NewProgram(model,
 		tea.WithFPS(30), // one frame per uptime tick is plenty; 60fps just redraws
+		tea.WithOutput(out),
 		tea.WithoutSignalHandler(),
 	)
 
@@ -84,6 +87,12 @@ func runTUI(targets []Target, cfg *Config, signals <-chan os.Signal) int {
 		return 1
 	}
 	return code
+}
+
+// programStatusEnabled reports whether the terminal gets OSC 7501 records;
+// RERUN_PROGRAM_STATUS=0 opts out.
+func programStatusEnabled() bool {
+	return os.Getenv("RERUN_PROGRAM_STATUS") != "0"
 }
 
 // Bottom-line input modes. inputNone means no bar is open.
@@ -691,6 +700,8 @@ func (m *tuiModel) stopTarget(i int) {
 	m.cancelBuild(i)
 	t.state = stateStopped
 	t.exitLabel = ""
+	// The next run probes again; the stopped one's verdict would outlive it otherwise.
+	t.health = ""
 	// The run ends here, not at the runner's ack: a start pressed before the ack belongs to the next run.
 	t.runStarted = false
 }
@@ -1008,12 +1019,18 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		return nil
 	}
 	t := m.targets[i]
-	if t.pendingStops > 0 {
-		// A start may already have been requested, but these events still belong to the stopped run.
-		switch ev.kind {
-		case evStopAck:
+	if ev.kind == evStopAck {
+		// A late or duplicate ack must not drive the count below zero.
+		if t.pendingStops > 0 {
 			t.pendingStops--
-		case evStarting, evStarted, evExited, evBackoff, evBuildStarted, evBuildFailed, evBuildOK, evHealth:
+		}
+		return nil
+	}
+	if t.pendingStops > 0 {
+		// Stale run-state events from the stopped run must not repaint state.
+		switch ev.kind {
+		case evBuildCancelled, evOutput, evWatcherErr, evRunnerErr:
+		default:
 			return nil
 		}
 	}
@@ -1198,7 +1215,7 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evRunnerErr:
 		// Nothing is running after a spawn failure, so the row leaves the
-		// running state the way an exit does.
+		// running state the way an exit does; a pending stop already did.
 		if t.pendingStops == 0 {
 			t.state = stateExited
 			t.restartBatch = 0

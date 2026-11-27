@@ -614,6 +614,24 @@ func TestLateOutputAfterCancelIsIgnored(t *testing.T) {
 	}
 }
 
+func TestCancelledBuildClearsFailureDuringStopDrain(t *testing.T) {
+	m := newTestModel(t, buildTarget("api"))
+	m.applyEvents([]event{{kind: evStarted, target: "api", at: buildAt}, buildFail("api", time.Second)})
+	row := m.targets[0]
+	if !row.buildFailed {
+		t.Fatal("the failed build left no mark on the row")
+	}
+	press(m, "s")
+	if row.pendingStops != 1 {
+		t.Fatalf("pendingStops = %d, want 1", row.pendingStops)
+	}
+	// A reload that drops the build step retires it inside the drain window.
+	m.applyEvents([]event{{kind: evBuildCancelled, target: "api"}})
+	if row.buildFailed {
+		t.Fatal("the retired build's cancel was dropped with the stopped run's events")
+	}
+}
+
 func TestDoubleClickRuleWhileFiltered(t *testing.T) {
 	m := newTestModel(t, buildTarget("api"), target("web"))
 	m.applyEvents([]event{
