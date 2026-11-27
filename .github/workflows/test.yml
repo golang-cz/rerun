@@ -77,9 +77,19 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
-      - name: GoReleaser config check
+      - name: GoReleaser install
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: check -f .github/.goreleaser.yml
+          install-only: true
+      # Tolerate the brews deprecation until the cask migration is decided.
+      - name: GoReleaser config check
+        run: |
+          set +e
+          goreleaser check -f .github/.goreleaser.yml 2>&1 | tee "$RUNNER_TEMP/goreleaser-check.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 0 ]; then exit 0; fi
+          if grep -qF "configuration is valid, but uses deprecated properties" "$RUNNER_TEMP/goreleaser-check.log"; then exit 0; fi
+          exit "$code"
