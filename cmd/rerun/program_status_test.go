@@ -237,7 +237,7 @@ func TestProgramStatusWireLimitsAndShutdown(t *testing.T) {
 	}
 }
 
-func TestPendingStopDrainDropsTargetEvents(t *testing.T) {
+func TestPendingStopDrainKeepsOutputDropsRunState(t *testing.T) {
 	m := newTestModel(t, target("api"))
 	row := m.targets[0]
 	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
@@ -248,13 +248,39 @@ func TestPendingStopDrainDropsTargetEvents(t *testing.T) {
 	lines := len(row.lines)
 	m.applyEvent(event{kind: evChanged, target: "api", change: rerun.ChangeSet{FirstFile: "a.go", Files: map[string]struct{}{"a.go": {}}}, restarts: true})
 	m.applyEvent(event{kind: evLoop, target: "api", line: "a.go", files: []string{"a.go"}})
-	m.applyEvent(event{kind: evRunnerErr, target: "api", err: errors.New("old spawn failed")})
 	m.applyEvent(event{kind: evOutput, target: "api", line: "late line"})
 	if got := row.lastChange; got.FirstFile != "" || len(got.Files) != 0 {
 		t.Fatalf("a change landed on the stopped row: %+v", got)
 	}
-	if row.restartBatch != 0 || row.loopFile != "" || len(row.lines) != lines {
-		t.Fatalf("a stopped run's event landed: restart %d, loop %q, lines %d", row.restartBatch, row.loopFile, len(row.lines)-lines)
+	if row.restartBatch != 0 || row.loopFile != "" {
+		t.Fatalf("a stopped run's event landed: restart %d, loop %q", row.restartBatch, row.loopFile)
+	}
+	if n := len(row.lines); n != lines+1 || row.lines[n-1].text != "late line" {
+		t.Fatalf("shutdown output did not land in the pane: %d lines added", n-lines)
+	}
+	if row.state != stateStopped || row.exitLabel != "" {
+		t.Fatalf("state = %v %q, want stopped", row.state, row.exitLabel)
+	}
+}
+
+func TestPendingStopDrainShowsWatcherErr(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	press(m, "s")
+	m.applyEvent(event{kind: evWatcherErr, target: "api", err: errors.New("too many open files")})
+	if !strings.Contains(m.notice, "watcher error: too many open files") || !m.noticeErr {
+		t.Fatalf("notice = %q (err %v), want the watcher error", m.notice, m.noticeErr)
+	}
+}
+
+func TestPendingStopDrainRunnerErrShowsNoticeKeepsState(t *testing.T) {
+	m := newTestModel(t, target("api"))
+	row := m.targets[0]
+	m.applyEvent(event{kind: evStarted, target: "api", at: m.now})
+	press(m, "s")
+	m.applyEvent(event{kind: evRunnerErr, target: "api", err: errors.New("old spawn failed")})
+	if !strings.Contains(m.notice, "old spawn failed") || !m.noticeErr {
+		t.Fatalf("notice = %q (err %v), want the spawn error", m.notice, m.noticeErr)
 	}
 	if row.state != stateStopped || row.exitLabel != "" {
 		t.Fatalf("state = %v %q, want stopped", row.state, row.exitLabel)

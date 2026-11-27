@@ -1026,9 +1026,13 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 		}
 		return nil
 	}
-	if t.pendingStops > 0 && ev.kind != evBuildCancelled {
-		// A start may already have been requested, but every event but a retired build's cancel belongs to the stopped run.
-		return nil
+	if t.pendingStops > 0 {
+		// Stale run-state events from the stopped run must not repaint state.
+		switch ev.kind {
+		case evBuildCancelled, evOutput, evWatcherErr, evRunnerErr:
+		default:
+			return nil
+		}
 	}
 
 	switch ev.kind {
@@ -1211,12 +1215,14 @@ func (m *tuiModel) applyEvent(ev event) tea.Cmd {
 
 	case evRunnerErr:
 		// Nothing is running after a spawn failure, so the row leaves the
-		// running state the way an exit does.
-		t.state = stateExited
-		t.restartBatch = 0
-		t.exitCode = -1
-		t.exitLabel = "exit error"
-		t.runStarted = false
+		// running state the way an exit does; a pending stop already did.
+		if t.pendingStops == 0 {
+			t.state = stateExited
+			t.restartBatch = 0
+			t.exitCode = -1
+			t.exitLabel = "exit error"
+			t.runStarted = false
+		}
 		m.showNotice(fmt.Sprintf("rerun: %s: %v", t.spec.Name, ev.err), true)
 
 	case evLoop:
