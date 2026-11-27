@@ -125,7 +125,11 @@ func impChecked(t *testing.T, m *tuiModel, path string) bool {
 }
 
 func TestImportOpensWithEveryFileChecked(t *testing.T) {
-	m, _ := impFixture(t, impTree)
+	// Home is the temp dir so shortDir shows "~" and the 120-column title keeps "found 3 files".
+	dir := makeDir(t, impTree)
+	t.Setenv("HOME", dir)
+	m := newTUI(nil)
+	m.group.configPath = filepath.Join(dir, ConfigFileName)
 	m.width, m.height = 160, 24
 	impOpen(t, m)
 	for _, p := range []string{"Makefile", "api/Makefile", "web/rerun.yml"} {
