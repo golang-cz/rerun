@@ -14,9 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-// lockedStdout is the one writer for every terminal byte: bubbletea's frames
-// and the status records share it, so neither can split the other. It keeps
-// the descriptor, or bubbletea would stop seeing a terminal on its output.
+// Insurance, not a live race: os.File already writes whole; Fd stays so bubbletea still sees a terminal.
 type lockedStdout struct {
 	mu   sync.Mutex
 	out  io.Writer
